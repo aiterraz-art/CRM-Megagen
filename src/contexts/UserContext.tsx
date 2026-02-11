@@ -79,8 +79,23 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user) {
+                const email = session.user.email?.toLowerCase();
+
+                // DOMAIN RESTRICTION CHECK
+                const isOwner = email === 'aterraza@imegagen.cl';
+                const isMegagenDomain = email?.endsWith('@imegagen.cl');
+
+                if (!isOwner && !isMegagenDomain) {
+                    console.warn(`UserContext: Access Denied for ${email}. Domain not allowed.`);
+                    await supabase.auth.signOut();
+                    alert('ACCESO DENEGADO\n\nEsta es una plataforma privada.\nSolo se permiten cuentas corporativas @imegagen.cl');
+                    window.location.href = '/';
+                    return;
+                }
+
                 // 1. PRIMARY SOURCE: public.profiles
                 const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id);
+
 
                 if (data && data.length > 0) {
                     let userProfile = data[0] as any as Profile;

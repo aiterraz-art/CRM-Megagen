@@ -43,11 +43,11 @@ const Login = () => {
                         className="w-full flex items-center justify-center space-x-4 bg-white border border-gray-100 py-5 px-8 rounded-[2rem] font-bold text-gray-700 hover:bg-gray-50 transition-all active:scale-95 shadow-sm hover:shadow-xl hover:shadow-indigo-50 border-gray-100"
                     >
                         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
-                        <span className="text-lg">Inicio de Sesión</span>
+                        Inicio de Sesión
                     </button>
 
-                    <p className="text-[10px] text-center text-gray-300 font-bold uppercase tracking-[0.2em]">
-                        Endpoint Security Active
+                    <p className="text-[10px] text-center text-gray-400 font-bold uppercase tracking-[0.1em] mt-4">
+                        Acceso Exclusivo @imegagen.cl
                     </p>
                 </div>
 
