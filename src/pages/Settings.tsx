@@ -244,7 +244,7 @@ const Settings: React.FC = () => {
             // Refresh logic if needed (e.g. fetch whitelist)
         } catch (error: any) {
             console.error('Error in handleInviteUser:', error);
-            alert('Error al procesar invitación: ' + error.message);
+            alert('Error al procesar invitación: ' + (error.message || JSON.stringify(error)));
         } finally {
             setSendingInvite(false);
         }
