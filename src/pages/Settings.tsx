@@ -193,15 +193,10 @@ const Settings: React.FC = () => {
 
             // 2. Upsert to Whitelist
             console.log("Upserting whitelist:", { email: inviteData.email, role: inviteData.role, created_by: profile?.id });
-            const { error: whitelistError } = await supabase.from('user_whitelist').upsert({
-                email: inviteData.email.toLowerCase(),
-                role: inviteData.role,
-                created_by: profile?.id
-            });
-
             if (whitelistError) {
                 console.error("Whitelist Error Details:", whitelistError);
-                throw new Error(`Whitelist Error: ${whitelistError.message || whitelistError.details || JSON.stringify(whitelistError)}`);
+                const errorDetail = `Code: ${whitelistError.code}\nMessage: ${whitelistError.message}\nDetails: ${whitelistError.details}\nHint: ${whitelistError.hint}`;
+                throw new Error(`Whitelist Error:\n${errorDetail}`);
             }
 
             // 3. Send Email (Best Effort via Gmail API)
