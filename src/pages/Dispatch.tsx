@@ -499,7 +499,7 @@ const Dispatch: React.FC = () => {
     };
 
     return (
-        <div className="space-y-8 max-w-7xl mx-auto">
+        <div className="space-y-8 w-full mx-auto">
             <div className="flex flex-col md:flex-row justify-between gap-6 items-start">
                 <div>
                     <h2 className="text-4xl font-black text-gray-900 tracking-tight">Centro de Despacho</h2>

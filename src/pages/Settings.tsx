@@ -330,7 +330,7 @@ const Settings: React.FC = () => {
     const filteredUsers = users.filter(u => (u.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || (u.full_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()));
 
     return (
-        <div className="max-w-7xl mx-auto space-y-8 pb-20">
+        <div className="w-full mx-auto space-y-8 pb-20">
             <div className="flex justify-between items-end">
                 <div>
                     <h2 className="text-4xl font-black text-gray-900 tracking-tight">Configuración Global</h2>

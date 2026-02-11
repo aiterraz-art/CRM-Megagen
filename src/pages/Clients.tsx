@@ -757,7 +757,7 @@ const ClientsContent = () => {
     });
 
     return (
-        <div className="space-y-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="space-y-8 w-full mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
                     <h2 className="text-3xl font-black text-gray-900 leading-tight">Gestión de Clientes</h2>
