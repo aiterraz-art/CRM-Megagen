@@ -201,7 +201,7 @@ const Settings: React.FC = () => {
 
             if (whitelistError) {
                 console.error("Whitelist Error Details:", whitelistError);
-                const errorDetail = `Code: ${whitelistError.code}\nMessage: ${whitelistError.message}\nDetails: ${whitelistError.details}\nHint: ${whitelistError.hint}`;
+                const errorDetail = `Code: ${whitelistError.code}\nMessage: ${whitelistError.message}\nDetails: ${whitelistError.details}\nHint: ${whitelistError.hint}\nLiteral: ${JSON.stringify(whitelistError)}`;
                 throw new Error(`Whitelist Error (BD):\n${errorDetail}`);
             }
 
