@@ -26,7 +26,7 @@ const ZoneDistributionChart = ({ data }: ZoneDistributionChartProps) => {
                     </Pie>
                     <Tooltip
                         contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}
-                        formatter={(value: number) => [value, 'Clientes Activos']}
+                        formatter={(value: number | undefined) => [value || 0, 'Clientes Activos']}
                     />
                     <Legend
                         layout="vertical"

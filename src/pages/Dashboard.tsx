@@ -147,7 +147,7 @@ const Dashboard = () => {
                 // B. Get Monthly Sales (Direct Orders Query)
                 const { data: monthOrders } = await supabase
                     .from('orders')
-                    .select('total_amount, status')
+                    .select('total_amount, status, created_at')
                     .eq('user_id', profile.id)
                     .gte('created_at', firstDayOfMonth)
                     .lte('created_at', lastDayOfMonth);
@@ -204,7 +204,7 @@ const Dashboard = () => {
                     .eq('user_id', profile.id)
                     .gte('created_at', sevenDaysAgo.toISOString());
 
-                const activityMap = new Map<string, { visits: number, orders: number }>();
+                const activityMap = new Map<string, { name: string; visits: number; orders: number }>();
                 const weekDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
                 for (let d = new Date(sevenDaysAgo); d <= now; d.setDate(d.getDate() + 1)) {

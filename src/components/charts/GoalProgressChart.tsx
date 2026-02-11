@@ -36,7 +36,6 @@ const GoalProgressChart = ({ current, target }: GoalProgressChartProps) => {
                     />
                     <RadialBar
                         background
-                        clockWise
                         dataKey="value"
                         cornerRadius={10}
                     />

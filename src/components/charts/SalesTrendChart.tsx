@@ -39,7 +39,7 @@ const SalesTrendChart = ({ data }: SalesTrendChartProps) => {
                     />
                     <Tooltip
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        formatter={(value: number) => [`$${value.toLocaleString()}`, 'Ventas']}
+                        formatter={(value: number | undefined) => [`$${(value || 0).toLocaleString()}`, 'Ventas']}
                     />
                     <Area
                         type="monotone"
