@@ -49,7 +49,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const closeMenu = () => setIsMobileMenuOpen(false);
 
     return (
-        <div className="flex h-screen bg-premium-bg overflow-hidden font-outfit">
+        <div className="flex h-full bg-premium-bg overflow-hidden font-outfit">
             {/* Backdrop for mobile */}
             {isMobileMenuOpen && (
                 <div

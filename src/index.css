@@ -7,7 +7,15 @@
 @layer base {
   body {
     @apply bg-premium-bg font-['Outfit'] antialiased;
-    zoom: 0.8;
+    overflow: hidden;
+    /* Scroll handled by Layout */
+  }
+
+  #root {
+    transform: scale(0.8);
+    transform-origin: top left;
+    height: 125vh;
+    width: 125vw;
   }
 }
 
