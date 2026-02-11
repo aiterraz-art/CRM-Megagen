@@ -156,8 +156,10 @@ const Dashboard = () => {
                 let activeOrdersCount = 0; // Not strictly used but kept for logic structure
 
                 monthOrders?.forEach(o => {
-                    monthSales += o.total_amount || 0;
-                    activeOrdersCount++;
+                    if (o.status !== 'cancelled' && o.status !== 'rejected') {
+                        monthSales += o.total_amount || 0;
+                        activeOrdersCount++;
+                    }
                 });
 
                 setMonthlyStats({
@@ -171,6 +173,9 @@ const Dashboard = () => {
                 // 1. Sales Trend (Daily Sales in Current Month)
                 const salesByDay = new Map<number, number>();
                 monthOrders?.forEach(o => {
+                    // Filter out cancelled orders
+                    if (o.status === 'cancelled' || o.status === 'rejected') return;
+
                     const day = new Date(o.created_at).getDate();
                     salesByDay.set(day, (salesByDay.get(day) || 0) + (o.total_amount || 0));
                 });
@@ -210,7 +215,7 @@ const Dashboard = () => {
                 for (let d = new Date(sevenDaysAgo); d <= now; d.setDate(d.getDate() + 1)) {
                     const dateKey = d.toISOString().split('T')[0];
                     const dayName = weekDays[d.getDay()];
-                    activityMap.set(dateKey, { name: dayName, visits: 0, orders: 0 }); // Use dateKey to map, but store dayName
+                    activityMap.set(dateKey, { name: dayName, visits: 0, orders: 0 });
                 }
 
                 weekVisits?.forEach(v => {
@@ -229,16 +234,13 @@ const Dashboard = () => {
                     }
                 });
 
-                // Convert map to array sorted by date
                 const activityArray = Array.from(activityMap.entries())
                     .sort((a, b) => a[0].localeCompare(b[0]))
                     .map(([_, val]) => val);
 
                 setWeeklyActivity(activityArray);
 
-
-                // 3. Zone Distribution (Active Clients in current month)
-                // We use visits to determine "Active" in a zone
+                // 3. Zone Distribution
                 const { data: monthVisits } = await supabase
                     .from('visits')
                     .select('clients(zone)')
@@ -254,27 +256,21 @@ const Dashboard = () => {
 
                 const zoneArray = Array.from(zoneCount.entries())
                     .map(([name, value]) => ({ name, value }))
-                    .sort((a, b) => b.value - a.value); // Sort descending
+                    .sort((a, b) => b.value - a.value);
 
                 setZoneData(zoneArray);
 
-                // ... existing tasks fetch ...
-                // Fetch Tasks (Pending)
+                // Fetch Tasks
                 const { data: tasksData } = await supabase
                     .from('tasks')
                     .select('*')
-                    .eq('user_id', profile.id) // Note: Dashboard uses user_id, TeamStats used manual fetch. Stick to what works here?
-                    // Actually, if TeamStats used 'assigned_to', Dashboard might be broken if 'user_id' doesn't exist?
-                    // But I didn't verify Dashboard tasks. Let's assume user_id works here for now or fix if needed. 
-                    // Wait, earlier I saw Dashboard uses .eq('user_id', ...). 
-                    // I will leave existing task logic alone unless it errors.
+                    .eq('user_id', profile.id)
                     .eq('status', 'pending')
                     .lte('due_date', new Date(new Date().setHours(23, 59, 59, 999)).toISOString())
                     .order('due_date', { ascending: true });
                 setTasks(tasksData || []);
 
-                // C. Get Neglected Clients (Intelligence)
-                // We fetch all clients assigned to the user or all if supervisor
+                // C. Neglected Clients
                 let clientsQuery = supabase.from('clients').select('id, name');
                 if (!hasPermission('VIEW_ALL_CLIENTS')) {
                     clientsQuery = clientsQuery.eq('created_by', profile.id);
@@ -282,7 +278,6 @@ const Dashboard = () => {
                 const { data: allClients } = await clientsQuery;
 
                 if (allClients) {
-                    // Fetch LAST visit for EACH client globally (not just today)
                     const { data: lastVisits } = await supabase
                         .from('visits')
                         .select('client_id, check_in_time')
@@ -303,12 +298,10 @@ const Dashboard = () => {
                 }
             }
 
-            // ... rest of existing fetch logic ...
-
-            // GLOBAL: Fetch detailed visits for the table (Admin gets all, Seller gets theirs)
+            // GLOBAL: Fetch detailed visits for the table
             let visitsQuery = supabase
                 .from('visits')
-                .select('*, clients(name, zone, comuna), profiles(full_name, email)') // Try to join profiles
+                .select('*, clients(name, zone, comuna), profiles(full_name, email)')
                 .gte('check_in_time', isoStart)
                 .lte('check_in_time', isoEnd)
                 .order('check_in_time', { ascending: false });
@@ -319,156 +312,72 @@ const Dashboard = () => {
 
             const { data: visitsData, error: visitsError } = await visitsQuery;
             if (visitsData) {
-                // If profiles join fails (no FK), we might need manual mapping, but let's assume it works or fail gracefully
-                // Deduplicate logic: If multiple active visits exist for same client, only show latest one
-                // Logic: 
-                // 1. Group by `${client_id}-${user_id}` (?) or just client_id per user.
-                // 2. If filtering `dailyVisits`, we iterate.
-                // Note: The array is already ordered by check_in_time DESC.
-                // We will keep the FIRST occurrence of an ACTIVE visit for a client, and FILTER OUT subsequent ACTIVE visits for the SAME client.
-
                 const seenActiveClients = new Set();
                 const filteredVisits = visitsData.filter(v => {
                     const key = `${v.sales_rep_id}-${v.client_id}`;
                     if (v.status !== 'completed' && !v.check_out_time) {
-                        if (seenActiveClients.has(key)) return false; // Duplicate active visit found, skip it
+                        if (seenActiveClients.has(key)) return false;
                         seenActiveClients.add(key);
                         return true;
                     }
-                    return true; // Keep all completed visits
+                    return true;
                 });
-
                 setDailyVisits(filteredVisits);
             } else if (visitsError) {
                 console.error("Error fetching detail visits:", visitsError);
             }
 
             if (hasPermission('VIEW_TEAM_STATS')) {
-                // Admin/Supervisor Logic: Summary per Seller
+                // Admin/Supervisor Logic
                 const { data: sellers } = await supabase
                     .from('profiles')
                     .select('id, email, full_name, role');
 
                 const summary = await Promise.all((sellers || []).map(async (seller) => {
-                    const now = new Date();
+                    const now = new Date(); // Re-declare now locally inside map async
 
-                    // 1. Fetch Visits (Including in_progress)
-                    const { data: vData } = await supabase
-                        .from('visits')
-                        .select('client_id, check_in_time, check_out_time, status')
-                        .eq('sales_rep_id', seller.id)
-                        .gte('check_in_time', isoStart)
-                        .lte('check_in_time', isoEnd);
-
-                    // 2. Fetch Orders (Replacing quotations)
-                    const { data: oData } = await supabase
-                        .from('orders')
-                        .select('id, client_id, total_amount, visit_id, created_at')
-                        .eq('user_id', seller.id)
-                        .gte('created_at', isoStart)
-                        .lte('created_at', isoEnd);
-
-                    // 3. Fetch Call Logs
-                    const { data: lData } = await supabase
-                        .from('call_logs')
-                        .select('client_id, created_at')
-                        .eq('user_id', seller.id)
-                        .gte('created_at', isoStart)
-                        .lte('created_at', isoEnd);
-
-                    // 4. Quotations (For Time Calculation)
-                    const { data: qData } = await supabase
-                        .from('quotations')
-                        .select('client_id, interaction_type, created_at')
-                        .eq('seller_id', seller.id)
-                        .gte('created_at', isoStart)
-                        .lte('created_at', isoEnd);
-
+                    // 1. Visits
+                    const { data: vData } = await supabase.from('visits').select('client_id, check_in_time, check_out_time').eq('sales_rep_id', seller.id).gte('check_in_time', isoStart).lte('check_in_time', isoEnd);
+                    // 2. Orders
+                    const { data: oData } = await supabase.from('orders').select('id, client_id, total_amount, visit_id').eq('user_id', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
+                    // 3. Calls
+                    const { data: lData } = await supabase.from('call_logs').select('client_id').eq('user_id', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
+                    // 4. Quotations
+                    const { data: qData } = await supabase.from('quotations').select('client_id, interaction_type').eq('seller_id', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
                     // 5. New Clients
-                    const { data: cData, count: cCount } = await supabase
-                        .from('clients')
-                        .select('name', { count: 'exact' })
-                        .eq('created_by', seller.id)
-                        .gte('created_at', isoStart)
-                        .lte('created_at', isoEnd);
-
-                    // 5. Monthly Goal
+                    const { count: cCount, data: cData } = await supabase.from('clients').select('name', { count: 'exact' }).eq('created_by', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
+                    // 6. Goal & Sales
                     const currentMonth = now.getMonth() + 1;
                     const currentYear = now.getFullYear();
                     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
                     const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
-
-                    const { data: sellerGoal } = await supabase
-                        .from('goals')
-                        .select('target_amount')
-                        .eq('user_id', seller.id)
-                        .eq('month', currentMonth)
-                        .eq('year', currentYear)
-                        .maybeSingle();
-
-                    // 6. Monthly Sales (From orders)
-                    const { data: mOrders } = await supabase
-                        .from('orders')
-                        .select('total_amount')
-                        .eq('user_id', seller.id)
-                        .gte('created_at', firstDayOfMonth)
-                        .lte('created_at', lastDayOfMonth);
+                    const { data: sellerGoal } = await supabase.from('goals').select('target_amount').eq('user_id', seller.id).eq('month', currentMonth).eq('year', currentYear).maybeSingle();
+                    const { data: mOrders } = await supabase.from('orders').select('total_amount').eq('user_id', seller.id).gte('created_at', firstDayOfMonth).lte('created_at', lastDayOfMonth);
 
                     let sellerMonthSales = 0;
                     mOrders?.forEach(o => sellerMonthSales += o.total_amount || 0);
 
                     // 7. Last Zone
-                    const { data: lastV } = await supabase
-                        .from('visits')
-                        .select('check_in_time, clients(zone)')
-                        .eq('sales_rep_id', seller.id)
-                        .order('check_in_time', { ascending: false })
-                        .limit(1)
-                        .maybeSingle();
+                    const { data: lastV } = await supabase.from('visits').select('clients(zone)').eq('sales_rep_id', seller.id).order('check_in_time', { ascending: false }).limit(1).maybeSingle();
 
                     // Calculate Time
                     let totalMinutes = 0;
                     const handledClientIds = new Set();
-
-                    // A. Visits Time (Real duration or current elapsed)
                     vData?.forEach(v => {
                         handledClientIds.add(v.client_id);
                         const start = new Date(v.check_in_time).getTime();
-                        const end = v.check_out_time ? new Date(v.check_out_time).getTime() : now.getTime();
-                        const duration = Math.floor((end - start) / (1000 * 60));
-                        totalMinutes += Math.max(0, duration);
+                        const end = v.check_out_time ? new Date(v.check_out_time).getTime() : new Date().getTime();
+                        totalMinutes += Math.max(0, Math.floor((end - start) / 60000));
                     });
-
-                    // B. Orders Time (Digital Management: 15 min if not in visit)
-                    oData?.forEach(o => {
-                        if (!o.visit_id) {
-                            handledClientIds.add(o.client_id);
-                            totalMinutes += 15; // Standard digital order time
-                        }
-                    });
-
-                    // C. Calls Time (7 min)
-                    lData?.forEach(l => {
-                        handledClientIds.add(l.client_id);
-                        totalMinutes += 7;
-                    });
-
-                    // D. Quotations Time (7 min if digital, 20 min if face-to-face and no visit)
+                    oData?.forEach(o => { if (!o.visit_id) { handledClientIds.add(o.client_id); totalMinutes += 15; } });
+                    lData?.forEach(l => { handledClientIds.add(l.client_id); totalMinutes += 7; });
                     qData?.forEach(q => {
                         handledClientIds.add(q.client_id);
-                        if (q.interaction_type === 'WhatsApp' || q.interaction_type === 'Teléfono') {
-                            totalMinutes += 7;
-                        } else {
-                            // Only add if no visits for this client today to avoid double counting
-                            const hasVisit = vData?.some(v => v.client_id === q.client_id);
-                            if (!hasVisit) totalMinutes += 20;
-                        }
+                        if (q.interaction_type === 'WhatsApp' || q.interaction_type === 'Teléfono') totalMinutes += 7;
+                        else if (!vData?.some(v => v.client_id === q.client_id)) totalMinutes += 20;
                     });
 
                     const hours = totalMinutes / 60;
-                    const h = Math.floor(hours);
-                    const m = Math.round((hours - h) * 60);
-
                     return {
                         id: seller.id,
                         name: seller.full_name || seller.email?.split('@')[0].toUpperCase(),
@@ -478,128 +387,56 @@ const Dashboard = () => {
                         newClientNames: (cData || []).map(c => c.name),
                         quoteAmount: oData?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0,
                         quoteCount: oData?.length || 0,
-                        hours: `${h}h ${m}m`,
+                        hours: `${Math.floor(hours)}h ${Math.round((hours % 1) * 60)}m`,
                         zone: (lastV?.clients as any)?.zone || 'N/A',
                         monthlyGoal: sellerGoal?.target_amount || 0,
                         monthlySales: sellerMonthSales
                     };
                 }));
-
                 setAdminSummary(summary);
             } else if (profile && !hasPermission('VIEW_TEAM_STATS')) {
-                // Seller Logic: Personal Stats
-                const now = new Date();
-
-                const { data: visits } = await supabase
-                    .from('visits')
-                    .select('*, clients(name, zone)')
-                    .eq('sales_rep_id', profile.id)
-                    .gte('check_in_time', isoStart)
-                    .lte('check_in_time', isoEnd)
-                    .order('check_in_time', { ascending: false });
-
-                const { data: orders } = await supabase
-                    .from('orders')
-                    .select('*, clients(name, zone)')
-                    .eq('user_id', profile.id)
-                    .gte('created_at', isoStart)
-                    .lte('created_at', isoEnd);
-
-                const { data: logs } = await supabase
-                    .from('call_logs')
-                    .select('*, clients(name, zone)')
-                    .eq('user_id', profile.id)
-                    .gte('created_at', isoStart)
-                    .lte('created_at', isoEnd);
-
-                const { data: quotations } = await supabase
-                    .from('quotations')
-                    .select('*, clients(name, zone)')
-                    .eq('seller_id', profile.id)
-                    .gte('created_at', isoStart)
-                    .lte('created_at', isoEnd);
+                // Seller Stats
+                const { data: visits } = await supabase.from('visits').select('*, clients(name, zone)').eq('sales_rep_id', profile.id).gte('check_in_time', isoStart).lte('check_in_time', isoEnd).order('check_in_time', { ascending: false });
+                const { data: orders } = await supabase.from('orders').select('*, clients(name, zone)').eq('user_id', profile.id).gte('created_at', isoStart).lte('created_at', isoEnd);
+                const { data: logs } = await supabase.from('call_logs').select('*, clients(name, zone)').eq('user_id', profile.id).gte('created_at', isoStart).lte('created_at', isoEnd);
+                const { data: quotations } = await supabase.from('quotations').select('*, clients(name, zone)').eq('seller_id', profile.id).gte('created_at', isoStart).lte('created_at', isoEnd);
 
                 let totalMinutes = 0;
                 const handledClientIds = new Set();
-
-                // 1. Visits: Duration (Real or Current)
                 visits?.forEach(v => {
                     handledClientIds.add(v.client_id);
                     const start = new Date(v.check_in_time).getTime();
-                    const end = v.check_out_time ? new Date(v.check_out_time).getTime() : now.getTime();
-                    const duration = Math.floor((end - start) / (1000 * 60));
-                    totalMinutes += Math.max(0, duration);
+                    const end = v.check_out_time ? new Date(v.check_out_time).getTime() : new Date().getTime();
+                    totalMinutes += Math.max(0, Math.floor((end - start) / 60000));
                 });
-
-                // 2. Orders: Digital Management (if not tied to a visit)
-                orders?.forEach(o => {
-                    if (!o.visit_id) {
-                        handledClientIds.add(o.client_id);
-                        totalMinutes += 15;
-                    }
-                });
-
-                // 3. Calls: 7 mins
-                logs?.forEach(l => {
-                    handledClientIds.add(l.client_id);
-                    totalMinutes += 7;
-                });
-
-                // 4. Quotations: 7 min if digital, 20 min if face-to-face (and no visit)
+                orders?.forEach(o => { if (!o.visit_id) { handledClientIds.add(o.client_id); totalMinutes += 15; } });
+                logs?.forEach(l => { handledClientIds.add(l.client_id); totalMinutes += 7; });
                 quotations?.forEach(q => {
                     handledClientIds.add(q.client_id);
-                    if (q.interaction_type === 'WhatsApp' || q.interaction_type === 'Teléfono') {
-                        totalMinutes += 7;
-                    } else {
-                        const hasVisit = visits?.some(v => v.client_id === q.client_id);
-                        if (!hasVisit) totalMinutes += 20;
-                    }
+                    if (q.interaction_type === 'WhatsApp' || q.interaction_type === 'Teléfono') totalMinutes += 7;
+                    else if (!visits?.some(v => v.client_id === q.client_id)) totalMinutes += 20;
                 });
 
                 const hours = totalMinutes / 60;
-                const h = Math.floor(hours);
-                const m = Math.round((hours - h) * 60);
+                const combinedActivity = [
+                    ...(visits?.map(v => ({ ...v, type: 'Visita', time: v.check_in_time })) || []),
+                    ...(orders?.filter(o => !o.visit_id).map(o => ({ ...o, type: 'Pedido Digital', time: o.created_at, status: 'Completado' })) || []),
+                    ...(logs?.map(l => ({ ...l, type: 'Llamada', time: l.created_at, status: l.status || 'Finalizada' })) || []),
+                    ...(quotations?.map(q => ({ ...q, type: 'Cotización', time: q.created_at, status: q.interaction_type || 'Digital' })) || [])
+                ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
 
                 const zones = Array.from(new Set([
                     ...(visits?.map(v => (v.clients as any)?.zone).filter(Boolean) || []),
                     ...(orders?.map(o => (o.clients as any)?.zone).filter(Boolean) || []),
-                    ...(logs?.map(l => (l.clients as any)?.zone).filter(Boolean) || []),
-                    ...(quotations?.map(q => (q.clients as any)?.zone).filter(Boolean) || [])
                 ])) as string[];
-
-                // Recent activity list
-                const combinedActivity = [
-                    ...(visits?.map(v => ({ ...v, type: 'Visita', time: v.check_in_time })) || []),
-                    ...(orders?.filter(o => !o.visit_id).map(o => ({
-                        ...o,
-                        type: 'Pedido Digital',
-                        time: o.created_at,
-                        clients: o.clients,
-                        status: 'Completado'
-                    })) || []),
-                    ...(logs?.map(l => ({
-                        ...l,
-                        type: 'Llamada',
-                        time: l.created_at,
-                        clients: l.clients,
-                        status: l.status || 'Finalizada'
-                    })) || []),
-                    ...(quotations?.map(q => ({
-                        ...q,
-                        type: 'Cotización',
-                        time: q.created_at,
-                        clients: q.clients,
-                        status: q.interaction_type || 'Digital'
-                    })) || [])
-                ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
 
                 setStats({
                     todayVisits: handledClientIds.size,
-                    effectiveHours: `${h}h ${m}m`,
+                    effectiveHours: `${Math.floor(hours)}h ${Math.round((hours % 1) * 60)}m`,
                     zones: zones,
                     recentVisits: combinedActivity,
                     newClientsToday: 0,
-                    quotationsToday: orders?.length || 0
+                    quotationsToday: quotations?.length || 0
                 });
             }
         } catch (error) {
