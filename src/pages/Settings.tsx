@@ -192,19 +192,13 @@ const Settings: React.FC = () => {
             }
 
             // 2. Upsert to Whitelist
-            console.log("Upserting whitelist:", { email: inviteData.email, role: inviteData.role, created_by: profile?.id });
             const { error: whitelistError } = await supabase.from('user_whitelist').upsert({
                 email: inviteData.email.toLowerCase(),
                 role: inviteData.role,
                 created_by: profile?.id
             });
 
-            if (whitelistError) {
-                console.error("Whitelist Error Details:", whitelistError);
-                // Reveal non-enumerable properties (like message and code)
-                const errorDetail = JSON.stringify(whitelistError, Object.getOwnPropertyNames(whitelistError), 2);
-                throw new Error(`Whitelist Error (BD):\n${errorDetail}`);
-            }
+            if (whitelistError) throw whitelistError;
 
             // 3. Send Email (Best Effort via Gmail API)
             try {
@@ -248,14 +242,10 @@ const Settings: React.FC = () => {
 
             setIsInviteModalOpen(false);
             setInviteData({ email: '', full_name: '', role: 'seller' });
-            // Refresh logic if needed (e.g. fetch whitelist)
+            fetchPendingInvites();
         } catch (error: any) {
-            console.error('CRITICAL INVITE ERROR:', error);
-            const isTypeError = error instanceof TypeError;
-            const errorString = String(error);
-            const errorDetail = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
-
-            alert(`⛔ DEBUG ERROR CRÍTICO:\n\n${errorDetail}\n\nTypeError: ${isTypeError}\nString: ${errorString}`);
+            console.error('Error in handleInviteUser:', error);
+            alert('Error al procesar invitación: ' + (error.message || 'Error desconocido'));
         } finally {
             setSendingInvite(false);
         }
@@ -610,28 +600,31 @@ const Settings: React.FC = () => {
                 isInviteModalOpen && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 backdrop-blur-md bg-black/40">
                         <div className="bg-white rounded-[3rem] w-full max-w-xl p-12 shadow-2xl relative border border-gray-100">
-                            <h3 className="text-4xl font-black text-gray-900 mb-2">Crear Invitación <span className="text-xs font-normal text-indigo-400">v2.1</span></h3>
+                            <h3 className="text-4xl font-black text-gray-900 mb-2">Crear Invitación</h3>
                             <form onSubmit={handleInviteUser} className="space-y-8">
                                 <input required type="text" value={inviteData.full_name} onChange={e => setInviteData(p => ({ ...p, full_name: e.target.value }))} className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black" placeholder="Nombre" />
                                 <input required type="email" value={inviteData.email} onChange={e => setInviteData(p => ({ ...p, email: e.target.value.toLowerCase() }))} className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black" placeholder="Email" />
 
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Rol / Perfil</label>
+                                <div>
+                                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Rol / Perfil</label>
                                     <select
                                         value={inviteData.role}
                                         onChange={e => setInviteData(p => ({ ...p, role: e.target.value }))}
-                                        className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black focus:ring-2 focus:ring-indigo-500 appearance-none"
+                                        className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black appearance-none focus:ring-4 focus:ring-indigo-500/10 transition-all uppercase"
                                     >
                                         <option value="seller">Vendedor</option>
-                                        <option value="driver">Repartidor (Driver)</option>
                                         <option value="administrativo">Administrativo</option>
-                                        <option value="jefe">Jefe de Área</option>
+                                        <option value="jefe">Jefe de Ventas</option>
+                                        <option value="driver">Repartidor</option>
+                                        <option value="manager">Gerente / Admin</option>
                                     </select>
                                 </div>
 
-                                <div className="flex gap-4 pt-6">
-                                    <button type="button" onClick={() => setIsInviteModalOpen(false)} className="flex-1 h-16 text-gray-400 font-black text-xs uppercase">Cancelar</button>
-                                    <button type="submit" disabled={sendingInvite} className="flex-[2] h-16 bg-gray-900 text-white rounded-2xl font-black text-xs uppercase shadow-2xl">{sendingInvite ? 'Enviando...' : 'Generar'}</button>
+                                <div className="flex gap-4 pt-4">
+                                    <button type="button" onClick={() => setIsInviteModalOpen(false)} className="flex-1 h-16 rounded-2xl font-black text-gray-400 hover:bg-gray-50 transition-all">CANCELAR</button>
+                                    <button type="submit" disabled={sendingInvite} className="flex-[2] h-16 bg-gray-900 text-white rounded-2xl font-black shadow-xl shadow-gray-200 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50">
+                                        {sendingInvite ? 'ENVIANDO...' : 'CREAR INVITACIÓN'}
+                                    </button>
                                 </div>
                             </form>
                         </div>
