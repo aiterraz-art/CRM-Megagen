@@ -249,7 +249,10 @@ const Settings: React.FC = () => {
             // Refresh logic if needed (e.g. fetch whitelist)
         } catch (error: any) {
             console.error('CRITICAL INVITE ERROR:', error);
-            alert(`⛔ DEBUG ERROR:\n${error.message || JSON.stringify(error)}`);
+            const isTypeError = error instanceof TypeError;
+            const errorString = String(error);
+            const errorKeys = Object.getOwnPropertyNames(error);
+            alert(`⛔ DEBUG ERROR:\nType: ${error.name || 'Unknown'}\nTypeError: ${isTypeError}\nMessage: ${error.message}\nString: ${errorString}\nKeys: ${errorKeys.join(', ')}`);
         } finally {
             setSendingInvite(false);
         }
