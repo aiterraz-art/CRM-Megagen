@@ -192,13 +192,17 @@ const Settings: React.FC = () => {
             }
 
             // 2. Upsert to Whitelist
+            console.log("Upserting whitelist:", { email: inviteData.email, role: inviteData.role, created_by: profile?.id });
             const { error: whitelistError } = await supabase.from('user_whitelist').upsert({
                 email: inviteData.email.toLowerCase(),
                 role: inviteData.role,
                 created_by: profile?.id
             });
 
-            if (whitelistError) throw whitelistError;
+            if (whitelistError) {
+                console.error("Whitelist Error Details:", whitelistError);
+                throw new Error(`Whitelist Error: ${whitelistError.message || whitelistError.details || JSON.stringify(whitelistError)}`);
+            }
 
             // 3. Send Email (Best Effort via Gmail API)
             try {
@@ -230,21 +234,21 @@ const Settings: React.FC = () => {
                         },
                         body: JSON.stringify({ raw: btoa(unescape(encodeURIComponent(rawMimeMessage))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') })
                     });
-                    alert('Invitación creada y correo enviado.');
+                    alert('✅ Invitación creada y correo enviado.');
                 } else {
-                    alert('Invitación creada. El correo no se pudo enviar automáticamente (falta sesión Google), avisa al usuario manualmente.');
+                    alert('⚠️ Invitación creada pero NO enviada (falta sesión Google). Notificar manualmente.');
                 }
             } catch (mailErr) {
                 console.warn("Mail verify error:", mailErr);
-                alert('Invitación creada, pero falló el envío del correo.');
+                alert('⚠️ Invitación creada, pero falló el envío del correo.');
             }
 
             setIsInviteModalOpen(false);
             setInviteData({ email: '', full_name: '', role: 'seller' });
             // Refresh logic if needed (e.g. fetch whitelist)
         } catch (error: any) {
-            console.error('Error in handleInviteUser:', error);
-            alert('Error al procesar invitación: ' + (error.message || JSON.stringify(error)));
+            console.error('CRITICAL INVITE ERROR:', error);
+            alert(`⛔ DEBUG ERROR:\n${error.message || JSON.stringify(error)}`);
         } finally {
             setSendingInvite(false);
         }
