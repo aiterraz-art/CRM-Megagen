@@ -201,7 +201,8 @@ const Settings: React.FC = () => {
 
             if (whitelistError) {
                 console.error("Whitelist Error Details:", whitelistError);
-                const errorDetail = `Code: ${whitelistError.code}\nMessage: ${whitelistError.message}\nDetails: ${whitelistError.details}\nHint: ${whitelistError.hint}\nLiteral: ${JSON.stringify(whitelistError)}`;
+                // Reveal non-enumerable properties (like message and code)
+                const errorDetail = JSON.stringify(whitelistError, Object.getOwnPropertyNames(whitelistError), 2);
                 throw new Error(`Whitelist Error (BD):\n${errorDetail}`);
             }
 
@@ -239,9 +240,10 @@ const Settings: React.FC = () => {
                 } else {
                     alert('⚠️ Invitación creada pero NO enviada (falta sesión Google). Notificar manualmente.');
                 }
-            } catch (mailErr) {
+            } catch (mailErr: any) {
                 console.warn("Mail verify error:", mailErr);
-                alert('⚠️ Invitación creada, pero falló el envío del correo.');
+                const mailDetail = JSON.stringify(mailErr, Object.getOwnPropertyNames(mailErr), 2);
+                alert(`⚠️ Invitación creada, pero falló el envío del correo.\n\nDetalle Correo:\n${mailDetail}`);
             }
 
             setIsInviteModalOpen(false);
@@ -251,8 +253,9 @@ const Settings: React.FC = () => {
             console.error('CRITICAL INVITE ERROR:', error);
             const isTypeError = error instanceof TypeError;
             const errorString = String(error);
-            const errorKeys = Object.getOwnPropertyNames(error);
-            alert(`⛔ DEBUG ERROR:\nType: ${error.name || 'Unknown'}\nTypeError: ${isTypeError}\nMessage: ${error.message}\nString: ${errorString}\nKeys: ${errorKeys.join(', ')}`);
+            const errorDetail = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+
+            alert(`⛔ DEBUG ERROR CRÍTICO:\n\n${errorDetail}\n\nTypeError: ${isTypeError}\nString: ${errorString}`);
         } finally {
             setSendingInvite(false);
         }
