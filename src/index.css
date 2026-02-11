@@ -1,0 +1,50 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-premium-bg font-['Outfit'] antialiased;
+  }
+}
+
+@layer components {
+  .premium-card {
+    @apply bg-white rounded-[2rem] shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300;
+  }
+
+  .premium-sidebar-item {
+    @apply flex items-center space-x-3 p-3 rounded-2xl transition-all duration-200 text-white/70 hover:text-white hover:bg-white/10;
+  }
+
+  .premium-sidebar-item.active {
+    @apply text-white bg-white/20 shadow-inner;
+  }
+
+  .premium-btn-primary {
+    @apply bg-dental-600 text-white py-3 px-6 rounded-2xl font-bold shadow-lg shadow-dental-200 active:scale-95 transition-all;
+  }
+
+  .premium-btn-accent {
+    @apply bg-premium-accent text-white py-3 px-6 rounded-2xl font-bold shadow-lg shadow-teal-100 active:scale-95 transition-all;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-200 rounded-full;
+}
+
+.custom-pin {
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+}
