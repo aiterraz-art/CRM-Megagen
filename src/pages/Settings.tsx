@@ -603,7 +603,7 @@ const Settings: React.FC = () => {
                 isInviteModalOpen && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 backdrop-blur-md bg-black/40">
                         <div className="bg-white rounded-[3rem] w-full max-w-xl p-12 shadow-2xl relative border border-gray-100">
-                            <h3 className="text-4xl font-black text-gray-900 mb-2">Crear Invitación</h3>
+                            <h3 className="text-4xl font-black text-gray-900 mb-2">Crear Invitación <span className="text-xs font-normal text-indigo-400">v2.1</span></h3>
                             <form onSubmit={handleInviteUser} className="space-y-8">
                                 <input required type="text" value={inviteData.full_name} onChange={e => setInviteData(p => ({ ...p, full_name: e.target.value }))} className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black" placeholder="Nombre" />
                                 <input required type="email" value={inviteData.email} onChange={e => setInviteData(p => ({ ...p, email: e.target.value.toLowerCase() }))} className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black" placeholder="Email" />
