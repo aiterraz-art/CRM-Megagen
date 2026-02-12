@@ -4,16 +4,17 @@ import { useVisit } from '../contexts/VisitContext';
 import { Clock, MapPin, Camera, ShoppingCart } from 'lucide-react';
 
 import VisitCheckoutModal from './modals/VisitCheckoutModal';
+import ScheduleVisitModal from './modals/ScheduleVisitModal';
 import { supabase } from '../services/supabase';
 
 const GlobalVisitTimer = () => {
     const navigate = useNavigate();
-    const { activeVisit, endVisit } = useVisit(); // We will bypass endVisit for now or duplicate logic? Better to handle manual update + context refresh
-    // Actually, `endVisit` in context DOES NOT take args. So we must do it manually here.
+    const { activeVisit, endVisit } = useVisit();
     const [elapsedTime, setElapsedTime] = useState(0);
     const [finishing, setFinishing] = useState(false);
     const [showNotesModal, setShowNotesModal] = useState(false);
     const [visitNotes, setVisitNotes] = useState('');
+    const [showScheduleModal, setShowScheduleModal] = useState(false);
 
     useEffect(() => {
         let interval: any;
@@ -49,48 +50,16 @@ const GlobalVisitTimer = () => {
     const handleConfirmCheckout = async () => {
         if (!activeVisit) return;
         setFinishing(true);
-        setShowNotesModal(false);
 
-        const checkoutPayload: any = {
-            check_out_time: new Date().toISOString(),
-            status: 'completed',
-            notes: visitNotes || null
-        };
-
-        const executeCheckout = async () => {
-            try {
-                // Update DB direct
-                await (supabase.from('visits') as any).update(checkoutPayload).eq('id', activeVisit.id);
-                // Call context to clear state (this triggers fetchActiveVisit which returns null)
-                // We mock it by forcing a reload or just calling endVisit?
-                // Calling endVisit() blindly might overwrite our update if we aren't careful?
-                // No, endVisit fetches location and updates. It might overwrite 'notes' with null if not careful.
-                // WE MUST NOT CALL endVisit() if we do it manually.
-                // We need a way to clear the context.
-                // HACK: Reload page to clear context or expose a clear function.
-                // But wait, user might stay on page.
-                // Ideally `endVisit` should accept params. Since I can't edit context easily without risk:
-                // I will reload the page or navigate to dashboard which triggers refresh.
-
-                window.location.href = '/';
-            } catch (err) {
-                console.error("Checkout error:", err);
-                alert("Error al finalizar visita.");
-                setFinishing(false);
-            }
-        };
-
-        navigator.geolocation.getCurrentPosition(async (pos) => {
-            const { latitude, longitude } = pos.coords;
-            checkoutPayload.check_out_lat = latitude;
-            checkoutPayload.check_out_lng = longitude;
-            await executeCheckout();
-        }, async (error) => {
-            console.error("Error getting location on checkout:", error);
-            // alert("No se pudo obtener la ubicación GPS, guardando solo gestión.");
-            // Proceed without GPS
-            await executeCheckout();
-        });
+        try {
+            await endVisit({ notes: visitNotes });
+            setShowNotesModal(false);
+            setFinishing(false);
+            navigate('/');
+        } catch (err) {
+            console.error("Checkout error in GlobalVisitTimer:", err);
+            setFinishing(false);
+        }
     };
 
     if (!activeVisit) return null;
@@ -163,7 +132,17 @@ const GlobalVisitTimer = () => {
                     onNotesChange={setVisitNotes}
                     onSave={handleConfirmCheckout}
                     onClose={() => setShowNotesModal(false)}
+                    onSchedule={() => setShowScheduleModal(true)}
                     saving={finishing}
+                />
+            )}
+
+            {showScheduleModal && (
+                <ScheduleVisitModal
+                    isOpen={showScheduleModal}
+                    onClose={() => setShowScheduleModal(false)}
+                    client={activeVisit ? { id: activeVisit.client_id, name: 'Cargando...' } as any : null}
+                    onSaved={() => setShowScheduleModal(false)}
                 />
             )}
 

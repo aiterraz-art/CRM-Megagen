@@ -19,7 +19,7 @@ type Client = Database['public']['Tables']['clients']['Row'];
 const VisitLog = () => {
     const { clientId } = useParams<{ clientId: string }>();
     const { profile } = useUser();
-    const { startVisit, activeVisit } = useVisit(); // Use context
+    const { startVisit, activeVisit, endVisit } = useVisit(); // Use context
     const navigate = useNavigate();
     const [client, setClient] = useState<Client | null>(null);
     // Use activeVisit if available, or fall back to local state if needed (though activeVisit is better)
@@ -150,22 +150,11 @@ const VisitLog = () => {
         setFinishing(true);
 
         try {
-            // STRICT GPS ENFORCE FOR CHECKOUT
-            const position = await checkGPSConnection();
-
-            const checkoutPayload: any = {
-                check_out_time: new Date().toISOString(),
-                status: 'completed',
-                notes: visitNotes || null,
-                check_out_lat: position.coords.latitude,
-                check_out_lng: position.coords.longitude
-            };
-
-            await (supabase.from('visits') as any).update(checkoutPayload).eq('id', visitId);
+            await endVisit({ notes: visitNotes });
             navigate('/');
         } catch (error) {
-            setFinishing(false); // Enable button again if failed
-            // Alert already shown by checkGPSConnection
+            setFinishing(false);
+            console.error("CheckOut error in VisitLog:", error);
         }
     };
 

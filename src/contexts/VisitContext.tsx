@@ -10,7 +10,7 @@ interface VisitContextType {
     activeVisit: Visit | null;
     loading: boolean;
     startVisit: (clientId: string) => Promise<Visit | null>;
-    endVisit: () => Promise<void>;
+    endVisit: (options?: { notes?: string }) => Promise<void>;
 }
 
 const VisitContext = createContext<VisitContextType | undefined>(undefined);
@@ -123,7 +123,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return null;
     };
 
-    const endVisit = async () => {
+    const endVisit = async (options?: { notes?: string }) => {
         if (!activeVisit) return;
 
         const closingVisitId = activeVisit.id;
@@ -149,6 +149,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const { error } = await supabase.from('visits').update({
                 check_out_time: new Date().toISOString(),
                 status: 'completed',
+                notes: options?.notes || null,
                 check_out_lat: lat as number | undefined,
                 check_out_lng: lng as number | undefined
             } as any).eq('id', closingVisitId);
