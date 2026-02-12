@@ -185,7 +185,7 @@ const TeamStats = () => {
     const handleAssignTask = async () => {
         if (!newTask.title || !selectedRep || !currentUser) return;
 
-        const { error } = await (supabase.from('crm_tasks') as any).insert({
+        const { error } = await (supabase.from('tasks') as any).insert({
             assigned_to: selectedRep.id,
             assigned_by: currentUser.id,
             title: newTask.title,
