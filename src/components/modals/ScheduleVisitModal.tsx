@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Calendar, Clock, FileText, CheckCircle2, Search, User } from 'lucide-react';
 import { supabase } from '../../services/supabase';
+import { googleService } from '../../services/googleService';
 import { Database } from '../../types/supabase';
 
 type Client = Database['public']['Tables']['clients']['Row'];
@@ -95,34 +96,17 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
             const isoStart = startDateTime.toISOString();
             const isoEnd = endDateTime.toISOString();
 
-            // 2. Get User & Token
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.user) throw new Error("No user session");
-
-            // Google Token Validity Check
-            if (session.provider_token) {
-                try {
-                    // Lightweight check: Get Primary Calendar Metadata
-                    const checkResponse = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary', {
-                        headers: { 'Authorization': `Bearer ${session.provider_token}` }
-                    });
-
-                    if (!checkResponse.ok) {
-                        setLoading(false);
-                        alert("⚠️ Tu sesión de Google ha expirado o se ha desconectado.\n\nPor favor, cierra sesión y vuelve a ingresar para renovar los permisos del calendario antes de agendar.");
-                        return; // Stop execution
-                    }
-                } catch (err) {
-                    console.error("Token verification failed:", err);
-                    setLoading(false);
-                    alert("⚠️ Error verificando conexión con Google. Por favor, intenta reloguearte.");
-                    return;
-                }
-            } else {
-                // Should we block if NO token at all? User asked "si no esta activa, que no agende".
-                // Assuming "no token" = "not active".
+            // 2. Google Token Validity Check
+            const validToken = await googleService.ensureSession();
+            if (!validToken) {
                 setLoading(false);
-                alert("⚠️ No se detectó conexión con Google Calendar.\n\nPor favor, cierra sesión y vuelve a ingresar con tu cuenta de Google para habilitar el agendamiento.");
+                return;
+            }
+
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.user) {
+                setLoading(false);
+                alert("Sesión de usuario no encontrada.");
                 return;
             }
 
@@ -176,7 +160,7 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                     const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${session.provider_token}`,
+                            'Authorization': `Bearer ${validToken}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(gCalEvent)

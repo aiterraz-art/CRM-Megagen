@@ -28,12 +28,12 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
 
             try {
-                // Find most recent in-progress visit for this sales rep
+                // Find most recent in_progress visit for this sales rep
                 const { data, error } = await supabase
                     .from('visits')
                     .select('*')
                     .eq('sales_rep_id', profile.id)
-                    .eq('status', 'in-progress')
+                    .eq('status', 'in_progress')
                     .order('check_in_time', { ascending: false })
                     .limit(1)
                     .single();
@@ -68,7 +68,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             .from('visits')
             .select('*')
             .eq('sales_rep_id', profile.id)
-            .eq('status', 'in-progress')
+            .eq('status', 'in_progress')
             .limit(1);
 
         const existing = existingList?.[0];
@@ -105,7 +105,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 client_id: clientId,
                 check_in_time: new Date().toISOString(),
                 sales_rep_id: profile.id,
-                status: 'in-progress',
+                status: 'in_progress',
                 lat: checkInLat, // Audit: Check-in location
                 lng: checkInLng, // Audit: Check-in location
                 scheduled_at: new Date().toISOString() // Required by DB constraint

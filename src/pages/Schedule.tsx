@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import ScheduleVisitModal from '../components/modals/ScheduleVisitModal';
 import ScheduleActivityModal from '../components/modals/ScheduleActivityModal';
+import { googleService } from '../services/googleService';
 
 interface CalendarEvent {
     id: string;
@@ -66,10 +67,10 @@ const Schedule = () => {
         // 1. Google Events (Only Self)
         if (isSelf) {
             try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (session?.provider_token) {
+                const token = await googleService.getValidToken();
+                if (token) {
                     const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${startOfMonth}&timeMax=${endOfMonth}&singleEvents=true`, {
-                        headers: { Authorization: `Bearer ${session.provider_token}` }
+                        headers: { Authorization: `Bearer ${token}` }
                     });
                     const data = await response.json();
                     if (data.items) {

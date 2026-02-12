@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { Shield, User, Search, CheckCircle, Ban, Edit, Save, AlertTriangle, Trash2 } from 'lucide-react';
 import { Profile } from '../contexts/UserContext';
+import { googleService } from '../services/googleService';
 
 const Settings: React.FC = () => {
     const { profile, isSupervisor, hasPermission } = useUser();
@@ -222,10 +223,16 @@ const Settings: React.FC = () => {
                         message
                     ].join('\r\n');
 
+                    const token = await googleService.ensureSession();
+                    if (!token) {
+                        setSendingInvite(false);
+                        return;
+                    }
+
                     await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${providerToken}`,
+                            'Authorization': `Bearer ${token}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({ raw: btoa(unescape(encodeURIComponent(rawMimeMessage))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') })
@@ -290,18 +297,13 @@ const Settings: React.FC = () => {
     const handleTestGoogleSync = async () => {
         setTestingSync(true);
         try {
-            const { data: { session } } = await supabase.auth.getSession();
-            const providerToken = (session as any)?.provider_token;
-
-            if (!providerToken) {
-                alert("❌ ERROR DE TOKEN:\nNo se detectó una sesión de Google activa.\n\nSolución: Cierra sesión en el CRM y vuelve a ingresar con Google para renovar el token.");
-                return;
-            }
+            const token = await googleService.ensureSession();
+            if (!token) return;
 
             // Test call to Google Calendar API (List Calendars)
             const response = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
                 headers: {
-                    'Authorization': `Bearer ${providerToken}`
+                    'Authorization': `Bearer ${token}`
                 }
             });
 

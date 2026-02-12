@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import CallOutcomeModal from './CallOutcomeModal';
 import ScheduleVisitModal from './ScheduleVisitModal';
 import { useUser } from '../../contexts/UserContext';
+import { googleService } from '../../services/googleService';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -235,11 +236,11 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                             try {
                                                                 // 1. Delete from Google if ID exists
                                                                 if (visit.google_event_id) {
-                                                                    const { data: { session } } = await supabase.auth.getSession();
-                                                                    if (session?.provider_token) {
+                                                                    const token = await googleService.ensureSession();
+                                                                    if (token) {
                                                                         await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${visit.google_event_id}`, {
                                                                             method: 'DELETE',
-                                                                            headers: { Authorization: `Bearer ${session.provider_token}` }
+                                                                            headers: { Authorization: `Bearer ${token}` }
                                                                         });
                                                                     }
                                                                 }

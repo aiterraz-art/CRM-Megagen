@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary, useMap } from '@vis.gl/react-google-maps';
 import ClientDetailModal from '../components/modals/ClientDetailModal';
+import { googleService } from '../services/googleService';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -373,10 +374,8 @@ const ClientsContent = () => {
         setSendingEmail(true);
         try {
             const { data: { session } } = await supabase.auth.getSession();
-            const providerToken = session?.provider_token;
-
-            if (!providerToken) {
-                alert('⚠️ No se detectó una sesión de Google activa con permisos de envío. Por favor, cierra sesión y vuelve a ingresar con Google.');
+            const validToken = await googleService.ensureSession();
+            if (!validToken) {
                 setSendingEmail(false);
                 return;
             }
@@ -441,7 +440,7 @@ const ClientsContent = () => {
             const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${providerToken}`,
+                    'Authorization': `Bearer ${validToken}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
