@@ -12,6 +12,7 @@ import VisualEvidence from '../components/VisualEvidence';
 import VisitCheckoutModal from '../components/modals/VisitCheckoutModal';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import ClientFormModal from '../components/modals/ClientFormModal';
+import ScheduleVisitModal from '../components/modals/ScheduleVisitModal';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -34,6 +35,7 @@ const VisitLog = () => {
     const [finishing, setFinishing] = useState(false);
     const [showNotesModal, setShowNotesModal] = useState(false);
     const [visitNotes, setVisitNotes] = useState('');
+    const [showScheduleModal, setShowScheduleModal] = useState(false);
 
     // Client Validation State
     // Client Validation State
@@ -210,9 +212,21 @@ const VisitLog = () => {
                             handleCheckOut();
                         }}
                         onClose={() => setShowNotesModal(false)}
+                        onSchedule={() => setShowScheduleModal(true)}
                         saving={finishing}
                     />
                 )}
+
+                {/* Schedule Modal Integration */}
+                <ScheduleVisitModal
+                    isOpen={showScheduleModal}
+                    onClose={() => setShowScheduleModal(false)}
+                    client={client}
+                    onSaved={() => {
+                        setShowScheduleModal(false);
+                        // Optional: show a success indicator or toast
+                    }}
+                />
 
                 {/* Client Completion Modal */}
                 {showClientForm && client && (

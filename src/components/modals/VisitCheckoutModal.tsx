@@ -1,14 +1,16 @@
 import React from 'react';
+import { Calendar } from 'lucide-react';
 
 interface VisitCheckoutModalProps {
     notes: string;
     onNotesChange: (notes: string) => void;
     onSave: () => void;
     onClose: () => void;
+    onSchedule?: () => void;
     saving: boolean;
 }
 
-const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({ notes, onNotesChange, onSave, onClose, saving }) => {
+const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({ notes, onNotesChange, onSave, onClose, onSchedule, saving }) => {
     return (
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl animate-in slide-in-from-bottom-10 duration-300">
@@ -26,6 +28,17 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({ notes, onNotesC
                             autoFocus
                         />
                     </div>
+
+                    {onSchedule && (
+                        <button
+                            onClick={onSchedule}
+                            disabled={saving}
+                            className="w-full flex items-center justify-center space-x-3 p-4 bg-indigo-50 text-indigo-600 rounded-2xl font-bold hover:bg-indigo-100 transition-all border border-indigo-100 active:scale-95 px-6"
+                        >
+                            <Calendar size={18} />
+                            <span>Agendar Gestión</span>
+                        </button>
+                    )}
 
                     <div className="grid grid-cols-2 gap-4 mt-6">
                         <button
