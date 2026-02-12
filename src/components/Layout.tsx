@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Search, Bell, Settings, ShieldCheck, ShoppingBag, UserCircle, Truck, Menu, X, Stethoscope } from 'lucide-react';
+import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Search, Bell, Settings, ShieldCheck, ShoppingBag, UserCircle, Truck, Menu, X, Stethoscope, ClipboardList } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -25,6 +25,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         { icon: <LayoutDashboard size={20} className="rotate-90" />, label: 'Embudo', path: '/pipeline' },
         { icon: <Package size={20} />, label: 'Inventario', path: '/inventory' },
         { icon: <Calendar size={20} />, label: 'Agenda', path: '/schedule' },
+        { icon: <ClipboardList size={20} />, label: 'Historial', path: '/visits' },
     ];
 
     if (effectiveRole === 'driver') {

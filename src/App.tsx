@@ -17,6 +17,7 @@ import Dispatch from './pages/Dispatch';
 import DeliveryRoute from './pages/DeliveryRoute';
 import DriverDashboard from './pages/DriverDashboard';
 import Settings from './pages/Settings';
+import VisitHistory from './pages/VisitHistory';
 import { supabase } from './services/supabase';
 import { Session } from '@supabase/supabase-js';
 import { UserProvider } from './contexts/UserContext';
@@ -138,6 +139,7 @@ function App() {
                             <Route path="cold-visit" element={<ColdVisit />} />
                             <Route path="map" element={<MapView />} />
                             <Route path="visit/:clientId" element={<VisitLog />} />
+                            <Route path="visits" element={<VisitHistory />} />
                             <Route path="schedule" element={<Schedule />} />
                             <Route path="clients" element={<Clients />} />
                             <Route path="quotations" element={<Quotations />} />
