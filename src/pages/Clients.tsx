@@ -383,6 +383,11 @@ const ClientsContent = () => {
             // MIME boundary
             const boundary = "foo_bar_baz";
 
+            if (!session) {
+                setSendingEmail(false);
+                return;
+            }
+
             // Build the MIME message parts
             let messageParts = [
                 `From: ${session.user.email}`,

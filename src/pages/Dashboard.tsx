@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import VisualEvidence from '../components/VisualEvidence';
 import TaskModal from '../components/TaskModal';
+import { useVisit } from '../contexts/VisitContext';
 
 // Charts
 import SalesTrendChart from '../components/charts/SalesTrendChart';
@@ -53,6 +54,7 @@ const ActiveVisitTimer = ({ startTime }: { startTime: string }) => {
 
 const Dashboard = () => {
     const { profile, isSupervisor, hasPermission } = useUser();
+    const { activeVisit, endVisit } = useVisit();
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState({
         todayVisits: 0,
@@ -556,15 +558,22 @@ const Dashboard = () => {
                                                 <button
                                                     onClick={async () => {
                                                         if (confirm('¿Forzar término de esta visita?')) {
-                                                            const { error } = await supabase.from('visits').update({
-                                                                check_out_time: new Date().toISOString(),
-                                                                status: 'completed'
-                                                            } as any).eq('id', visit.id);
-
-                                                            if (error) {
-                                                                alert('Error al terminar visita: ' + error.message);
-                                                            } else {
+                                                            try {
+                                                                // Use endVisit from context if it's the active visit, 
+                                                                // or direct update if it's another rep's visit (supervisor case)
+                                                                if (visit.id === activeVisit?.id) {
+                                                                    await endVisit({ notes: 'Cierre forzado desde Dashboard' });
+                                                                } else {
+                                                                    const { error } = await supabase.from('visits').update({
+                                                                        check_out_time: new Date().toISOString(),
+                                                                        status: 'completed',
+                                                                        notes: 'Cierre forzado por supervisor'
+                                                                    } as any).eq('id', visit.id);
+                                                                    if (error) throw error;
+                                                                }
                                                                 fetchDashboardData();
+                                                            } catch (error: any) {
+                                                                alert('Error al terminar visita: ' + error.message);
                                                             }
                                                         }
                                                     }}

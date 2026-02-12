@@ -42,15 +42,62 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     setActiveVisit(data);
                 } else if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned" which is fine
                     console.error("Error fetching active visit:", error);
+                    setActiveVisit(null);
+                } else {
+                    setActiveVisit(null);
                 }
             } catch (err) {
                 console.error("Unexpected error fetching active visit:", err);
+                setActiveVisit(null);
             } finally {
                 setLoading(false);
             }
         };
 
         fetchActiveVisit();
+
+        // REALTIME SYNC: Listen for changes in the visits table for this rep
+        if (!profile?.id) return;
+
+        const channel = supabase
+            .channel(`active-visit-${profile.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'visits',
+                    filter: `sales_rep_id=eq.${profile.id}`
+                },
+                (payload) => {
+                    console.log("Visit Realtime Change:", payload);
+
+                    // If a visit was updated/deleted and it matches our active visit, or status changed
+                    if (payload.eventType === 'UPDATE') {
+                        const updatedVisit = payload.new as Visit;
+                        if (updatedVisit.status === 'completed' || updatedVisit.status === 'cancelled') {
+                            // If the visit we're tracking was just closed, clear it
+                            setActiveVisit(prev => (prev?.id === updatedVisit.id ? null : prev));
+                        } else if (updatedVisit.status === 'in_progress') {
+                            // If an in_progress visit was updated, or a new one appeared (unlikely on update but safe)
+                            setActiveVisit(updatedVisit);
+                        }
+                    } else if (payload.eventType === 'INSERT') {
+                        const newVisit = payload.new as Visit;
+                        if (newVisit.status === 'in_progress') {
+                            setActiveVisit(newVisit);
+                        }
+                    } else if (payload.eventType === 'DELETE') {
+                        const deletedId = payload.old.id;
+                        setActiveVisit(prev => (prev?.id === deletedId ? null : prev));
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, [profile]);
 
     const startVisit = async (clientId: string) => {

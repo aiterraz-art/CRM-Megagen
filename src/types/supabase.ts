@@ -129,6 +129,7 @@ export interface Database {
                     outcome: string | null
                     sales_rep_id: string | null
                     type: string | null
+                    status: string | null
                 }
                 Insert: {
                     check_in_time?: string | null
@@ -143,6 +144,7 @@ export interface Database {
                     outcome?: string | null
                     sales_rep_id?: string | null
                     type?: string | null
+                    status?: string | null
                 }
                 Update: {
                     check_in_time?: string | null
@@ -157,6 +159,7 @@ export interface Database {
                     outcome?: string | null
                     sales_rep_id?: string | null
                     type?: string | null
+                    status?: string | null
                 }
             }
             delivery_routes: {
