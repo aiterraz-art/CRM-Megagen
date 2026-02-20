@@ -69,9 +69,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                     <div className="flex items-center justify-between mb-12">
                         <div className="flex items-center space-x-4">
                             <div className="w-10 h-10 bg-white rounded-2xl p-2 flex items-center justify-center border border-white/30 shadow-2xl">
-                                <img src="/logo_megagen.png" alt="Megagen" className="w-full h-auto object-contain" />
+                                <img src={import.meta.env.VITE_COMPANY_LOGO || "/logo_megagen.png"} alt={import.meta.env.VITE_COMPANY_NAME || "Megagen"} className="w-full h-auto object-contain" />
                             </div>
-                            <h1 className="text-white text-xl font-black tracking-tight">Megagen CRM</h1>
+                            <h1 className="text-white text-xl font-black tracking-tight">{import.meta.env.VITE_APP_TITLE || "Megagen CRM"}</h1>
                         </div>
                         <button onClick={closeMenu} className="lg:hidden p-2 text-white/60 hover:text-white">
                             <X size={24} />
@@ -126,9 +126,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <header className="lg:hidden h-20 bg-white border-b border-gray-100 flex items-center justify-between px-6 shrink-0 relative z-30">
                     <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 bg-side-gradient rounded-xl flex items-center justify-center shadow-lg">
-                            <img src="/logo_megagen.png" alt="Megagen" className="w-6 h-6 object-contain brightness-0 invert" />
+                            <img src={import.meta.env.VITE_COMPANY_LOGO || "/logo_megagen.png"} alt={import.meta.env.VITE_COMPANY_NAME || "Megagen"} className="w-6 h-6 object-contain brightness-0 invert" />
                         </div>
-                        <h1 className="text-gray-900 text-lg font-black tracking-tighter">Megagen CRM</h1>
+                        <h1 className="text-gray-900 text-lg font-black tracking-tighter">{import.meta.env.VITE_APP_TITLE || "Megagen CRM"}</h1>
                     </div>
                     <button
                         onClick={() => setIsMobileMenuOpen(true)}
@@ -143,7 +143,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
                     <div className="mt-12 py-6 border-t border-gray-100/50 text-center">
                         <p className="text-[10px] font-medium text-gray-400 uppercase tracking-widest">
-                            © {new Date().getFullYear()} Megagen - Gestión Profesional
+                            © {new Date().getFullYear()} {import.meta.env.VITE_COMPANY_NAME || "Megagen"} - Gestión Profesional
                         </p>
                     </div>
                 </div>

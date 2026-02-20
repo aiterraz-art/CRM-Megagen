@@ -120,11 +120,11 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
                 await navigator.share({
                     files: [file],
                     title: `Cotización ${data.folio}`,
-                    text: `Adjunto cotización formal Folio Nº ${data.folio} de Megagen Chile.`,
+                    text: `Adjunto cotización formal Folio Nº ${data.folio} de ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}.`,
                 });
             } else {
                 // Fallback to text share if files are not supported
-                const shareText = `Estimado(a) ${data.clientName},\n\nLe adjunto la cotización Folio Nº ${data.folio} de Megagen Chile.\n\nTotal: $${total.toLocaleString()}\nVendedor: ${data.sellerName}\n\nGracias por su confianza.`;
+                const shareText = `Estimado(a) ${data.clientName},\n\nLe adjunto la cotización Folio Nº ${data.folio} de ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}.\n\nTotal: $${total.toLocaleString()}\nVendedor: ${data.sellerName}\n\nGracias por su confianza.`;
                 const waUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
                 window.open(waUrl, '_blank');
             }
@@ -226,17 +226,17 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
                         <div className="flex justify-between items-start mb-10">
                             <div className="space-y-1">
                                 <div className="flex items-center space-x-2 mb-4">
-                                    <img src="/logo_megagen.png" alt="Megagen" className="h-16 w-auto" />
+                                    <img src={import.meta.env.VITE_COMPANY_LOGO || "/logo_megagen.png"} alt={import.meta.env.VITE_COMPANY_NAME || "Megagen"} className="h-16 w-auto" />
                                 </div>
-                                <p className="font-bold text-xs uppercase">MEGAGEN IMPLANT</p>
-                                <p>Venta insumos dentales</p>
-                                <p>Avenida Americo Vespucio 2880 of 1403, CONCHALI</p>
-                                <p>Teléfono: 961183899</p>
-                                <p>Email: <span className="text-blue-600 underline">aterraza@imegagen.cl</span></p>
+                                <p className="font-bold text-xs uppercase">{import.meta.env.VITE_COMPANY_NAME || 'MEGAGEN IMPLANT'}</p>
+                                <p>{import.meta.env.VITE_COMPANY_GIRO || 'Venta insumos dentales'}</p>
+                                <p>{import.meta.env.VITE_COMPANY_ADDRESS || 'Avenida Americo Vespucio 2880 of 1403, CONCHALI'}</p>
+                                <p>Teléfono: {import.meta.env.VITE_COMPANY_PHONE || '961183899'}</p>
+                                <p>Email: <span className="text-blue-600 underline">{import.meta.env.VITE_COMPANY_EMAIL || 'aterraza@imegagen.cl'}</span></p>
                             </div>
 
                             <div className="w-64 border-2 border-orange-400 p-4 text-center rounded-lg space-y-2">
-                                <p className="text-orange-500 font-extrabold text-sm tracking-widest">R.U.T: 76.921.029-6</p>
+                                <p className="text-orange-500 font-extrabold text-sm tracking-widest">R.U.T: {import.meta.env.VITE_COMPANY_RUT || '76.921.029-6'}</p>
                                 <p className="text-orange-500 font-black text-lg uppercase tracking-wider">Cotización</p>
                                 <p className="text-orange-500 font-extrabold text-sm uppercase">Folio N° {data.folio}</p>
                             </div>
@@ -406,7 +406,12 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
 
                         {/* Logo Bottom (Small) */}
                         <div className="mt-auto pt-12 flex justify-center opacity-10 grayscale">
-                            <div className="text-xl font-black text-gray-400 tracking-tighter italic">Megagen<span className="text-gray-400 font-light not-italic text-xs ml-1 uppercase">Chile</span></div>
+                            <div className="text-xl font-black text-gray-400 tracking-tighter italic">
+                                {import.meta.env.VITE_COMPANY_NAME?.split(' ')[0] || 'Megagen'}
+                                <span className="text-gray-400 font-light not-italic text-xs ml-1 uppercase">
+                                    {import.meta.env.VITE_COMPANY_NAME?.split(' ').slice(1).join(' ') || 'Chile'}
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>

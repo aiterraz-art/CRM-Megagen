@@ -207,8 +207,9 @@ const Settings: React.FC = () => {
                 const providerToken = (session as any)?.provider_token;
 
                 if (providerToken) {
-                    const subject = "Invitación a Megagen CRM 🏥";
-                    const message = `Hola ${inviteData.full_name},\n\nHas sido invitado al CRM de Megagen con el rol de ${inviteData.role.toUpperCase()}.\n\nPara ingresar, simplemente inicia sesión con tu cuenta de Google (${inviteData.email}) en:\n\n${window.location.origin}/\n\nSaludos,\nEquipo Megagen`;
+                    const companyName = import.meta.env.VITE_COMPANY_NAME || 'Megagen';
+                    const subject = `Invitación a ${companyName} CRM 🏥`;
+                    const message = `Hola ${inviteData.full_name},\n\nHas sido invitado al CRM de ${companyName} con el rol de ${inviteData.role.toUpperCase()}.\n\nPara ingresar, simplemente inicia sesión con tu cuenta de Google (${inviteData.email}) en:\n\n${window.location.origin}/\n\nSaludos,\nEquipo ${companyName}`;
 
                     const utf8Encode = new TextEncoder();
                     const subjectEncoded = btoa(String.fromCharCode(...utf8Encode.encode(subject)));
@@ -259,7 +260,8 @@ const Settings: React.FC = () => {
     };
 
     const handleDeleteUser = async (id: string, email: string) => {
-        if (email === 'aterraza@imegagen.cl' || !window.confirm(`¿BORRADO DEFINITIVO de ${email}?`)) return;
+        const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
+        if (email === ownerEmail || !window.confirm(`¿BORRADO DEFINITIVO de ${email}?`)) return;
 
         try {
             // 1. Limpieza de Dependencias (Foreign Keys)

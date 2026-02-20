@@ -57,7 +57,7 @@ const Quotations: React.FC = () => {
         setLoading(true);
 
         try {
-            const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === 'aterraza@imegagen.cl';
+            const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
 
             let query = supabase
                 .from('quotations')
@@ -152,7 +152,7 @@ const Quotations: React.FC = () => {
     useEffect(() => {
         fetchQuotations();
         const fetchClients = async () => {
-            const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || profile?.email === 'aterraza@imegagen.cl';
+            const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
 
             let query = supabase.from('clients').select('*').order('name');
 

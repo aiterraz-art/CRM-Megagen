@@ -256,7 +256,7 @@ const ClientsContent = () => {
                 .select('*')
                 .order('name');
 
-            const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === 'aterraza@imegagen.cl';
+            const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
 
             if (!canViewAll && profile?.id) {
                 query = query.eq('created_by', profile.id);
@@ -742,7 +742,7 @@ const ClientsContent = () => {
         });
     };
 
-    const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === 'aterraza@imegagen.cl';
+    const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
 
     const filteredClients = clients.filter(c => {
         const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||

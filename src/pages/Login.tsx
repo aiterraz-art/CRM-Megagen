@@ -28,12 +28,12 @@ const Login = () => {
             <div className="w-full max-w-lg bg-white/95 backdrop-blur-xl rounded-[3rem] shadow-2xl p-10 md:p-16 space-y-10 relative z-10 animate-in fade-in zoom-in duration-700">
                 <div className="flex justify-center mb-8">
                     <div className="w-24 h-24 bg-white rounded-3xl shadow-xl flex items-center justify-center p-4 animate-in zoom-in duration-500">
-                        <img src="/logo_megagen.png" alt="Megagen Logo" className="w-full h-full object-contain" />
+                        <img src={import.meta.env.VITE_COMPANY_LOGO || "/logo_megagen.png"} alt={import.meta.env.VITE_COMPANY_NAME || "Megagen"} className="w-full h-full object-contain" />
                     </div>
                 </div>
 
                 <div className="text-center space-y-2 mb-8">
-                    <h1 className="text-3xl font-black text-gray-900 tracking-tight">CRM Megagen</h1>
+                    <h1 className="text-3xl font-black text-gray-900 tracking-tight">{import.meta.env.VITE_APP_TITLE || "Megagen CRM"}</h1>
                     <p className="text-gray-500 font-medium">Plataforma de Gestión Comercial</p>
                 </div>
 
@@ -47,7 +47,7 @@ const Login = () => {
                     </button>
 
                     <p className="text-[10px] text-center text-gray-400 font-bold uppercase tracking-[0.1em] mt-4">
-                        Acceso Exclusivo @imegagen.cl
+                        Acceso Exclusivo {import.meta.env.VITE_ALLOWED_DOMAIN || "@imegagen.cl"}
                     </p>
                 </div>
 

@@ -48,7 +48,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
 
         // NUCLEAR BYPASS: If current user is owner, give EVERYTHING regardless of DB
-        if (profile?.email === 'aterraza@imegagen.cl') {
+        const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
+        if (profile?.email === ownerEmail) {
             console.log("UserContext: Owner nuclear bypass applied to permissions.");
             setPermissions(defaults['admin']);
             return;
@@ -82,13 +83,16 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 const email = session.user.email?.toLowerCase();
 
                 // DOMAIN RESTRICTION CHECK
-                const isOwner = email === 'aterraza@imegagen.cl';
-                const isMegagenDomain = email?.endsWith('@imegagen.cl');
+                const allowedDomain = import.meta.env.VITE_ALLOWED_DOMAIN || '@imegagen.cl';
+                const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
 
-                if (!isOwner && !isMegagenDomain) {
+                const isOwner = email === ownerEmail;
+                const isAllowedDomain = email?.endsWith(allowedDomain);
+
+                if (!isOwner && !isAllowedDomain) {
                     console.warn(`UserContext: Access Denied for ${email}. Domain not allowed.`);
                     await supabase.auth.signOut();
-                    alert('ACCESO DENEGADO\n\nEsta es una plataforma privada.\nSolo se permiten cuentas corporativas @imegagen.cl');
+                    alert(`ACCESO DENEGADO\n\nEsta es una plataforma privada.\nSolo se permiten cuentas corporativas ${allowedDomain}`);
                     window.location.href = '/';
                     return;
                 }
@@ -100,7 +104,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (data && data.length > 0) {
                     let userProfile = data[0] as any as Profile;
 
-                    if (session.user.email === 'aterraza@imegagen.cl') {
+                    const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
+                    if (session.user.email === ownerEmail) {
                         console.warn("UserContext: Owner detected in DB. Forcing ACTIVE/ADMIN status locally.");
                         userProfile = {
                             ...userProfile,
@@ -128,7 +133,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         }
                     }
                     setProfile(userProfile);
-                } else if (session.user.email === 'aterraza@imegagen.cl') {
+                } else if (session.user.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')) {
                     // EMERGENCY BYPASS: Force admin profile for system owner if DB fetch fails
                     console.warn("UserContext: EMERGENCY BYPASS triggered for owner.");
                     const ownerProfile = {

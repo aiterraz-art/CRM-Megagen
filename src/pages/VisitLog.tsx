@@ -58,7 +58,7 @@ const VisitLog = () => {
             const { data } = await (supabase.from('clients') as any).select('*').eq('id', clientId).single();
             if (data) {
                 // Security Check
-                const canViewAll = profile?.role === 'admin' || profile?.role === 'supervisor' || profile?.email === 'aterraza@imegagen.cl';
+                const canViewAll = profile?.role === 'admin' || profile?.role === 'supervisor' || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
                 if (!canViewAll && data.created_by !== profile?.id) {
                     alert('Acceso denegado: Este cliente no está en tu cartera.');
                     navigate('/');
