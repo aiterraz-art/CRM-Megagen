@@ -14,6 +14,7 @@ interface DeliveryData {
     clientName: string;
     clientRut: string;
     clientAddress: string;
+    clientOffice?: string;
     clientPhone?: string;
     items: DeliveryItem[];
     driverName?: string;
@@ -80,7 +81,10 @@ const DeliveryNoteTemplate: React.FC<Props> = ({ data, onClose }) => {
                             <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-2">Destinatario</p>
                             <h2 className="text-xl font-bold text-slate-900 leading-tight mb-1">{data.clientName}</h2>
                             <p className="text-sm text-gray-600 font-medium mb-1">{data.clientRut}</p>
-                            <p className="text-sm text-gray-500 mb-1">{data.clientAddress}</p>
+                            <p className="text-sm text-gray-500 mb-1">
+                                {data.clientAddress}
+                                {data.clientOffice && <span className="ml-1 text-indigo-600 font-bold">({data.clientOffice})</span>}
+                            </p>
                             {data.clientPhone && <p className="text-sm text-gray-500">Tel: {data.clientPhone}</p>}
                         </div>
                         <div>

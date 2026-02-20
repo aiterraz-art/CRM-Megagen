@@ -17,6 +17,7 @@ interface MatchedOrder {
     folio: number;
     client_name: string;
     client_address: string;
+    client_office?: string;
     client_rut: string;
     lat?: number;
     lng?: number;
@@ -132,7 +133,8 @@ const Dispatch: React.FC = () => {
                             name, 
                             address, 
                             phone,
-                            comuna
+                            comuna,
+                            office
                         )
                     )
                 `)
@@ -240,8 +242,9 @@ const Dispatch: React.FC = () => {
             clientName: data.client.name,
             clientRut: data.client.rut,
             clientAddress: data.client.address || data.client.zone,
+            clientOffice: data.client.office,
             clientPhone: data.client.phone,
-            driverName: "Juan Mena", // Could be dynamic if we assign drivers
+            driverName: "Juan Mena",
             items: data.order_items.map((item: any) => ({
                 code: item.product_id ? 'PROD' : 'GEN',
                 detail: item.product_name,
@@ -288,7 +291,7 @@ const Dispatch: React.FC = () => {
             .from('orders')
             .select(`
                 id, status, delivery_status,
-                client:clients(name, address, zone, rut, comuna),
+                client:clients(name, address, zone, rut, comuna, office),
                 seller_location:seller_locations(lat, lng) 
             `)
             .not('status', 'eq', 'rejected'); // Filter out rejected
@@ -324,6 +327,7 @@ const Dispatch: React.FC = () => {
                     folio: match.folio,
                     client_name: match.client.name,
                     client_address: match.client.address || match.client.comuna || match.client.zone,
+                    client_office: match.client.office,
                     client_rut: match.client.rut,
                     lat: loc?.lat,
                     lng: loc?.lng,
@@ -678,7 +682,10 @@ const Dispatch: React.FC = () => {
                                                 {/* Debug Info */}
                                                 {/* <span className="text-xs text-gray-300 ml-2">({order.lat}, {order.lng})</span> */}
                                             </h4>
-                                            <p className="text-xs text-gray-400 font-medium mt-1 truncate max-w-[250px]">{order.client_address}</p>
+                                            <p className="text-xs text-gray-400 font-medium mt-1 truncate max-w-[250px]">
+                                                {order.client_address}
+                                                {order.client_office && <span className="ml-1 text-indigo-500 font-bold">({order.client_office})</span>}
+                                            </p>
 
                                             <button
                                                 onClick={() => handlePrintGuide(order.id)}

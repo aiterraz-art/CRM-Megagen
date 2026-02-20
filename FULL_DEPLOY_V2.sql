@@ -1,15 +1,14 @@
 -- ==============================================================================
--- MASTER DEPLOYMENT SCRIPT - 3DENTAL CRM V2 (REPLICA)
--- Fecha: 2026-01-31
+-- MASTER DEPLOYMENT SCRIPT - CRM V2 (UNIVERSAL)
+-- Fecha: 2026-02-20
 -- Descripción: Reconstrucción completa de la base de datos para nueva instancia.
--- Orden de ejecución: Types -> Profiles -> Clients -> Products -> Visits -> Orders -> Logistics
+-- Incluye migraciones robustas para compatibilidad con instancias existentes.
+-- Orden: Types -> Profiles -> Clients -> Inventory -> Visits -> Quotations -> Orders -> Logistics -> Logs -> Goals
 -- ==============================================================================
 -- ------------------------------------------------------------------------------
 -- 1. SETUP INICIAL Y TIPOS
 -- ------------------------------------------------------------------------------
--- Habilitar extensiones necesarias
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
--- Tipos ENUM personalizados
 DO $$ BEGIN CREATE TYPE app_role AS ENUM (
     'manager',
     'jefe',
@@ -50,11 +49,24 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     ),
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'disabled')),
     phone TEXT,
+    zone TEXT,
     avatar_url TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+-- Migración: Añadir columna zone si no existe
+DO $$ BEGIN IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'profiles'
+        AND column_name = 'zone'
+) THEN
+ALTER TABLE public.profiles
+ADD COLUMN zone TEXT;
+END IF;
+END $$;
 -- Trigger para crear perfil automáticamente al registrarse en Auth
 CREATE OR REPLACE FUNCTION public.handle_new_user() RETURNS trigger AS $$ BEGIN
 INSERT INTO public.profiles (id, email, full_name, role)
@@ -116,12 +128,69 @@ CREATE TABLE IF NOT EXISTS public.clients (
     address TEXT,
     comuna TEXT,
     region TEXT,
+    zone TEXT,
+    giro TEXT,
+    office TEXT,
+    lat NUMERIC,
+    lng NUMERIC,
     notes TEXT,
     created_by UUID REFERENCES public.profiles(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
+-- Migraciones: Añadir columnas faltantes si no existen
+DO $$ BEGIN IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'clients'
+        AND column_name = 'zone'
+) THEN
+ALTER TABLE public.clients
+ADD COLUMN zone TEXT;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'clients'
+        AND column_name = 'giro'
+) THEN
+ALTER TABLE public.clients
+ADD COLUMN giro TEXT;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'clients'
+        AND column_name = 'office'
+) THEN
+ALTER TABLE public.clients
+ADD COLUMN office TEXT;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'clients'
+        AND column_name = 'lat'
+) THEN
+ALTER TABLE public.clients
+ADD COLUMN lat NUMERIC;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'clients'
+        AND column_name = 'lng'
+) THEN
+ALTER TABLE public.clients
+ADD COLUMN lng NUMERIC;
+END IF;
+END $$;
 -- Políticas Clients
 DROP POLICY IF EXISTS "Sellers view own clients" ON clients;
 CREATE POLICY "Sellers view own clients" ON clients FOR
@@ -139,28 +208,36 @@ CREATE POLICY "Sellers insert clients" ON clients FOR
 INSERT WITH CHECK (auth.uid() = created_by);
 DROP POLICY IF EXISTS "Sellers update own clients" ON clients;
 CREATE POLICY "Sellers update own clients" ON clients FOR
-UPDATE USING (created_by = auth.uid());
+UPDATE USING (
+        created_by = auth.uid()
+        OR EXISTS (
+            SELECT 1
+            FROM profiles
+            WHERE id = auth.uid()
+                AND role IN ('manager', 'jefe', 'administrativo')
+        )
+    );
 -- ------------------------------------------------------------------------------
--- 4. INVENTARIO (PRODUCTS)
+-- 4. INVENTARIO (INVENTORY)
 -- ------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.products (
+CREATE TABLE IF NOT EXISTS public.inventory (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL,
     sku TEXT UNIQUE,
     description TEXT,
     price NUMERIC NOT NULL DEFAULT 0,
-    stock_quantity INTEGER DEFAULT 0,
+    stock_qty INTEGER DEFAULT 0,
     category TEXT,
     min_stock_alert INTEGER DEFAULT 5,
     image_url TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Everyone read products" ON products;
-CREATE POLICY "Everyone read products" ON products FOR
+ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Everyone read products" ON inventory;
+CREATE POLICY "Everyone read products" ON inventory FOR
 SELECT USING (true);
-DROP POLICY IF EXISTS "Staff edit products" ON products;
-CREATE POLICY "Staff edit products" ON products FOR ALL USING (
+DROP POLICY IF EXISTS "Staff edit products" ON inventory;
+CREATE POLICY "Staff edit products" ON inventory FOR ALL USING (
     EXISTS (
         SELECT 1
         FROM profiles
@@ -169,7 +246,7 @@ CREATE POLICY "Staff edit products" ON products FOR ALL USING (
     )
 );
 -- Seed Data (Ejemplo Inicial)
-INSERT INTO products (name, sku, price, stock_quantity, category)
+INSERT INTO inventory (name, sku, price, stock_qty, category)
 VALUES (
         'Implante Titanio Tipo A',
         'IMP-001',
@@ -187,43 +264,280 @@ VALUES (
 -- ------------------------------------------------------------------------------
 -- 5. VISITAS (VISITS)
 -- ------------------------------------------------------------------------------
+-- MIGRACIÓN ROBUSTA: Renombrar columnas antiguas si existen
+DO $$ BEGIN -- Renombrar user_id a sales_rep_id
+IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'user_id'
+) THEN
+ALTER TABLE public.visits
+    RENAME COLUMN user_id TO sales_rep_id;
+END IF;
+-- Renombrar check_in_at a check_in_time
+IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'check_in_at'
+) THEN
+ALTER TABLE public.visits
+    RENAME COLUMN check_in_at TO check_in_time;
+END IF;
+-- Renombrar check_out_at a check_out_time
+IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'check_out_at'
+) THEN
+ALTER TABLE public.visits
+    RENAME COLUMN check_out_at TO check_out_time;
+END IF;
+-- Renombrar location_lat a lat
+IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'location_lat'
+) THEN
+ALTER TABLE public.visits
+    RENAME COLUMN location_lat TO lat;
+END IF;
+-- Renombrar location_lng a lng
+IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'location_lng'
+) THEN
+ALTER TABLE public.visits
+    RENAME COLUMN location_lng TO lng;
+END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS public.visits (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     client_id UUID REFERENCES public.clients(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES public.profiles(id),
-    -- Vendedor
-    scheduled_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    sales_rep_id UUID REFERENCES public.profiles(id),
+    scheduled_at TIMESTAMP WITH TIME ZONE,
     title TEXT,
+    purpose TEXT,
     notes TEXT,
     status TEXT DEFAULT 'pending' CHECK (
         status IN (
             'pending',
+            'in_progress',
             'completed',
             'cancelled',
-            'rescheduled'
+            'rescheduled',
+            'scheduled'
         )
     ),
-    check_in_at TIMESTAMP WITH TIME ZONE,
-    check_out_at TIMESTAMP WITH TIME ZONE,
-    location_lat NUMERIC,
-    location_lng NUMERIC,
+    check_in_time TIMESTAMP WITH TIME ZONE,
+    check_out_time TIMESTAMP WITH TIME ZONE,
+    lat NUMERIC,
+    lng NUMERIC,
+    check_out_lat NUMERIC,
+    check_out_lng NUMERIC,
+    outcome TEXT,
+    type TEXT,
+    google_event_id TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ALTER TABLE public.visits ENABLE ROW LEVEL SECURITY;
+-- Migraciones: Añadir columnas faltantes si la tabla ya existía
+DO $$ BEGIN IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'google_event_id'
+) THEN
+ALTER TABLE public.visits
+ADD COLUMN google_event_id TEXT;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'purpose'
+) THEN
+ALTER TABLE public.visits
+ADD COLUMN purpose TEXT;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'check_out_lat'
+) THEN
+ALTER TABLE public.visits
+ADD COLUMN check_out_lat NUMERIC;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'check_out_lng'
+) THEN
+ALTER TABLE public.visits
+ADD COLUMN check_out_lng NUMERIC;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'outcome'
+) THEN
+ALTER TABLE public.visits
+ADD COLUMN outcome TEXT;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'type'
+) THEN
+ALTER TABLE public.visits
+ADD COLUMN type TEXT;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'lat'
+) THEN
+ALTER TABLE public.visits
+ADD COLUMN lat NUMERIC;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'visits'
+        AND column_name = 'lng'
+) THEN
+ALTER TABLE public.visits
+ADD COLUMN lng NUMERIC;
+END IF;
+END $$;
+-- Migración: Ampliar CHECK constraint de status si la tabla ya existía
+-- (DROP + ADD para actualizar constraint existente)
+DO $$ BEGIN
+ALTER TABLE public.visits DROP CONSTRAINT IF EXISTS visits_status_check;
+ALTER TABLE public.visits
+ADD CONSTRAINT visits_status_check CHECK (
+        status IN (
+            'pending',
+            'in_progress',
+            'completed',
+            'cancelled',
+            'rescheduled',
+            'scheduled'
+        )
+    );
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END $$;
+-- Políticas Visits
 DROP POLICY IF EXISTS "Users view own visits" ON visits;
 CREATE POLICY "Users view own visits" ON visits FOR
 SELECT USING (
-        user_id = auth.uid()
+        sales_rep_id = auth.uid()
         OR EXISTS (
             SELECT 1
             FROM profiles
             WHERE id = auth.uid()
-                AND role IN ('manager', 'jefe')
+                AND role IN ('manager', 'jefe', 'administrativo')
         )
     );
 DROP POLICY IF EXISTS "Users create visits" ON visits;
 CREATE POLICY "Users create visits" ON visits FOR
-INSERT WITH CHECK (auth.uid() = user_id);
+INSERT WITH CHECK (auth.uid() = sales_rep_id);
+DROP POLICY IF EXISTS "Users update visits" ON visits;
+CREATE POLICY "Users update visits" ON visits FOR
+UPDATE USING (
+        sales_rep_id = auth.uid()
+        OR EXISTS (
+            SELECT 1
+            FROM profiles
+            WHERE id = auth.uid()
+                AND role IN ('manager', 'jefe', 'administrativo')
+        )
+    );
+DROP POLICY IF EXISTS "Users delete visits" ON visits;
+CREATE POLICY "Users delete visits" ON visits FOR DELETE USING (
+    sales_rep_id = auth.uid()
+    OR EXISTS (
+        SELECT 1
+        FROM profiles
+        WHERE id = auth.uid()
+            AND role IN ('manager', 'jefe', 'administrativo')
+    )
+);
+-- ------------------------------------------------------------------------------
+-- 5.5 COTIZACIONES (QUOTATIONS)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.quotations (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    folio INTEGER,
+    client_id UUID REFERENCES public.clients(id) ON DELETE CASCADE,
+    seller_id UUID REFERENCES public.profiles(id),
+    items JSONB DEFAULT '[]'::JSONB,
+    total_amount NUMERIC DEFAULT 0,
+    status TEXT DEFAULT 'draft' CHECK (
+        status IN ('draft', 'sent', 'approved', 'rejected')
+    ),
+    comments TEXT,
+    payment_terms JSONB,
+    interaction_type TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+ALTER TABLE public.quotations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Sellers manage own quotations" ON quotations;
+CREATE POLICY "Sellers manage own quotations" ON quotations FOR ALL USING (
+    seller_id = auth.uid()
+    OR EXISTS (
+        SELECT 1
+        FROM profiles
+        WHERE id = auth.uid()
+            AND role IN ('manager', 'jefe', 'administrativo')
+    )
+);
+-- ------------------------------------------------------------------------------
+-- 5.6 UBICACIONES DE VENDEDORES (SELLER_LOCATIONS)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.seller_locations (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    seller_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    quotation_id UUID REFERENCES public.quotations(id) ON DELETE CASCADE,
+    lat NUMERIC NOT NULL,
+    lng NUMERIC NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+ALTER TABLE public.seller_locations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public manage locations" ON seller_locations;
+CREATE POLICY "Public manage locations" ON seller_locations FOR ALL USING (
+    seller_id = auth.uid()
+    OR EXISTS (
+        SELECT 1
+        FROM profiles
+        WHERE id = auth.uid()
+            AND role IN ('manager', 'jefe', 'administrativo')
+    )
+);
 -- ------------------------------------------------------------------------------
 -- 6. ÓRDENES Y VENTAS (ORDERS)
 -- ------------------------------------------------------------------------------
@@ -231,22 +545,56 @@ CREATE TABLE IF NOT EXISTS public.orders (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     client_id UUID REFERENCES public.clients(id),
     user_id UUID REFERENCES public.profiles(id),
-    -- Vendedor
     visit_id UUID REFERENCES public.visits(id),
+    quotation_id UUID REFERENCES public.quotations(id),
     status TEXT DEFAULT 'completed' CHECK (
         status IN ('draft', 'pending', 'completed', 'cancelled')
     ),
     total_amount NUMERIC DEFAULT 0,
     notes TEXT,
     payment_method TEXT,
+    interaction_type TEXT,
+    delivery_status TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+-- Migraciones Orders
+DO $$ BEGIN IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'orders'
+        AND column_name = 'quotation_id'
+) THEN
+ALTER TABLE public.orders
+ADD COLUMN quotation_id UUID REFERENCES public.quotations(id);
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'orders'
+        AND column_name = 'interaction_type'
+) THEN
+ALTER TABLE public.orders
+ADD COLUMN interaction_type TEXT;
+END IF;
+IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'orders'
+        AND column_name = 'delivery_status'
+) THEN
+ALTER TABLE public.orders
+ADD COLUMN delivery_status TEXT;
+END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS public.order_items (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     order_id UUID REFERENCES public.orders(id) ON DELETE CASCADE,
-    product_id UUID REFERENCES public.products(id),
+    product_id UUID REFERENCES public.inventory(id),
     quantity INTEGER DEFAULT 1,
     unit_price NUMERIC NOT NULL,
     total_price NUMERIC NOT NULL,
@@ -267,7 +615,36 @@ SELECT USING (
     );
 DROP POLICY IF EXISTS "Create orders" ON orders;
 CREATE POLICY "Create orders" ON orders FOR
-INSERT WITH CHECK (auth.uid() = user_id);
+INSERT WITH CHECK (
+        auth.uid() = user_id
+        OR EXISTS (
+            SELECT 1
+            FROM profiles
+            WHERE id = auth.uid()
+                AND role IN ('manager', 'jefe', 'administrativo')
+        )
+    );
+DROP POLICY IF EXISTS "Update orders" ON orders;
+CREATE POLICY "Update orders" ON orders FOR
+UPDATE USING (
+        user_id = auth.uid()
+        OR EXISTS (
+            SELECT 1
+            FROM profiles
+            WHERE id = auth.uid()
+                AND role IN ('manager', 'jefe', 'administrativo')
+        )
+    );
+DROP POLICY IF EXISTS "Delete orders" ON orders;
+CREATE POLICY "Delete orders" ON orders FOR DELETE USING (
+    user_id = auth.uid()
+    OR EXISTS (
+        SELECT 1
+        FROM profiles
+        WHERE id = auth.uid()
+            AND role IN ('manager', 'jefe', 'administrativo')
+    )
+);
 DROP POLICY IF EXISTS "View items" ON order_items;
 CREATE POLICY "View items" ON order_items FOR
 SELECT USING (
@@ -291,6 +668,7 @@ SELECT USING (
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.delivery_routes (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    name TEXT,
     dispatch_date DATE NOT NULL DEFAULT CURRENT_DATE,
     driver_id UUID REFERENCES public.profiles(id) ON DELETE
     SET NULL,
@@ -299,6 +677,18 @@ CREATE TABLE IF NOT EXISTS public.delivery_routes (
         created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 ALTER TABLE public.delivery_routes ENABLE ROW LEVEL SECURITY;
+-- Migración: Añadir columna name si no existe
+DO $$ BEGIN IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'delivery_routes'
+        AND column_name = 'name'
+) THEN
+ALTER TABLE public.delivery_routes
+ADD COLUMN name TEXT;
+END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS public.route_items (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     route_id UUID REFERENCES public.delivery_routes(id) ON DELETE CASCADE,
@@ -358,7 +748,7 @@ UPDATE USING (
         )
     );
 -- ------------------------------------------------------------------------------
--- 8. REGISTROS (LOGS)
+-- 8. REGISTROS DE LLAMADAS (CALL_LOGS)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.call_logs (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -370,13 +760,44 @@ CREATE TABLE IF NOT EXISTS public.call_logs (
             'no_contesto',
             'ocupado',
             'equivocado',
-            'buzon'
+            'buzon',
+            'iniciada'
         )
     ),
+    interaction_type TEXT,
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 ALTER TABLE public.call_logs ENABLE ROW LEVEL SECURITY;
+-- Migraciones Call Logs
+DO $$ BEGIN IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+        AND table_name = 'call_logs'
+        AND column_name = 'interaction_type'
+) THEN
+ALTER TABLE public.call_logs
+ADD COLUMN interaction_type TEXT;
+END IF;
+END $$;
+-- Migración: Ampliar CHECK de status para incluir 'iniciada'
+DO $$ BEGIN
+ALTER TABLE public.call_logs DROP CONSTRAINT IF EXISTS call_logs_status_check;
+ALTER TABLE public.call_logs
+ADD CONSTRAINT call_logs_status_check CHECK (
+        status IN (
+            'contestada',
+            'no_contesto',
+            'ocupado',
+            'equivocado',
+            'buzon',
+            'iniciada'
+        )
+    );
+EXCEPTION
+WHEN OTHERS THEN NULL;
+END $$;
 DROP POLICY IF EXISTS "View logs" ON call_logs;
 CREATE POLICY "View logs" ON call_logs FOR
 SELECT USING (
@@ -385,16 +806,83 @@ SELECT USING (
             SELECT 1
             FROM profiles
             WHERE id = auth.uid()
-                AND role IN ('manager', 'jefe')
+                AND role IN ('manager', 'jefe', 'administrativo')
         )
     );
 DROP POLICY IF EXISTS "Insert logs" ON call_logs;
 CREATE POLICY "Insert logs" ON call_logs FOR
 INSERT WITH CHECK (auth.uid() = user_id);
 -- ------------------------------------------------------------------------------
--- 9. CONFIGURACIÓN FINAL DE STORAGE (OPCIONAL)
+-- 9. REGISTROS DE CORREOS (EMAIL_LOGS) - NUEVA
 -- ------------------------------------------------------------------------------
--- Intenta crear bucket para evidencia si la extensión storage está disponible
+CREATE TABLE IF NOT EXISTS public.email_logs (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    client_id UUID REFERENCES public.clients(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    subject TEXT,
+    snippet TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+ALTER TABLE public.email_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "View email logs" ON email_logs;
+CREATE POLICY "View email logs" ON email_logs FOR
+SELECT USING (
+        user_id = auth.uid()
+        OR EXISTS (
+            SELECT 1
+            FROM profiles
+            WHERE id = auth.uid()
+                AND role IN ('manager', 'jefe', 'administrativo')
+        )
+    );
+DROP POLICY IF EXISTS "Insert email logs" ON email_logs;
+CREATE POLICY "Insert email logs" ON email_logs FOR
+INSERT WITH CHECK (auth.uid() = user_id);
+-- ------------------------------------------------------------------------------
+-- 10. METAS DE VENTAS (GOALS) - NUEVA
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.goals (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    target_amount NUMERIC NOT NULL DEFAULT 0,
+    commission_rate NUMERIC DEFAULT 0.01,
+    month INTEGER NOT NULL CHECK (
+        month BETWEEN 1 AND 12
+    ),
+    year INTEGER NOT NULL CHECK (year >= 2024),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id, month, year)
+);
+ALTER TABLE public.goals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "View goals" ON goals;
+CREATE POLICY "View goals" ON goals FOR
+SELECT USING (
+        user_id = auth.uid()
+        OR EXISTS (
+            SELECT 1
+            FROM profiles
+            WHERE id = auth.uid()
+                AND role IN ('manager', 'jefe', 'administrativo')
+        )
+    );
+DROP POLICY IF EXISTS "Manage goals" ON goals;
+CREATE POLICY "Manage goals" ON goals FOR ALL USING (
+    EXISTS (
+        SELECT 1
+        FROM profiles
+        WHERE id = auth.uid()
+            AND role IN ('manager', 'jefe', 'administrativo')
+    )
+);
+DROP POLICY IF EXISTS "Users insert own goals" ON goals;
+CREATE POLICY "Users insert own goals" ON goals FOR
+INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users update own goals" ON goals;
+CREATE POLICY "Users update own goals" ON goals FOR
+UPDATE USING (auth.uid() = user_id);
+-- ------------------------------------------------------------------------------
+-- 11. CONFIGURACIÓN FINAL DE STORAGE (OPCIONAL)
+-- ------------------------------------------------------------------------------
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('evidence-photos', 'evidence-photos', true) ON CONFLICT (id) DO NOTHING;
 DROP POLICY IF EXISTS "Public Access Evidence" ON storage.objects;
@@ -407,5 +895,5 @@ INSERT WITH CHECK (
         AND auth.role() = 'authenticated'
     );
 -- ==============================================================================
--- FIN DEL SCRIPT
+-- FIN DEL SCRIPT - Todas las tablas sincronizadas con el frontend
 -- ==============================================================================

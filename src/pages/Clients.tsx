@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
 import { Search, Plus, MapPin, ChevronRight, Filter, Phone, Mail, CheckCircle2, Trash2, Building2, Pencil, Send, Paperclip, X, FileText, Upload, AlertCircle, Users } from 'lucide-react';
-import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { Database } from '../types/supabase';
 import { Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
@@ -110,7 +110,8 @@ const ClientsContent = () => {
         lng: SANTIAGO_CENTER.lng,
         notes: '',
         giro: '',
-        comuna: ''
+        comuna: '',
+        office: ''
     });
 
     // Maps State for Modal
@@ -319,7 +320,8 @@ const ClientsContent = () => {
                 lng: clientToEdit.lng ?? SANTIAGO_CENTER.lng,
                 notes: clientToEdit.notes || '',
                 giro: clientToEdit.giro || '',
-                comuna: clientToEdit.comuna || ''
+                comuna: clientToEdit.comuna || '',
+                office: clientToEdit.office || ''
             });
             if (clientToEdit.lat && clientToEdit.lng) {
                 setManualLocation({ lat: clientToEdit.lat, lng: clientToEdit.lng });
@@ -338,7 +340,8 @@ const ClientsContent = () => {
                 lng: SANTIAGO_CENTER.lng,
                 notes: '',
                 giro: '',
-                comuna: ''
+                comuna: '',
+                office: ''
             });
             setManualLocation(null);
         }
@@ -554,7 +557,8 @@ const ClientsContent = () => {
                         lng: finalLng,
                         notes: clientForm.notes,
                         giro: clientForm.giro,
-                        comuna: clientForm.comuna
+                        comuna: clientForm.comuna,
+                        office: clientForm.office
                     })
                     .eq('id', isEditing);
 
@@ -593,7 +597,8 @@ const ClientsContent = () => {
                         status: 'active',
                         zone: 'Santiago',
                         giro: clientForm.giro,
-                        comuna: clientForm.comuna
+                        comuna: clientForm.comuna,
+                        office: clientForm.office
                     });
 
                 if (insertError) throw insertError;
@@ -622,22 +627,27 @@ const ClientsContent = () => {
         }
     };
 
-    const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setImporting(true);
-        Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: async (results) => {
-                const rows = results.data as any[];
+        const reader = new FileReader();
+
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const rows = XLSX.utils.sheet_to_json(ws) as any[];
+
                 let successCount = 0;
                 let errorCount = 0;
                 let errors: string[] = [];
 
                 if (rows.length === 0) {
-                    alert('El archivo CSV está vacío.');
+                    alert('El archivo está vacío.');
                     setImporting(false);
                     return;
                 }
@@ -648,20 +658,19 @@ const ClientsContent = () => {
                     return;
                 }
 
-                // Prepare data for bulk insert
                 const clientsToInsert: any[] = [];
 
                 for (const row of rows) {
-                    // Map CSV headers to DB columns
-                    const name = row['Nombre']?.trim();
-                    const rut = row['Rut'] ? normalizeRut(row['Rut']) : null;
-                    const giro = row['Giro']?.trim();
-                    const address = row['Dirección']?.trim();
-                    const comuna = row['Comuna']?.trim() || row['Ciudad']?.trim();
-                    const phone = row['Teléfono']?.trim();
-                    const email = row['Email']?.trim();
-                    const purchase_contact = row['Contacto']?.trim();
-                    const sellerEmail = row['Vendedor']?.trim();
+                    const name = row['Nombre']?.toString().trim();
+                    const rut = row['Rut'] ? normalizeRut(row['Rut'].toString()) : null;
+                    const giro = row['Giro']?.toString().trim();
+                    const address = row['Dirección']?.toString().trim();
+                    const office = row['Oficina']?.toString().trim() || row['Depto']?.toString().trim();
+                    const comuna = row['Comuna']?.toString().trim() || row['Ciudad']?.toString().trim();
+                    const phone = row['Teléfono']?.toString().trim();
+                    const email = row['Email']?.toString().trim();
+                    const purchase_contact = row['Contacto']?.toString().trim();
+                    const sellerEmail = row['Vendedor']?.toString().trim();
 
                     if (!name) {
                         errorCount++;
@@ -669,8 +678,7 @@ const ClientsContent = () => {
                         continue;
                     }
 
-                    // Resolve Seller
-                    let assignedSellerId = profile?.id; // Default to current user
+                    let assignedSellerId = profile?.id;
                     if (sellerEmail) {
                         const foundProfile = profiles.find(p => p.email?.toLowerCase() === sellerEmail.toLowerCase());
                         if (foundProfile) {
@@ -700,12 +708,12 @@ const ClientsContent = () => {
                         zone: 'Santiago',
                         lat: SANTIAGO_CENTER.lat,
                         lng: SANTIAGO_CENTER.lng,
-                        notes: 'Importado vía CSV'
+                        office: office,
+                        notes: 'Importado vía Excel'
                     });
                 }
 
                 if (clientsToInsert.length > 0) {
-                    // Bulk insert with check
                     for (const client of clientsToInsert) {
                         try {
                             if (client.rut) {
@@ -728,18 +736,32 @@ const ClientsContent = () => {
                 }
 
                 alert(`Importación Finalizada.\n\n✅ Exitosos: ${successCount}\n❌ Errores: ${errorCount}\n\n${errorCount > 0 ? 'Revisa la consola para detalles de errores.' : ''}`);
-                if (errors.length > 0) console.error("CSV Import Errors:", errors);
+                if (errors.length > 0) console.error("Excel Import Errors:", errors);
 
                 setImporting(false);
                 if (csvInputRef.current) csvInputRef.current.value = '';
                 fetchClients();
-            },
-            error: (err) => {
-                console.error("CSV Parse Error:", err);
-                alert("Error al leer el archivo CSV.");
+
+            } catch (err) {
+                console.error("Excel Parse Error:", err);
+                alert("Error al leer el archivo Excel. Asegúrate de que sea un archivo .xlsx válido.");
                 setImporting(false);
             }
-        });
+        };
+
+        reader.readAsBinaryString(file);
+    };
+
+    const downloadTemplate = () => {
+        const headers = ['Nombre', 'Rut', 'Giro', 'Dirección', 'Oficina', 'Comuna', 'Teléfono', 'Email', 'Contacto', 'Vendedor'];
+        const data = [
+            ['Exemplo Dental Ltda', '76.123.456-7', 'Clinica Dental', 'Av Providencia 1234, Providencia', 'Oficina 402', 'Providencia', '+56912345678', 'contacto@clinica.cl', 'Juan Perez', profile?.email || 'vendedor@empresa.cl']
+        ];
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+        XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+        XLSX.writeFile(wb, 'plantilla_clientes_crm.xlsx');
     };
 
     const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
@@ -792,23 +814,31 @@ const ClientsContent = () => {
                         <>
                             <input
                                 type="file"
-                                accept=".csv"
+                                accept=".xlsx, .xls"
                                 ref={csvInputRef}
-                                onChange={handleCSVUpload}
+                                onChange={handleFileUpload}
                                 className="hidden"
                             />
                             <button
+                                onClick={downloadTemplate}
+                                className="bg-green-50 text-green-700 px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-green-100 transition-all text-sm"
+                                title="Descargar Plantilla Excel"
+                            >
+                                <FileText size={18} className="mr-2" />
+                                Plantilla
+                            </button>
+                            <button
                                 onClick={() => csvInputRef.current?.click()}
                                 disabled={importing}
-                                className="bg-indigo-50 text-indigo-600 px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-indigo-100 transition-all text-sm disabled:opacity-50"
-                                title="Importar CSV"
+                                className="bg-green-600 text-white px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-green-700 shadow-lg shadow-green-100 transition-all text-sm disabled:opacity-50"
+                                title="Importar Excel"
                             >
                                 {importing ? (
-                                    <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent animate-spin rounded-full mr-2"></div>
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent animate-spin rounded-full mr-2"></div>
                                 ) : (
                                     <Upload size={18} className="mr-2" />
                                 )}
-                                {importing ? '...' : 'Importar'}
+                                {importing ? '...' : 'Importar Excel'}
                             </button>
                         </>
                     )}
@@ -931,7 +961,7 @@ const ClientsContent = () => {
                                         {(client.address || client.comuna) && (
                                             <div className="flex items-start text-xs text-gray-500 font-medium bg-gray-50 p-3 rounded-xl">
                                                 <MapPin size={14} className="mr-2 mt-0.5 text-indigo-500 shrink-0" />
-                                                <span className="line-clamp-2">{[client.address, client.comuna].filter(Boolean).join(', ')}</span>
+                                                <span className="line-clamp-2">{[client.address, client.office ? `Of: ${client.office}` : null, client.comuna].filter(Boolean).join(', ')}</span>
                                             </div>
                                         )}
                                         <div className="grid grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
@@ -1237,17 +1267,26 @@ const ClientsContent = () => {
                                                 />
                                             </div>
                                         </div>
-                                        <div className="space-y-2">
-                                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Dirección Comercial <span className="text-red-500">*</span></label>
-                                            <div className="relative">
-                                                {/* <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 z-10" size={18} /> */}
-                                                <div
-                                                    ref={inputRef as any} // Cast to any because we attach a web component here div
-                                                    className="w-full"
-                                                >
-                                                    {/* The Google Places Autocomplete Element will be injected here */}
+                                        <div className="grid grid-cols-3 gap-5">
+                                            <div className="col-span-2 space-y-2">
+                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Dirección Comercial <span className="text-red-500">*</span></label>
+                                                <div className="relative">
+                                                    <div
+                                                        ref={inputRef as any}
+                                                        className="w-full"
+                                                    >
+                                                    </div>
                                                 </div>
-                                                {/* Hidden input to keep form state valid if needed, or just rely on state */}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Oficina / Depto</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Ej: Of 402"
+                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                    value={clientForm.office}
+                                                    onChange={e => setClientForm({ ...clientForm, office: e.target.value })}
+                                                />
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-5">

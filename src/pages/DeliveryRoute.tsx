@@ -131,7 +131,7 @@ const DeliveryRoute: React.FC = () => {
                     id, status, sequence_order, notes,
                     order:orders (
                         id, folio, total_amount, delivery_status,
-                        client:clients (name, address, phone, lat, lng)
+                        client:clients (name, address, phone, lat, lng, office)
                     )
                 `)
                 .in('route_id', routeIds)
@@ -387,6 +387,7 @@ const DeliveryRoute: React.FC = () => {
                                 <p className="text-sm text-gray-500 mt-1 flex items-start gap-2">
                                     <MapPin size={14} className="mt-0.5 shrink-0" />
                                     {order.client.address || "Sin dirección"}
+                                    {order.client.office && <span className="ml-1 text-indigo-500 font-bold">({order.client.office})</span>}
                                 </p>
                                 {order.client.phone && (
                                     <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">

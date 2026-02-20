@@ -27,6 +27,7 @@ export interface Database {
                     notes: string | null
                     giro: string | null
                     comuna: string | null
+                    office: string | null
                 }
                 Insert: {
                     address?: string | null
@@ -44,6 +45,7 @@ export interface Database {
                     notes?: string | null
                     giro?: string | null
                     comuna?: string | null
+                    office?: string | null
                 }
                 Update: {
                     address?: string | null
@@ -61,6 +63,7 @@ export interface Database {
                     notes?: string | null
                     giro?: string | null
                     comuna?: string | null
+                    office?: string | null
                 }
             }
             inventory: {
