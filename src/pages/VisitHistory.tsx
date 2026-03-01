@@ -56,7 +56,7 @@ const getVisitStatusClass = (status: string | null | undefined) => {
 };
 
 const VisitHistory = () => {
-    const { profile, isSupervisor, effectiveRole } = useUser();
+    const { profile, isSupervisor, effectiveRole, hasPermission, permissions } = useUser();
     const [visits, setVisits] = useState<VisitHistoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -64,13 +64,19 @@ const VisitHistory = () => {
 
     useEffect(() => {
         fetchVisits();
-    }, [dateFilter, profile]);
+    }, [dateFilter, profile?.id, effectiveRole, isSupervisor, permissions]);
 
     const fetchVisits = async () => {
         if (!profile?.id) return;
         setLoading(true);
 
         try {
+            const canViewAllVisits = effectiveRole === 'admin'
+                || effectiveRole === 'jefe'
+                || isSupervisor
+                || hasPermission('VIEW_TEAM_STATS')
+                || hasPermission('VIEW_ALL_TEAM_STATS');
+
             let query = supabase
                 .from('visits')
                 .select(`
@@ -80,8 +86,8 @@ const VisitHistory = () => {
                 `)
                 .order('check_in_time', { ascending: false });
 
-            // If not supervisor, only show own visits
-            if (!isSupervisor) {
+            // If user cannot view all, show only own visits.
+            if (!canViewAllVisits) {
                 query = query.eq('sales_rep_id', profile.id);
             }
 
