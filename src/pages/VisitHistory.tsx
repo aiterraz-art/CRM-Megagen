@@ -30,6 +30,7 @@ interface VisitHistoryItem {
     check_out_lng: number | null;
     client_name: string;
     client_status: string;
+    doctor_name: string | null;
     sales_rep_name: string;
 }
 
@@ -81,7 +82,7 @@ const VisitHistory = () => {
                 .from('visits')
                 .select(`
                     *,
-                    clients (name, status),
+                    clients (name, status, purchase_contact),
                     profiles:sales_rep_id (full_name, email)
                 `)
                 .order('check_in_time', { ascending: false });
@@ -114,6 +115,7 @@ const VisitHistory = () => {
                 check_out_lng: v.check_out_lng,
                 client_name: v.clients?.name || 'Cliente Desconocido',
                 client_status: v.clients?.status || 'active',
+                doctor_name: v.clients?.purchase_contact || null,
                 sales_rep_name: v.profiles?.full_name || v.profiles?.email?.split('@')[0] || 'Vendedor'
             }));
 
@@ -142,6 +144,7 @@ const VisitHistory = () => {
 
     const filteredVisits = visits.filter(v =>
         v.client_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (v.doctor_name && v.doctor_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
         v.sales_rep_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (v.notes && v.notes.toLowerCase().includes(searchTerm.toLowerCase()))
     );
@@ -227,6 +230,9 @@ const VisitHistory = () => {
                                                     <p className="font-black text-gray-900 leading-tight">{visit.client_name}</p>
                                                     <p className="text-xs font-bold text-gray-400 mt-0.5 flex items-center">
                                                         <span className="uppercase tracking-tighter mr-2">{visit.sales_rep_name}</span>
+                                                        {visit.doctor_name && (
+                                                            <span className="text-[10px] font-black text-indigo-600 mr-2">Dr(a). {visit.doctor_name}</span>
+                                                        )}
                                                         {visit.client_status === 'prospect' && (
                                                             <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest">Visita en Frío</span>
                                                         )}
