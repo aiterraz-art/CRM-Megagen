@@ -128,6 +128,7 @@ const ClientsContent = () => {
     // Places Autocomplete Setup
     const placesLib = useMapsLibrary('places');
     const inputRef = useRef<HTMLInputElement>(null);
+    const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
 
     // PERSISTENCE LOGIC: Save state to LocalStorage to prevent data loss on mobile app switch
     useEffect(() => {
@@ -168,91 +169,54 @@ const ClientsContent = () => {
     useEffect(() => {
         if (!placesLib || !inputRef.current || !isModalOpen) return;
 
-        // Create the PlaceAutocompleteElement using the New Places API
-        // @ts-ignore - TS might not know about this element yet
-        const autocompleteElement = new placesLib.PlaceAutocompleteElement({
-            componentRestrictions: { country: 'cl' }
+        const autocomplete = new placesLib.Autocomplete(inputRef.current, {
+            componentRestrictions: { country: 'cl' },
+            fields: ['formatted_address', 'geometry', 'address_components'],
+            types: ['address']
         });
 
-        // Append it to our container
-        inputRef.current.appendChild(autocompleteElement);
+        autocompleteRef.current = autocomplete;
 
-        // INITIALIZE VALUE FROM STATE (Crucial for Editing)
-        if (clientForm.address) {
-            // @ts-ignore
-            autocompleteElement.value = clientForm.address;
-        }
+        const listener = autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (!place) return;
 
-        // Add event listener for MANUAL input changes to sync state
-        // @ts-ignore
-        autocompleteElement.addEventListener('change', (e: any) => {
-            // Always sync, even if empty, to allow clearing address
-            setClientForm(prev => ({ ...prev, address: e.target.value || '' }));
-        });
+            const formattedAddress = place.formatted_address || inputRef.current?.value || '';
+            const lat = place.geometry?.location?.lat();
+            const lng = place.geometry?.location?.lng();
 
-        // Add event listener for selection
-        const listener = autocompleteElement.addEventListener('gmp-places-select', async (event: any) => {
-            const place = event.place;
+            let comuna = '';
+            const components = place.address_components;
+            if (components) {
+                const comunaComponent = components.find((c: any) => c.types.includes('administrative_area_level_3'))
+                    || components.find((c: any) => c.types.includes('locality'));
+                comuna = comunaComponent?.long_name || comunaComponent?.short_name || '';
+            }
 
-            // We need to fetch details because the event might not have all fields populated by default
-            // depending on the API version, but 'place.fetchFields' is the way now.
-            await place.fetchFields({
-                fields: ['location', 'formattedAddress', 'addressComponents']
-            });
-
-            if (place.location && place.formattedAddress) {
-                const lat = place.location.lat();
-                const lng = place.location.lng();
-
-                let comuna = '';
-
-                // Strategy: Prioritize Address Components for cleaner data
-                // In Google Maps (Chile), 'administrative_area_level_3' corresponds exactly to "Comuna"
-                const components = place.addressComponents;
-                if (components) {
-                    const comunaComponent = components.find((c: any) => c.types.includes('administrative_area_level_3'))
-                        || components.find((c: any) => c.types.includes('locality')); // Fallback
-
-                    comuna = comunaComponent?.longText || comunaComponent?.shortText || '';
+            if (!comuna && formattedAddress) {
+                const parts = formattedAddress.split(',');
+                if (parts.length >= 2) {
+                    comuna = parts[parts.length - 2].replace(/\d+/g, '').trim();
                 }
+            }
 
-                // Fallback Strategy: Extract from formattedAddress if components failed
-                if (!comuna && place.formattedAddress) {
-                    const parts = place.formattedAddress.split(',');
-                    // Usually: "Street Number, Comuna, Region"
-                    if (parts.length >= 2) {
-                        // Takes the element before the last one (Region/Country) or second to last
-                        // Users perception: "Name before city"
-                        // Trying to capture the middle part which is usually the Comuna in "Av Providencia 123, Providencia, Santiago"
-                        comuna = parts[parts.length - 2].trim();
+            setClientForm((prev) => ({
+                ...prev,
+                address: formattedAddress || prev.address,
+                lat: typeof lat === 'number' ? lat : prev.lat,
+                lng: typeof lng === 'number' ? lng : prev.lng,
+                comuna: comuna || prev.comuna
+            }));
 
-                        // Clean up if it contains numbers (Zip Code)
-                        comuna = comuna.replace(/\d+/g, '').trim();
-                    }
-                }
-
-                setClientForm(prev => ({
-                    ...prev,
-                    address: place.formattedAddress || prev.address,
-                    lat,
-                    lng,
-                    comuna
-                }));
-                // Also update the map and manual pin to this location
+            if (typeof lat === 'number' && typeof lng === 'number') {
                 setManualLocation({ lat, lng });
             }
         });
 
         return () => {
-            // Clean up: remove the listener and the element
-            // @ts-ignore
-            if (autocompleteElement) {
-                // @ts-ignore
-                autocompleteElement.removeEventListener('gmp-places-select', listener);
-                if (inputRef.current) {
-                    inputRef.current.innerHTML = ''; // Remove the element from DOM
-                }
-            }
+            listener.remove();
+            google.maps.event.clearInstanceListeners(autocomplete);
+            autocompleteRef.current = null;
         };
     }, [placesLib, isModalOpen]);
 
@@ -496,17 +460,8 @@ const ClientsContent = () => {
         setSubmitting(true);
         const normalizedRut = normalizeRut(clientForm.rut);
 
-        // FORCE READ ADDRESS FROM DOM (Fix for PlaceAutocompleteElement state verify)
-        let finalAddress = clientForm.address;
-
-        // Always try to read from the live DOM element to catch latest typing
-        if (inputRef.current) {
-            const domElement = inputRef.current.querySelector('gmp-place-autocomplete') as any;
-            if (domElement && domElement.value) {
-                console.log('📍 Reading Address directly from properties:', domElement.value);
-                finalAddress = domElement.value;
-            }
-        }
+        // Always try to read from the input DOM value to capture latest typing.
+        let finalAddress = (inputRef.current?.value || clientForm.address || '').trim();
 
         console.log('💾 SAVING CLIENT - Payload Address:', finalAddress);
 
@@ -1332,11 +1287,15 @@ const ClientsContent = () => {
                                             <div className="col-span-2 space-y-2">
                                                 <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Dirección Comercial <span className="text-red-500">*</span></label>
                                                 <div className="relative">
-                                                    <div
-                                                        ref={inputRef as any}
-                                                        className="w-full"
-                                                    >
-                                                    </div>
+                                                    <input
+                                                        ref={inputRef}
+                                                        required
+                                                        type="text"
+                                                        placeholder="Escribe una dirección y selecciónala desde Google Maps"
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                        value={clientForm.address}
+                                                        onChange={e => setClientForm({ ...clientForm, address: e.target.value })}
+                                                    />
                                                 </div>
                                             </div>
                                             <div className="space-y-2">
@@ -1446,7 +1405,7 @@ const ClientsContent = () => {
 
 const Clients = () => {
     return (
-        <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+        <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={['places']}>
             <ClientsContent />
         </APIProvider>
     );

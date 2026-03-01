@@ -55,3 +55,8 @@
 .custom-pin {
   filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
 }
+
+/* Keep Google Places dropdown above modal overlays */
+.pac-container {
+  z-index: 9999 !important;
+}
