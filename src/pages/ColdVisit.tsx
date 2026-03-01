@@ -7,6 +7,25 @@ import { useVisit } from '../contexts/VisitContext';
 import { queueVisitCheckinLocation } from '../services/locationQueue';
 import { User, MapPin, Building2, ChevronRight, Stethoscope } from 'lucide-react';
 
+const formatGpsAddress = (lat: number, lng: number) => `Ubicación GPS (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
+
+const reverseGeocodeAddress = async (lat: number, lng: number): Promise<string | null> => {
+    try {
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&accept-language=es`;
+        const response = await fetch(url, {
+            headers: {
+                Accept: 'application/json'
+            }
+        });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        const label = typeof payload?.display_name === 'string' ? payload.display_name.trim() : '';
+        return label || null;
+    } catch {
+        return null;
+    }
+};
+
 const ColdVisit = () => {
     const navigate = useNavigate();
     const { profile } = useUser();
@@ -17,7 +36,7 @@ const ColdVisit = () => {
     const [doctorName, setDoctorName] = useState('');
     const [address, setAddress] = useState('');
     const [loading, setLoading] = useState(false);
-    const [location, setLocation] = useState<{ lat: number, lng: number } | null>(null);
+    const [location, setLocation] = useState<{ lat: number, lng: number, accuracy: number } | null>(null);
     const [gpsReady, setGpsReady] = useState(false);
 
     // Get location on mount
@@ -25,11 +44,12 @@ const ColdVisit = () => {
         let mounted = true;
         const loadLocation = async () => {
             try {
-                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 400 });
+                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 15000, retries: 2, minAccuracyMeters: 200 });
                 if (!mounted) return;
                 setLocation({
                     lat: pos.coords.latitude,
-                    lng: pos.coords.longitude
+                    lng: pos.coords.longitude,
+                    accuracy: pos.coords.accuracy
                 });
                 setGpsReady(true);
             } catch (error) {
@@ -72,13 +92,14 @@ const ColdVisit = () => {
                 try {
                     const gpsPosition = await checkGPSConnection({
                         showAlert: false,
-                        timeoutMs: 12000,
-                        retries: 1,
-                        minAccuracyMeters: 600
+                        timeoutMs: 15000,
+                        retries: 2,
+                        minAccuracyMeters: 200
                     });
                     currentLocation = {
                         lat: gpsPosition.coords.latitude,
-                        lng: gpsPosition.coords.longitude
+                        lng: gpsPosition.coords.longitude,
+                        accuracy: gpsPosition.coords.accuracy
                     };
                     setLocation(currentLocation);
                     setGpsReady(true);
@@ -87,17 +108,27 @@ const ColdVisit = () => {
                 }
             }
 
+            if (!currentLocation) {
+                alert('No fue posible obtener GPS confiable para registrar la visita en frío. Activa la ubicación y vuelve a intentar.');
+                return;
+            }
+
+            let resolvedAddress = addressClean;
+            if (!resolvedAddress) {
+                resolvedAddress = (await reverseGeocodeAddress(currentLocation.lat, currentLocation.lng)) || formatGpsAddress(currentLocation.lat, currentLocation.lng);
+            }
+
             // 1. Create "Prospect" Client
             const newClient = {
                 name: clinicNameClean,
                 purchase_contact: doctorNameClean,
-                address: addressClean || null,
+                address: resolvedAddress,
                 lat: currentLocation?.lat ?? null,
                 lng: currentLocation?.lng ?? null,
                 status: 'prospect', // New status for Cold Visits
                 created_by: profile.id,
                 zone: profile.zone || 'Sin Zona',
-                notes: `Visita en Frío iniciada el ${new Date().toLocaleDateString()}${currentLocation ? ' (con GPS)' : ' (GPS en cola)'}`
+                notes: `Visita en Frío iniciada el ${new Date().toLocaleDateString()} (con GPS ±${Math.round(currentLocation.accuracy)}m)`
             };
 
             const { data: createdClient, error: clientError } = await supabase
@@ -113,19 +144,12 @@ const ColdVisit = () => {
             const visit = await startVisit(createdClient.id);
 
             if (visit) {
-                if (currentLocation) {
-                    await queueVisitCheckinLocation({
-                        visit_id: visit.id,
-                        seller_id: profile.id,
-                        lat: currentLocation.lat,
-                        lng: currentLocation.lng
-                    });
-                } else {
-                    await queueVisitCheckinLocation({
-                        visit_id: visit.id,
-                        seller_id: profile.id
-                    });
-                }
+                await queueVisitCheckinLocation({
+                    visit_id: visit.id,
+                    seller_id: profile.id,
+                    lat: currentLocation.lat,
+                    lng: currentLocation.lng
+                });
                 // 3. Redirect to Visit Log
                 navigate(`/visit/${createdClient.id}`);
             } else {
@@ -222,10 +246,10 @@ const ColdVisit = () => {
 
             <div className="text-center mt-6">
                 <p className="text-xs text-gray-400 font-medium">
-                    Se intentará registrar la ubicación GPS automáticamente.
+                    Se requiere GPS para iniciar visita en frío y registrar ubicación real.
                 </p>
                 <p className={`text-[10px] font-bold mt-1 flex items-center justify-center ${gpsReady ? 'text-green-500' : 'text-amber-500'}`}>
-                    <MapPin size={10} className="mr-1" /> {gpsReady ? 'GPS Activo' : 'GPS no disponible, se enviará en cola automáticamente'}
+                    <MapPin size={10} className="mr-1" /> {gpsReady ? 'GPS Activo' : 'GPS no disponible'}
                 </p>
             </div>
 

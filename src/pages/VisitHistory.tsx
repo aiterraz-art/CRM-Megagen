@@ -33,6 +33,28 @@ interface VisitHistoryItem {
     sales_rep_name: string;
 }
 
+const normalizeVisitStatus = (status: string | null | undefined) => (status || '').toLowerCase();
+
+const getVisitStatusLabel = (status: string | null | undefined) => {
+    const normalized = normalizeVisitStatus(status);
+    if (normalized === 'completed') return 'Finalizada';
+    if (normalized === 'in_progress' || normalized === 'in-progress') return 'En Curso';
+    if (normalized === 'cancelled') return 'Cancelada';
+    if (normalized === 'scheduled' || normalized === 'pending') return 'Agendada';
+    if (normalized === 'rescheduled') return 'Reagendada';
+    return status || 'Sin estado';
+};
+
+const getVisitStatusClass = (status: string | null | undefined) => {
+    const normalized = normalizeVisitStatus(status);
+    if (normalized === 'completed') return 'bg-green-100 text-green-700';
+    if (normalized === 'in_progress' || normalized === 'in-progress') return 'bg-blue-100 text-blue-700 animate-pulse';
+    if (normalized === 'cancelled') return 'bg-gray-100 text-gray-500';
+    if (normalized === 'scheduled' || normalized === 'pending') return 'bg-purple-100 text-purple-700';
+    if (normalized === 'rescheduled') return 'bg-amber-100 text-amber-700';
+    return 'bg-gray-100 text-gray-500';
+};
+
 const VisitHistory = () => {
     const { profile, isSupervisor, effectiveRole } = useUser();
     const [visits, setVisits] = useState<VisitHistoryItem[]>([]);
@@ -54,7 +76,7 @@ const VisitHistory = () => {
                 .select(`
                     *,
                     clients (name, status),
-                    profiles:sales_rep_id (email)
+                    profiles:sales_rep_id (full_name, email)
                 `)
                 .order('check_in_time', { ascending: false });
 
@@ -65,9 +87,9 @@ const VisitHistory = () => {
 
             // Date filter (simple for now)
             if (dateFilter) {
-                const startOfDay = `${dateFilter}T00:00:00Z`;
-                const endOfDay = `${dateFilter}T23:59:59Z`;
-                query = query.gte('check_in_time', startOfDay).lte('check_in_time', endOfDay);
+                const startOfDay = new Date(`${dateFilter}T00:00:00`);
+                const endOfDay = new Date(`${dateFilter}T23:59:59.999`);
+                query = query.gte('check_in_time', startOfDay.toISOString()).lte('check_in_time', endOfDay.toISOString());
             }
 
             const { data, error } = await query;
@@ -86,7 +108,7 @@ const VisitHistory = () => {
                 check_out_lng: v.check_out_lng,
                 client_name: v.clients?.name || 'Cliente Desconocido',
                 client_status: v.clients?.status || 'active',
-                sales_rep_name: v.profiles?.email?.split('@')[0] || 'Vendedor'
+                sales_rep_name: v.profiles?.full_name || v.profiles?.email?.split('@')[0] || 'Vendedor'
             }));
 
             setVisits(transformedData);
@@ -97,8 +119,14 @@ const VisitHistory = () => {
         }
     };
 
-    const calculateDuration = (start: string, end: string | null) => {
-        if (!end) return 'En curso...';
+    const calculateDuration = (start: string, end: string | null, status: string) => {
+        const normalized = normalizeVisitStatus(status);
+        if (!end) {
+            if (normalized === 'cancelled') return 'Cancelada';
+            if (normalized === 'scheduled' || normalized === 'pending') return 'Agendada';
+            if (normalized === 'rescheduled') return 'Reagendada';
+            return 'En curso...';
+        }
         const minutes = differenceInMinutes(parseISO(end), parseISO(start));
         if (minutes < 60) return `${minutes} min`;
         const hours = Math.floor(minutes / 60);
@@ -204,11 +232,11 @@ const VisitHistory = () => {
                                             <div className="flex flex-col space-y-1">
                                                 <div className="flex items-center text-sm font-bold text-gray-700">
                                                     <Clock size={14} className="mr-2 text-gray-400" />
-                                                    <span>{format(parseISO(visit.check_in_time), 'HH:mm')} - {visit.check_out_time ? format(parseISO(visit.check_out_time), 'HH:mm') : '??'}</span>
+                                                    <span>{format(parseISO(visit.check_in_time), 'HH:mm')} - {visit.check_out_time ? format(parseISO(visit.check_out_time), 'HH:mm') : (normalizeVisitStatus(visit.status) === 'in_progress' || normalizeVisitStatus(visit.status) === 'in-progress' ? '??' : '--')}</span>
                                                 </div>
                                                 <div className="flex items-center text-xs font-black text-dental-600 bg-dental-50 w-fit px-2 py-1 rounded-lg uppercase tracking-widest">
                                                     <Timer size={12} className="mr-1.5" />
-                                                    <span>{calculateDuration(visit.check_in_time, visit.check_out_time)}</span>
+                                                    <span>{calculateDuration(visit.check_in_time, visit.check_out_time, visit.status)}</span>
                                                 </div>
                                             </div>
                                         </td>
@@ -222,16 +250,22 @@ const VisitHistory = () => {
                                         </td>
                                         <td className="px-8 py-8">
                                             <div className="flex items-center space-x-2">
-                                                <a
-                                                    href={`https://www.google.com/maps?q=${visit.lat},${visit.lng}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="p-3 bg-gray-50 text-gray-400 rounded-xl hover:bg-dental-50 hover:text-dental-600 transition-all border border-transparent hover:border-dental-100 group/link"
-                                                    title="Ver Ubicación Check-in"
-                                                >
-                                                    <MapPin size={18} />
-                                                </a>
-                                                {visit.check_out_lat && (
+                                                {typeof visit.lat === 'number' && typeof visit.lng === 'number' ? (
+                                                    <a
+                                                        href={`https://www.google.com/maps?q=${visit.lat},${visit.lng}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="p-3 bg-gray-50 text-gray-400 rounded-xl hover:bg-dental-50 hover:text-dental-600 transition-all border border-transparent hover:border-dental-100 group/link"
+                                                        title="Ver Ubicación Check-in"
+                                                    >
+                                                        <MapPin size={18} />
+                                                    </a>
+                                                ) : (
+                                                    <div className="p-3 bg-gray-50 text-gray-300 rounded-xl border border-transparent" title="Sin GPS check-in">
+                                                        <MapPin size={18} />
+                                                    </div>
+                                                )}
+                                                {(typeof visit.check_out_lat === 'number' && typeof visit.check_out_lng === 'number') && (
                                                     <a
                                                         href={`https://www.google.com/maps?q=${visit.check_out_lat},${visit.check_out_lng}`}
                                                         target="_blank"
@@ -245,13 +279,8 @@ const VisitHistory = () => {
                                             </div>
                                         </td>
                                         <td className="px-8 py-8 text-right">
-                                            <span className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest ${visit.status === 'completed'
-                                                    ? 'bg-green-100 text-green-700'
-                                                    : visit.status === 'in_progress'
-                                                        ? 'bg-blue-100 text-blue-700 animate-pulse'
-                                                        : 'bg-gray-100 text-gray-500'
-                                                }`}>
-                                                {visit.status === 'completed' ? 'Finalizada' : visit.status === 'in_progress' ? 'En Curso' : visit.status}
+                                            <span className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest ${getVisitStatusClass(visit.status)}`}>
+                                                {getVisitStatusLabel(visit.status)}
                                             </span>
                                         </td>
                                     </tr>

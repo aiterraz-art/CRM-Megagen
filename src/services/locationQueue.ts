@@ -15,10 +15,17 @@ interface VisitCheckinLocationPayload {
     lng?: number;
 }
 
+interface VisitCheckoutLocationPayload {
+    visit_id: string;
+    seller_id: string;
+    lat?: number;
+    lng?: number;
+}
+
 type LocationQueueItem = {
     id: string;
-    type: 'quotation_location' | 'visit_checkin_location';
-    payload: QuotationLocationPayload | VisitCheckinLocationPayload;
+    type: 'quotation_location' | 'visit_checkin_location' | 'visit_checkout_location';
+    payload: QuotationLocationPayload | VisitCheckinLocationPayload | VisitCheckoutLocationPayload;
     attempts: number;
     created_at: string;
     last_error?: string;
@@ -99,6 +106,31 @@ const updateVisitCheckinLocation = async (payload: VisitCheckinLocationPayload) 
     }
 };
 
+const updateVisitCheckoutLocation = async (payload: VisitCheckoutLocationPayload) => {
+    let lat = typeof payload.lat === 'number' ? payload.lat : null;
+    let lng = typeof payload.lng === 'number' ? payload.lng : null;
+
+    if (lat === null || lng === null) {
+        const pos = await checkGPSConnection({
+            showAlert: false,
+            timeoutMs: 10000,
+            retries: 1,
+            minAccuracyMeters: 900
+        });
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+    }
+
+    const { error } = await supabase
+        .from('visits')
+        .update({ check_out_lat: lat, check_out_lng: lng } as any)
+        .eq('id', payload.visit_id);
+
+    if (error) {
+        throw error;
+    }
+};
+
 export const queueQuotationLocation = async (payload: QuotationLocationPayload): Promise<{ sent: boolean; queued: boolean; error?: string }> => {
     try {
         await insertQuotationLocation(payload);
@@ -147,6 +179,35 @@ export const queueVisitCheckinLocation = async (
     }
 };
 
+export const queueVisitCheckoutLocation = async (
+    payload: VisitCheckoutLocationPayload
+): Promise<{ sent: boolean; queued: boolean; error?: string }> => {
+    try {
+        await updateVisitCheckoutLocation(payload);
+        return { sent: true, queued: false };
+    } catch (error: any) {
+        const queue = readQueue();
+        const existingIndex = queue.findIndex((item) => item.type === 'visit_checkout_location' && (item.payload as VisitCheckoutLocationPayload).visit_id === payload.visit_id);
+        const nextItem: LocationQueueItem = {
+            id: `visit-checkout-${payload.visit_id}`,
+            type: 'visit_checkout_location',
+            payload,
+            attempts: existingIndex >= 0 ? queue[existingIndex].attempts : 0,
+            created_at: existingIndex >= 0 ? queue[existingIndex].created_at : new Date().toISOString(),
+            last_error: toErrorText(error)
+        };
+
+        if (existingIndex >= 0) {
+            queue[existingIndex] = nextItem;
+        } else {
+            queue.push(nextItem);
+        }
+
+        writeQueue(queue);
+        return { sent: false, queued: true, error: toErrorText(error) };
+    }
+};
+
 const processQueueItem = async (item: LocationQueueItem) => {
     if (item.type === 'quotation_location') {
         await insertQuotationLocation(item.payload as QuotationLocationPayload);
@@ -154,6 +215,10 @@ const processQueueItem = async (item: LocationQueueItem) => {
     }
     if (item.type === 'visit_checkin_location') {
         await updateVisitCheckinLocation(item.payload as VisitCheckinLocationPayload);
+        return;
+    }
+    if (item.type === 'visit_checkout_location') {
+        await updateVisitCheckoutLocation(item.payload as VisitCheckoutLocationPayload);
         return;
     }
     throw new Error(`Unsupported queue item type: ${item.type}`);
@@ -180,7 +245,7 @@ export const flushLocationQueue = async (): Promise<{ processed: number; remaini
                 processed += 1;
             } catch (error) {
                 const attempts = (item.attempts || 0) + 1;
-                const shouldKeepRetrying = item.type === 'visit_checkin_location' || attempts < MAX_ATTEMPTS;
+                const shouldKeepRetrying = item.type === 'visit_checkin_location' || item.type === 'visit_checkout_location' || attempts < MAX_ATTEMPTS;
                 if (shouldKeepRetrying) {
                     remaining.push({
                         ...item,

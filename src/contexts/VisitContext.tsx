@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { checkGPSConnection } from '../utils/gps';
 import { Database } from '../types/supabase';
 import { useUser } from './UserContext';
+import { queueVisitCheckoutLocation } from '../services/locationQueue';
 
 type Visit = Database['public']['Tables']['visits']['Row'];
 
@@ -135,7 +136,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         let checkInLng = null;
 
         try {
-            const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 300 });
+            const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 200 });
             checkInLat = pos.coords.latitude;
             checkInLng = pos.coords.longitude;
         } catch (geoError) {
@@ -178,12 +179,12 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             let lng = null;
 
             try {
-                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 10000, maximumAgeMs: 3000, retries: 0, minAccuracyMeters: 500 });
+                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, maximumAgeMs: 2000, retries: 1, minAccuracyMeters: 200 });
                 lat = pos.coords.latitude;
                 lng = pos.coords.longitude;
             } catch (geoError) {
                 console.warn("Could not get geolocation for checkout:", geoError);
-                // Continue without location
+                // Continue without immediate location; queue retry after close.
             }
 
             const { error } = await supabase.from('visits').update({
@@ -200,6 +201,13 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 // Do NOT clear activeVisit so user can try again
                 return false;
             } else {
+                // If checkout location was unavailable at close time, retry in background queue.
+                if (lat === null || lng === null) {
+                    void queueVisitCheckoutLocation({
+                        visit_id: closingVisitId,
+                        seller_id: profile?.id || activeVisit.sales_rep_id || ''
+                    });
+                }
                 // ONLY clear on success
                 setActiveVisit(null);
                 return true;

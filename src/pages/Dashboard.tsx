@@ -331,7 +331,9 @@ const Dashboard = () => {
                 const seenActiveClients = new Set();
                 const filteredVisits = visitsData.filter(v => {
                     const key = `${v.sales_rep_id}-${v.client_id}`;
-                    if (v.status !== 'completed' && !v.check_out_time) {
+                    const status = String(v.status || '').toLowerCase();
+                    const isOpen = (status === 'in_progress' || status === 'in-progress') && !v.check_out_time;
+                    if (isOpen) {
                         if (seenActiveClients.has(key)) return false;
                         seenActiveClients.add(key);
                         return true;
@@ -560,6 +562,15 @@ const Dashboard = () => {
                                                     </div>
                                                 );
                                             })()
+                                        ) : visit.status === 'cancelled' ? (
+                                            <div>
+                                                <span className="text-gray-500 font-bold block">Cancelada</span>
+                                                {visit.notes && (
+                                                    <div className="mt-1 max-w-[200px] truncate text-[10px] text-gray-500 italic" title={visit.notes}>
+                                                        "{visit.notes}"
+                                                    </div>
+                                                )}
+                                            </div>
                                         ) : (
                                             <ActiveVisitTimer startTime={visit.check_in_time} />
                                         )}
@@ -569,9 +580,11 @@ const Dashboard = () => {
                                             <div className="flex gap-2">
                                                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${visit.status === 'completed'
                                                     ? 'bg-emerald-50 text-emerald-600 border border-emerald-100'
-                                                    : 'bg-amber-50 text-amber-600 border border-amber-100'
+                                                    : visit.status === 'cancelled'
+                                                        ? 'bg-gray-100 text-gray-600 border border-gray-200'
+                                                        : 'bg-amber-50 text-amber-600 border border-amber-100'
                                                     }`}>
-                                                    {visit.status === 'completed' ? 'Completada' : 'En Ruta'}
+                                                    {visit.status === 'completed' ? 'Completada' : visit.status === 'cancelled' ? 'Cancelada' : 'En Ruta'}
                                                 </span>
                                                 {visit.status === 'completed' && (
                                                     <button
