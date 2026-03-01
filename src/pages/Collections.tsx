@@ -115,6 +115,7 @@ const Collections = () => {
     const isSeller = effectiveRole === 'seller';
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
     const canUpload = canManageCollections;
+    const canDownloadTemplate = canManageCollections;
     const canEditComment = effectiveRole === 'seller' || canManageCollections;
 
     const normalizeEmail = (value: string | null | undefined) => (value || '').trim().toLowerCase();
@@ -176,6 +177,10 @@ const Collections = () => {
     }, []);
 
     const downloadTemplate = () => {
+        if (!canDownloadTemplate) {
+            alert('Solo jefes y administradores pueden descargar la plantilla.');
+            return;
+        }
         const headers = [
             'razon_social', 'rut', 'numero_documento', 'fecha_vencimiento', 'monto_con_iva',
             'seller_email', 'seller_name'
@@ -387,9 +392,11 @@ const Collections = () => {
                         )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <button onClick={downloadTemplate} className="px-3 py-2 rounded-xl border font-bold text-sm inline-flex items-center gap-2">
-                            <Download size={14} /> Descargar plantilla
-                        </button>
+                        {canDownloadTemplate && (
+                            <button onClick={downloadTemplate} className="px-3 py-2 rounded-xl border font-bold text-sm inline-flex items-center gap-2">
+                                <Download size={14} /> Descargar plantilla
+                            </button>
+                        )}
                         <button onClick={downloadCurrent} className="px-3 py-2 rounded-xl border font-bold text-sm inline-flex items-center gap-2">
                             <Download size={14} /> Descargar datos
                         </button>
