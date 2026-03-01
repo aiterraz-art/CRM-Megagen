@@ -12,10 +12,8 @@
   }
 
   #root {
-    transform: scale(0.8);
-    transform-origin: top left;
-    height: 125vh;
-    width: 125vw;
+    height: 100vh;
+    width: 100vw;
   }
 }
 

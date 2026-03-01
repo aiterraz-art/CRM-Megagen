@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, MapPin, Phone, Mail, Building2, Calendar, FileText, ShoppingBag, Clock, FileSpreadsheet, Send, Pencil, ChevronRight, Plus, CalendarRange } from 'lucide-react';
+import { X, MapPin, Phone, Mail, Building2, FileText, ShoppingBag, Clock, FileSpreadsheet, Pencil, CalendarRange, CheckCircle2, AlertTriangle, Send } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { Database } from '../../types/supabase';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
@@ -21,14 +21,23 @@ interface ClientDetailModalProps {
 const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailModalProps) => {
     const navigate = useNavigate();
     const { profile } = useUser();
-    const [activeTab, setActiveTab] = useState<'overview' | 'visits' | 'quotations' | 'orders' | 'emails' | 'calls'>('overview');
-    const [stats, setStats] = useState({ totalVisits: 0, totalSales: 0, lastVisit: null as string | null });
+    const [activeTab, setActiveTab] = useState<'overview' | 'visits' | 'quotations' | 'sent_quotations' | 'orders' | 'emails' | 'calls'>('overview');
+    const [stats, setStats] = useState({
+        totalVisits: 0,
+        totalSales: 0,
+        lastVisit: null as string | null,
+        totalQuotations: 0,
+        approvedQuotations: 0
+    });
     const [visits, setVisits] = useState<any[]>([]);
     const [quotations, setQuotations] = useState<any[]>([]);
     const [orders, setOrders] = useState<any[]>([]);
     const [emails, setEmails] = useState<any[]>([]);
     const [callLogs, setCallLogs] = useState<any[]>([]);
+    const [recentActivity, setRecentActivity] = useState<Array<{ id: string; type: string; date: string; title: string; subtitle: string }>>([]);
+    const [sentQuotations, setSentQuotations] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [showCallOutcome, setShowCallOutcome] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
 
@@ -40,24 +49,83 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
 
     const fetchData = async () => {
         setLoading(true);
+        setLoadError(null);
         try {
             if (activeTab === 'overview') {
-                const { count: visitsCount } = await supabase.from('visits').select('*', { count: 'exact', head: true }).eq('client_id', client.id);
-                const { data: lastVisit } = await supabase.from('visits').select('check_in_time').eq('client_id', client.id).eq('status', 'completed').order('check_in_time', { ascending: false }).limit(1).single();
-                const { data: salesData } = await supabase.from('orders').select('total_amount').eq('client_id', client.id);
+                const [{ count: visitsCount }, { data: lastVisit }, { data: salesData }, { data: quotesData }, { data: recentVisits }, { data: recentCalls }, { data: recentEmails }, { data: recentOrders }] = await Promise.all([
+                    supabase.from('visits').select('*', { count: 'exact', head: true }).eq('client_id', client.id),
+                    supabase.from('visits').select('check_in_time').eq('client_id', client.id).eq('status', 'completed').order('check_in_time', { ascending: false }).limit(1).maybeSingle(),
+                    supabase.from('orders').select('total_amount').eq('client_id', client.id),
+                    supabase.from('quotations').select('id, status, folio, total_amount, created_at, comments').eq('client_id', client.id).order('created_at', { ascending: false }),
+                    supabase.from('visits').select('id, check_in_time, status, purpose').eq('client_id', client.id).order('check_in_time', { ascending: false }).limit(4),
+                    supabase.from('call_logs').select('id, created_at, status').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4),
+                    supabase.from('email_logs').select('id, created_at, subject').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4),
+                    supabase.from('orders').select('id, created_at, total_amount').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4)
+                ]);
+
                 const totalSales = salesData?.reduce((acc, curr) => acc + (Number(curr.total_amount) || 0), 0) || 0;
+                const totalQuotations = quotesData?.length || 0;
+                const approvedQuotations = (quotesData || []).filter((q) => q.status === 'approved').length;
+                const sent = (quotesData || []).filter((q) => q.status === 'sent');
 
                 setStats({
                     totalVisits: visitsCount || 0,
                     totalSales,
-                    lastVisit: lastVisit?.check_in_time || null
+                    lastVisit: lastVisit?.check_in_time || null,
+                    totalQuotations,
+                    approvedQuotations
                 });
+                setSentQuotations(sent.slice(0, 6));
+
+                const timeline = [
+                    ...(recentVisits || []).map((item: any) => ({
+                        id: `visit-${item.id}`,
+                        type: 'Visita',
+                        date: item.check_in_time,
+                        title: item.status === 'scheduled' ? 'Visita agendada' : 'Visita registrada',
+                        subtitle: item.purpose || 'Sin detalle'
+                    })),
+                    ...(recentCalls || []).map((item: any) => ({
+                        id: `call-${item.id}`,
+                        type: 'Llamada',
+                        date: item.created_at,
+                        title: 'Llamada registrada',
+                        subtitle: String(item.status || 'sin estado').replace('_', ' ')
+                    })),
+                    ...(recentEmails || []).map((item: any) => ({
+                        id: `email-${item.id}`,
+                        type: 'Correo',
+                        date: item.created_at,
+                        title: 'Correo enviado',
+                        subtitle: item.subject || 'Sin asunto'
+                    })),
+                    ...(recentOrders || []).map((item: any) => ({
+                        id: `order-${item.id}`,
+                        type: 'Venta',
+                        date: item.created_at,
+                        title: 'Venta registrada',
+                        subtitle: formatCurrency(Number(item.total_amount || 0))
+                    }))
+                ]
+                    .filter((item) => !!item.date)
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .slice(0, 8);
+
+                setRecentActivity(timeline);
             } else if (activeTab === 'visits') {
                 const { data } = await supabase.from('visits').select('*, profiles(full_name)').eq('client_id', client.id).order('check_in_time', { ascending: false });
                 setVisits(data || []);
             } else if (activeTab === 'quotations') {
                 const { data } = await supabase.from('quotations').select('*').eq('client_id', client.id).order('created_at', { ascending: false });
                 setQuotations(data || []);
+            } else if (activeTab === 'sent_quotations') {
+                const { data } = await supabase
+                    .from('quotations')
+                    .select('id, status, folio, total_amount, created_at, comments')
+                    .eq('client_id', client.id)
+                    .eq('status', 'sent')
+                    .order('created_at', { ascending: false });
+                setSentQuotations(data || []);
             } else if (activeTab === 'orders') {
                 const { data } = await supabase.from('orders').select('*, order_items(quantity, total_price, inventory(name))').eq('client_id', client.id).order('created_at', { ascending: false });
                 setOrders(data || []);
@@ -70,6 +138,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
             }
         } catch (error) {
             console.error("Error fetching client details:", error);
+            setLoadError('No se pudo cargar la información de esta ficha.');
         } finally {
             setLoading(false);
         }
@@ -78,6 +147,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const formatDate = (iso: string) => iso ? new Date(iso).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A';
     const formatDateTime = (iso: string) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'N/A';
     const formatCurrency = (amount: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(amount);
+    const lastVisitAgeDays = stats.lastVisit ? Math.floor((Date.now() - new Date(stats.lastVisit).getTime()) / (1000 * 60 * 60 * 24)) : null;
 
     const handleVisit = () => navigate(`/visit/${client.id}`);
     const handleQuote = () => navigate('/quotations', { state: { client: client } });
@@ -96,6 +166,47 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
         // Show modal to capture outcome
         setTimeout(() => setShowCallOutcome(true), 1500);
     };
+
+    const recommendation = (() => {
+        if (!client.phone && !client.email) {
+            return {
+                title: 'Completar datos de contacto',
+                reason: 'El cliente no tiene teléfono ni correo registrados.',
+                actionLabel: 'Editar ficha',
+                action: onEdit
+            };
+        }
+        if (stats.totalVisits === 0) {
+            return {
+                title: 'Agendar primera visita',
+                reason: 'Aún no hay visitas registradas para este cliente.',
+                actionLabel: 'Agendar ahora',
+                action: () => setShowScheduleModal(true)
+            };
+        }
+        if (sentQuotations.length > 0 && stats.approvedQuotations === 0) {
+            return {
+                title: 'Hacer seguimiento de cotización enviada',
+                reason: `Hay ${sentQuotations.length} cotización(es) enviada(s) sin aprobación.`,
+                actionLabel: 'Ir a cotizaciones',
+                action: () => navigate('/quotations', { state: { client } })
+            };
+        }
+        if (lastVisitAgeDays !== null && lastVisitAgeDays >= 15) {
+            return {
+                title: 'Registrar visita de seguimiento',
+                reason: `La última visita fue hace ${lastVisitAgeDays} días.`,
+                actionLabel: 'Registrar visita',
+                action: () => navigate(`/visit/${client.id}`)
+            };
+        }
+        return {
+            title: 'Mantener ritmo comercial',
+            reason: 'Cliente con actividad reciente. Recomendada llamada de control.',
+            actionLabel: 'Registrar llamada',
+            action: handleCall
+        };
+    })();
 
     return (
         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -147,8 +258,9 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 <div className="flex border-b border-gray-100 px-8 shrink-0 overflow-x-auto">
                     {[
                         { id: 'overview', label: 'Resumen', icon: FileText },
-                        { id: 'visits', label: 'Visitas', icon: MapPin },
-                        { id: 'quotations', label: 'Cotizaciones', icon: FileSpreadsheet },
+                        { id: 'visits', label: 'Actividad', icon: MapPin },
+                        { id: 'quotations', label: 'Comercial', icon: FileSpreadsheet },
+                        { id: 'sent_quotations', label: 'Enviadas', icon: Send },
                         { id: 'orders', label: 'Ventas', icon: ShoppingBag },
                         { id: 'calls', label: 'Llamadas', icon: Phone },
                         { id: 'emails', label: 'Correos', icon: Mail },
@@ -161,6 +273,11 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto bg-gray-50/50 p-8">
+                    {loadError && (
+                        <div className="mb-4 p-3 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm font-medium">
+                            {loadError}
+                        </div>
+                    )}
                     {loading ? (
                         <div className="space-y-4 animate-pulse">{[1, 2, 3].map(i => <div key={i} className="h-24 bg-gray-200 rounded-2xl"></div>)}</div>
                     ) : (
@@ -182,6 +299,16 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                 <p className="text-xl font-black text-gray-900 mt-1">{formatDate(stats.lastVisit || '')}</p>
                                             </div>
                                         </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Cotizaciones</p>
+                                                <p className="text-2xl font-black text-gray-900 mt-1">{stats.totalQuotations}</p>
+                                            </div>
+                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Aprobadas</p>
+                                                <p className="text-2xl font-black text-emerald-600 mt-1">{stats.approvedQuotations}</p>
+                                            </div>
+                                        </div>
                                         <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
                                             <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><FileText size={20} className="text-indigo-600" /> Información de Contacto</h3>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
@@ -192,6 +319,43 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                 <div className="col-span-1 md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Notas</label><p className="font-medium text-gray-600 bg-gray-50 p-4 rounded-xl border border-gray-200/50 italic">{client.notes || 'Sin notas registradas.'}</p></div>
                                             </div>
                                         </div>
+                                        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                                            <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                                                <CheckCircle2 size={18} className="text-indigo-600" /> Próxima Acción Recomendada
+                                            </h3>
+                                            <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-100">
+                                                <p className="font-black text-indigo-900">{recommendation.title}</p>
+                                                <p className="text-sm text-indigo-700 mt-1">{recommendation.reason}</p>
+                                                <button
+                                                    onClick={recommendation.action}
+                                                    className="mt-3 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors"
+                                                >
+                                                    {recommendation.actionLabel}
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                                            <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                                                <Clock size={18} className="text-indigo-600" /> Actividad Reciente
+                                            </h3>
+                                            <div className="space-y-3">
+                                                {recentActivity.map((activity) => (
+                                                    <div key={activity.id} className="p-3 rounded-xl border border-gray-100 bg-gray-50/60">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <p className="text-sm font-bold text-gray-900">{activity.title}</p>
+                                                            <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">{activity.type}</span>
+                                                        </div>
+                                                        <p className="text-xs text-gray-600 mt-1">{activity.subtitle}</p>
+                                                        <p className="text-[11px] text-gray-400 mt-1">{formatDateTime(activity.date)}</p>
+                                                    </div>
+                                                ))}
+                                                {recentActivity.length === 0 && (
+                                                    <div className="p-6 text-center text-sm text-gray-500 bg-gray-50 rounded-xl border border-gray-100">
+                                                        Sin actividad reciente registrada.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
                                     <div className="h-full min-h-[300px] rounded-3xl overflow-hidden shadow-lg border-2 border-white">
                                         {client.lat && client.lng && GOOGLE_MAPS_API_KEY ? (
@@ -200,7 +364,12 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                     <AdvancedMarker position={{ lat: client.lat, lng: client.lng }}><Pin background={'#4F46E5'} borderColor={'#312E81'} glyphColor={'#FFF'} /></AdvancedMarker>
                                                 </Map>
                                             </APIProvider>
-                                        ) : (<div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400 font-bold">Sin ubicación</div>)}
+                                        ) : (
+                                            <div className="w-full h-full bg-gray-200 flex flex-col items-center justify-center text-gray-500 font-bold gap-2">
+                                                <AlertTriangle size={18} />
+                                                Sin ubicación GPS
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -282,6 +451,21 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                             <p className="font-black text-gray-900">{formatCurrency(o.total_amount)}</p>
                                         </div>
                                     ))}
+                                    {activeTab === 'sent_quotations' && sentQuotations.map((quote) => (
+                                        <div key={quote.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="font-bold text-gray-900">Folio #{quote.folio || '---'}</p>
+                                                    <p className="text-xs text-gray-500 font-medium">{formatDateTime(quote.created_at)}</p>
+                                                    {quote.comments && <p className="text-xs text-gray-600 mt-2 italic">"{quote.comments}"</p>}
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="px-2 py-1 rounded-lg text-[10px] font-black uppercase bg-blue-100 text-blue-700">Enviada</span>
+                                                    <p className="font-black text-gray-900 mt-2">{formatCurrency(Number(quote.total_amount || 0))}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
                                     {activeTab === 'emails' && emails.map((email) => (
                                         <div key={email.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
                                             <div className="flex justify-between items-start mb-1"><h4 className="font-bold text-gray-900 text-sm">{email.subject}</h4><span className="text-[10px] text-gray-400 font-bold uppercase">{formatDateTime(email.created_at)}</span></div>
@@ -303,11 +487,12 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                     ))}
 
                                     {/* Empty States */}
-                                    {activeTab === 'visits' && visits.length === 0 && <EmptyState message="No hay visitas" />}
-                                    {activeTab === 'quotations' && quotations.length === 0 && <EmptyState message="No hay cotizaciones" />}
-                                    {activeTab === 'orders' && orders.length === 0 && <EmptyState message="No hay ventas" />}
-                                    {activeTab === 'emails' && emails.length === 0 && <EmptyState message="No hay correos" />}
-                                    {activeTab === 'calls' && callLogs.length === 0 && <EmptyState message="No hay llamadas" />}
+                                    {activeTab === 'visits' && visits.length === 0 && <EmptyState message="No hay actividad de visitas" />}
+                                    {activeTab === 'quotations' && quotations.length === 0 && <EmptyState message="No hay actividad comercial" />}
+                                    {activeTab === 'sent_quotations' && sentQuotations.length === 0 && <EmptyState message="No hay cotizaciones enviadas" />}
+                                    {activeTab === 'orders' && orders.length === 0 && <EmptyState message="No hay ventas registradas" />}
+                                    {activeTab === 'emails' && emails.length === 0 && <EmptyState message="No hay correos registrados" />}
+                                    {activeTab === 'calls' && callLogs.length === 0 && <EmptyState message="No hay llamadas registradas" />}
                                 </div>
                             )}
                         </>

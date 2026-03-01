@@ -1,7 +1,5 @@
 import React from 'react';
 import { Printer, Download, X, Share2, Loader2 } from 'lucide-react';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 
 interface QuotationItem {
     code: string;
@@ -36,11 +34,17 @@ interface QuotationData {
 interface Props {
     data: QuotationData;
     onClose: () => void;
+    canShareAndDownload?: boolean;
+    shareBlockReason?: string;
 }
 
-const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
+const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload = true, shareBlockReason }) => {
     const contentRef = React.useRef<HTMLDivElement>(null);
+    const viewportRef = React.useRef<HTMLDivElement>(null);
     const [generatingPdf, setGeneratingPdf] = React.useState(false);
+    const [previewScale, setPreviewScale] = React.useState(1);
+    const [previewHeight, setPreviewHeight] = React.useState(1400);
+    const [zoomMultiplier, setZoomMultiplier] = React.useState(1);
 
     // Robust parsing: items could be a string (JSON) or an object
     let items: QuotationItem[] = [];
@@ -70,35 +74,63 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
         if (!contentRef.current) return null;
 
         try {
-            const captureWidth = 1000; // Ancho fijo para diseño de escritorio
+            const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                import('html2canvas'),
+                import('jspdf')
+            ]);
+            const captureWidth = 1000;
+            const sourceNode = contentRef.current;
+            const sandbox = document.createElement('div');
+            sandbox.style.position = 'fixed';
+            sandbox.style.left = '-20000px';
+            sandbox.style.top = '0';
+            sandbox.style.width = `${captureWidth}px`;
+            sandbox.style.background = '#ffffff';
+            sandbox.style.padding = '0';
+            sandbox.style.zIndex = '-1';
 
-            const canvas = await html2canvas(contentRef.current, {
-                scale: 2.5, // Alta calidad
-                useCORS: true,
-                windowWidth: captureWidth,
-                width: captureWidth,
-                onclone: (clonedDoc) => {
-                    const clonedContent = clonedDoc.querySelector('[ref-content-container]');
-                    if (clonedContent instanceof HTMLElement) {
-                        // Quitamos el escalado visual para la foto del PDF
-                        clonedContent.style.width = '1000px';
-                        clonedContent.style.transform = 'none';
-                        clonedContent.style.margin = '0';
-                        clonedContent.style.padding = '40px';
-                    }
-                }
+            const clonedNode = sourceNode.cloneNode(true) as HTMLDivElement;
+            clonedNode.style.position = 'static';
+            clonedNode.style.left = '0';
+            clonedNode.style.top = '0';
+            clonedNode.style.transform = 'none';
+            clonedNode.style.transformOrigin = 'top left';
+            clonedNode.style.width = `${captureWidth}px`;
+            clonedNode.style.margin = '0';
+            clonedNode.style.padding = '40px';
+            clonedNode.style.boxSizing = 'border-box';
+            clonedNode.style.background = '#ffffff';
+            clonedNode.style.fontFamily = 'Arial, Helvetica, sans-serif';
+            clonedNode.style.fontKerning = 'normal';
+            clonedNode.style.letterSpacing = 'normal';
+            clonedNode.style.textRendering = 'optimizeLegibility';
+            clonedNode.querySelectorAll<HTMLElement>('*').forEach((el) => {
+                el.style.fontFamily = 'Arial, Helvetica, sans-serif';
+                el.style.fontKerning = 'normal';
             });
 
+            sandbox.appendChild(clonedNode);
+            document.body.appendChild(sandbox);
+
+            const canvas = await html2canvas(clonedNode, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                windowWidth: captureWidth,
+                width: captureWidth
+            });
+
+            document.body.removeChild(sandbox);
+
             const imgData = canvas.toDataURL('image/jpeg', 0.95);
+            const imgWidth = 210;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
             const pdf = new jsPDF({
                 orientation: 'portrait',
                 unit: 'mm',
-                format: 'a4',
+                format: [imgWidth, imgHeight],
                 compress: true
             });
-
-            const imgWidth = 210; // A4 mm
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
             pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
             return pdf.output('blob');
@@ -109,6 +141,10 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
     };
 
     const handleShare = async () => {
+        if (!canShareAndDownload) {
+            alert('Esta cotización debe estar aprobada para poder enviarse.');
+            return;
+        }
         setGeneratingPdf(true);
         try {
             const pdfBlob = await generatePdfBlob();
@@ -136,6 +172,10 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
     };
 
     const handleDownloadPDF = async () => {
+        if (!canShareAndDownload) {
+            alert('Esta cotización debe estar aprobada para poder descargarse.');
+            return;
+        }
         setGeneratingPdf(true);
         try {
             const pdfBlob = await generatePdfBlob();
@@ -157,13 +197,44 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
         }
     };
 
+    React.useEffect(() => {
+        const recomputeScale = () => {
+            const viewport = viewportRef.current;
+            const content = contentRef.current;
+            if (!viewport || !content) return;
+
+            const availableWidth = viewport.clientWidth - 24;
+            const availableHeight = viewport.clientHeight - 24;
+            const contentWidth = content.offsetWidth || 1000;
+            const contentHeight = content.scrollHeight || content.offsetHeight || 1400;
+
+            const widthScale = availableWidth / contentWidth;
+            const heightScale = availableHeight / contentHeight;
+            const nextScale = Math.min(widthScale, heightScale, 1);
+
+            setPreviewScale(Number.isFinite(nextScale) && nextScale > 0 ? nextScale : 1);
+            setPreviewHeight(contentHeight);
+        };
+
+        const frame = window.requestAnimationFrame(recomputeScale);
+        window.addEventListener('resize', recomputeScale);
+        return () => {
+            window.cancelAnimationFrame(frame);
+            window.removeEventListener('resize', recomputeScale);
+        };
+    }, [data, canShareAndDownload, generatingPdf, items.length, data.comments]);
+
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+    const effectiveScale = clamp(previewScale * zoomMultiplier, 0.2, 3);
+    const zoomPercent = Math.round(effectiveScale * 100);
+
     return (
         <div
-            className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 md:p-8 overflow-y-auto cursor-pointer"
+            className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-2 md:p-3 overflow-y-auto cursor-pointer"
             onClick={onClose} // Close on backdrop click
         >
             <div
-                className="bg-white w-full max-w-4xl shadow-2xl rounded-lg flex flex-col max-h-[95vh] overflow-y-auto animate-in fade-in zoom-in duration-300 cursor-default"
+                className="bg-white w-[96vw] max-w-[1700px] shadow-2xl rounded-lg flex flex-col h-[98vh] overflow-hidden animate-in fade-in zoom-in duration-300 cursor-default"
                 onClick={(e) => e.stopPropagation()} // Prevent close on content click
             >
 
@@ -172,9 +243,41 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
                     <h3 className="font-bold text-gray-700">Visualización de Cotización</h3>
 
                     <div className="flex items-center space-x-4">
+                        <div className="flex items-center gap-1 bg-white border rounded-lg px-2 py-1 print:hidden">
+                            <button
+                                onClick={() => setZoomMultiplier((prev) => clamp(prev / 1.1, 0.2, 6))}
+                                className="px-2 py-1 text-sm font-black text-gray-600 hover:bg-gray-100 rounded"
+                                title="Alejar"
+                            >
+                                -
+                            </button>
+                            <span className="text-xs font-black text-gray-500 min-w-[52px] text-center">{zoomPercent}%</span>
+                            <button
+                                onClick={() => setZoomMultiplier((prev) => clamp(prev * 1.1, 0.2, 6))}
+                                className="px-2 py-1 text-sm font-black text-gray-600 hover:bg-gray-100 rounded"
+                                title="Acercar"
+                            >
+                                +
+                            </button>
+                            <button
+                                onClick={() => setZoomMultiplier(1)}
+                                className="px-2 py-1 text-[10px] font-black text-gray-600 hover:bg-gray-100 rounded uppercase"
+                                title="Ajustar a pantalla"
+                            >
+                                Ajustar
+                            </button>
+                            <button
+                                onClick={() => setZoomMultiplier(previewScale > 0 ? clamp(1 / previewScale, 0.2, 6) : 1)}
+                                className="px-2 py-1 text-[10px] font-black text-gray-600 hover:bg-gray-100 rounded uppercase"
+                                title="Zoom real 100%"
+                            >
+                                100%
+                            </button>
+                        </div>
                         <button
                             onClick={handleShare}
-                            className="flex items-center px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 transition-all"
+                            disabled={!canShareAndDownload || generatingPdf}
+                            className="flex items-center px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <Share2 size={16} className="mr-2" /> Compartir
                         </button>
@@ -183,8 +286,8 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
                         </button>
                         <button
                             onClick={handleDownloadPDF}
-                            disabled={generatingPdf}
-                            className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all disabled:opacity-50"
+                            disabled={generatingPdf || !canShareAndDownload}
+                            className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {generatingPdf ? (
                                 <Loader2 size={16} className="mr-2 animate-spin" />
@@ -198,30 +301,38 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
                         </button>
                     </div>
                 </div>
+                {!canShareAndDownload && (
+                    <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-amber-700 text-xs font-bold print:hidden">
+                        {shareBlockReason || 'Esta cotización no se puede enviar ni descargar todavía.'}
+                    </div>
+                )}
 
                 {/* Contenedor con escalado dinámico */}
                 <div
-                    className="w-full h-full flex items-start justify-center md:items-center overflow-auto"
-                    style={{ minHeight: 'min-content' }}
+                    ref={viewportRef}
+                    className="w-full flex-1 flex items-center justify-center overflow-auto bg-gray-50 p-1"
                 >
                     <div
-                        ref={contentRef}
-                        // @ts-ignore
-                        ref-content-container="true"
-                        className="bg-white p-6 md:p-12 shadow-sm origin-top md:origin-center transition-transform duration-300"
                         style={{
-                            width: '1000px',
-                            minWidth: '1000px',
-                            // Calculamos el factor de escala basado en el ancho de la ventana
-                            transform: typeof window !== 'undefined' && window.innerWidth < 1000
-                                ? `scale(${(window.innerWidth) / 1000})`
-                                : 'none',
-                            // Compensamos el margen inferior que deja el escalado
-                            marginBottom: typeof window !== 'undefined' && window.innerWidth < 1000
-                                ? `-${1000 - window.innerWidth}px`
-                                : '0'
+                            width: `${1000 * effectiveScale}px`,
+                            height: `${previewHeight * effectiveScale}px`,
+                            transition: 'width 120ms ease-out, height 120ms ease-out'
                         }}
+                        className="relative"
                     >
+                        <div
+                            ref={contentRef}
+                            // @ts-ignore
+                            ref-content-container="true"
+                            className="bg-white p-6 md:p-12 shadow-sm w-[1000px]"
+                            style={{
+                                transform: `scale(${effectiveScale})`,
+                                transformOrigin: 'top left',
+                                position: 'absolute',
+                                top: 0,
+                                left: 0
+                            }}
+                        >
                         {/* Header Section */}
                         <div className="flex justify-between items-start mb-10">
                             <div className="space-y-1">
@@ -329,7 +440,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
                         </div>
 
                         {/* Items Table */}
-                        <div className="min-h-[400px] text-[11px]">
+                        <div className="min-h-[140px] text-[11px]">
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="border-b-2 border-gray-100 text-sm font-bold text-gray-500">
@@ -412,6 +523,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose }) => {
                                     {import.meta.env.VITE_COMPANY_NAME?.split(' ').slice(1).join(' ') || 'Chile'}
                                 </span>
                             </div>
+                        </div>
                         </div>
                     </div>
                 </div>

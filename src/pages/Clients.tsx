@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, MapPin, ChevronRight, Filter, Phone, Mail, CheckCircle2, Trash2, Building2, Pencil, Send, Paperclip, X, FileText, Upload, AlertCircle, Users } from 'lucide-react';
+import { Search, Plus, MapPin, ChevronRight, Phone, Mail, Trash2, Building2, Pencil, Send, Paperclip, X, FileText, Upload, AlertCircle, Users, UserCircle2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Database } from '../types/supabase';
 import { Link } from 'react-router-dom';
@@ -9,6 +9,7 @@ import { useUser } from '../contexts/UserContext';
 import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary, useMap } from '@vis.gl/react-google-maps';
 import ClientDetailModal from '../components/modals/ClientDetailModal';
 import { googleService } from '../services/googleService';
+import { checkGPSConnection } from '../utils/gps';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -60,7 +61,7 @@ const deg2rad = (deg: number) => {
 };
 
 const ClientsContent = () => {
-    const { profile, hasPermission, isSupervisor } = useUser();
+    const { profile, hasPermission, isSupervisor, effectiveRole } = useUser();
     const navigate = useNavigate();
     const searchParams = new URLSearchParams(window.location.search);
     const initialFilter = searchParams.get('filter') || 'all';
@@ -70,6 +71,8 @@ const ClientsContent = () => {
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(true);
     const [profiles, setProfiles] = useState<any[]>([]);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
 
     // Client 360 View State
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -98,6 +101,11 @@ const ClientsContent = () => {
     const [importing, setImporting] = useState(false);
 
     const [viewMode, setViewMode] = useState<'all' | 'mine'>('all'); // For Admins
+    const isSellerRole = effectiveRole === 'seller';
+    const canViewAll = useMemo(
+        () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
+        [isSellerRole, hasPermission, isSupervisor, profile?.email]
+    );
 
     // New/Edit Client Form State
     const [clientForm, setClientForm] = useState({
@@ -251,15 +259,16 @@ const ClientsContent = () => {
     // Initial Fetch
     const fetchClients = async () => {
         setLoading(true);
+        setErrorMessage(null);
         try {
             let query = supabase
                 .from('clients')
                 .select('*')
                 .order('name');
 
-            const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
-
-            if (!canViewAll && profile?.id) {
+            if (isSellerRole && profile?.id) {
+                query = query.eq('created_by', profile.id);
+            } else if (!canViewAll && profile?.id) {
                 query = query.eq('created_by', profile.id);
             }
 
@@ -272,6 +281,7 @@ const ClientsContent = () => {
 
             if (data) {
                 setClients(data);
+                setLastRefreshAt(new Date().toISOString());
 
                 // OPTIMIZATION: Use 'last_visit_date' directly from client record
                 // This avoids fetching ALL visits separately, which was causing massive slowness (O(N) vs O(1))
@@ -290,6 +300,7 @@ const ClientsContent = () => {
             }
         } catch (err: any) {
             console.error("Critical error in fetchClients:", err);
+            setErrorMessage(err?.message || 'No se pudo cargar la cartera de clientes.');
         } finally {
             setLoading(false);
         }
@@ -514,6 +525,7 @@ const ClientsContent = () => {
         const isDefaultLocation = Math.abs(finalLat - (-33.4489)) < 0.0001 && Math.abs(finalLng - (-70.6693)) < 0.0001;
         const hasAddress = finalAddress && finalAddress.length > 5;
 
+        let finalComuna = clientForm.comuna;
         if ((!finalLat || !finalLng || isDefaultLocation) && hasAddress) {
             try {
                 // console.log("⚠️ Coordenadas por defecto detectadas. Geocodificando dirección:", finalAddress);
@@ -525,14 +537,14 @@ const ClientsContent = () => {
                     finalLng = results[0].geometry.location.lng();
 
                     // Intentamos completar la Comuna si falta
-                    if (!clientForm.comuna) {
+                    if (!finalComuna) {
                         const place = results[0];
                         const components = place.address_components;
                         if (components) {
                             const comunaComponent = components.find((c: any) => c.types.includes('administrative_area_level_3'))
                                 || components.find((c: any) => c.types.includes('locality'));
                             if (comunaComponent) {
-                                clientForm.comuna = comunaComponent.long_name;
+                                finalComuna = comunaComponent.long_name;
                             }
                         }
                     }
@@ -557,7 +569,7 @@ const ClientsContent = () => {
                         lng: finalLng,
                         notes: clientForm.notes,
                         giro: clientForm.giro,
-                        comuna: clientForm.comuna,
+                        comuna: finalComuna,
                         office: clientForm.office
                     })
                     .eq('id', isEditing);
@@ -597,7 +609,7 @@ const ClientsContent = () => {
                         status: 'active',
                         zone: 'Santiago',
                         giro: clientForm.giro,
-                        comuna: clientForm.comuna,
+                        comuna: finalComuna,
                         office: clientForm.office
                     });
 
@@ -717,7 +729,7 @@ const ClientsContent = () => {
                     for (const client of clientsToInsert) {
                         try {
                             if (client.rut) {
-                                const { data: dup } = await supabase.from('clients').select('id').eq('rut', client.rut).single();
+                                const { data: dup } = await supabase.from('clients').select('id').eq('rut', client.rut).maybeSingle();
                                 if (dup) {
                                     errorCount++;
                                     errors.push(`RUT duplicado: ${client.rut} (${client.name})`);
@@ -764,23 +776,45 @@ const ClientsContent = () => {
         XLSX.writeFile(wb, 'plantilla_clientes_crm.xlsx');
     };
 
-    const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
+    const ownersById = useMemo(() => {
+        const map: Record<string, string> = {};
+        profiles.forEach((p) => {
+            if (!p?.id) return;
+            map[p.id] = p.full_name || p.email || 'Sin asignar';
+        });
+        return map;
+    }, [profiles]);
 
-    const filteredClients = clients.filter(c => {
-        const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
-            c.rut?.toLowerCase().includes(search.toLowerCase()) ||
-            (c.address?.toLowerCase().includes(search.toLowerCase()) ?? false);
+    const filteredClients = useMemo(() => {
+        const normalizedSearch = search.trim().toLowerCase();
+        return clients.filter(c => {
+            const matchesSearch = !normalizedSearch ||
+                c.name.toLowerCase().includes(normalizedSearch) ||
+                c.rut?.toLowerCase().includes(normalizedSearch) ||
+                (c.address?.toLowerCase().includes(normalizedSearch) ?? false);
 
-        const isOwner = c.created_by === profile?.id;
+            const isOwner = c.created_by === profile?.id;
+            const isNeglected = (neglectedData[c.id] || 0) >= 15;
+            const passesNeglect = neglectFilter === 'all' || isNeglected;
 
-        const isNeglected = (neglectedData[c.id] || 0) >= 15;
-        const passesNeglect = neglectFilter === 'all' || isNeglected;
+            if (canViewAll) {
+                return (viewMode === 'all' || isOwner) && matchesSearch && passesNeglect;
+            }
+            return isOwner && matchesSearch && passesNeglect;
+        });
+    }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode]);
 
-        if (canViewAll) {
-            return (viewMode === 'all' || isOwner) && matchesSearch && passesNeglect;
-        }
-        return isOwner && matchesSearch && passesNeglect;
-    });
+    const clientStats = useMemo(() => {
+        const inRisk = filteredClients.filter((client) => (neglectedData[client.id] || 0) >= 15).length;
+        const withCoordinates = filteredClients.filter((client) => !!client.lat && !!client.lng).length;
+        const mine = filteredClients.filter((client) => client.created_by === profile?.id).length;
+        return {
+            total: filteredClients.length,
+            inRisk,
+            withCoordinates,
+            mine
+        };
+    }, [filteredClients, neglectedData, profile?.id]);
 
     return (
         <div className="space-y-8 w-full mx-auto px-4 sm:px-6 lg:px-8">
@@ -790,6 +824,9 @@ const ClientsContent = () => {
                     <p className="text-gray-500 font-medium mt-1">
                         {canViewAll ? 'Administración total de la cartera' : 'Tu cartera de clientes asignada'}
                     </p>
+                    {lastRefreshAt && (
+                        <p className="text-xs text-gray-400 mt-2">Última actualización: {new Date(lastRefreshAt).toLocaleString()}</p>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -866,15 +903,48 @@ const ClientsContent = () => {
                         <Plus size={18} className="mr-2" />
                         Nuevo Cliente
                     </button>
+                    <button
+                        onClick={fetchClients}
+                        className="bg-white text-gray-700 px-4 py-4 rounded-2xl font-bold flex items-center border border-gray-200 hover:bg-gray-50 transition-all text-sm"
+                        title="Actualizar cartera"
+                    >
+                        <RefreshCw size={16} className="mr-2" />
+                        Actualizar
+                    </button>
                 </div>
             </div>
 
-            <div className="relative max-w-2xl">
+            {errorMessage && (
+                <div className="p-4 rounded-2xl border border-red-100 bg-red-50 text-red-700 text-sm font-medium">
+                    {errorMessage}
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="bg-white p-4 rounded-2xl border border-gray-100">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-400 font-black">Clientes visibles</p>
+                    <p className="text-2xl font-black text-gray-900 mt-1">{clientStats.total}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-400 font-black">En riesgo</p>
+                    <p className="text-2xl font-black text-amber-600 mt-1">{clientStats.inRisk}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-400 font-black">Con GPS</p>
+                    <p className="text-2xl font-black text-emerald-600 mt-1">{clientStats.withCoordinates}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-400 font-black">Asignados a mí</p>
+                    <p className="text-2xl font-black text-indigo-600 mt-1">{clientStats.mine}</p>
+                </div>
+            </div>
+
+            <div className="relative max-w-3xl">
                 <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                 <input
                     type="text"
                     placeholder="Buscar por nombre, RUT o dirección..."
-                    className="w-full pl-14 pr-6 py-5 bg-white border-none rounded-[2rem] shadow-sm ring-1 ring-gray-100 focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-gray-700 font-medium placeholder:text-gray-400"
+                    className="w-full pl-14 pr-6 py-4 bg-white border-none rounded-[2rem] shadow-sm ring-1 ring-gray-100 focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-gray-700 font-medium placeholder:text-gray-400"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
@@ -899,14 +969,6 @@ const ClientsContent = () => {
                         <p className="text-indigo-600 font-bold mt-4 text-sm bg-indigo-50 px-4 py-2 rounded-full">
                             Hay {clients.length} clientes totales, pero ninguno coincide con tus filtros.
                         </p>
-                    )}
-                    {profile?.email === 'aterraza@imegagen.cl' && clients.length === 0 && (
-                        <div className="mt-8 p-6 bg-red-50 rounded-2xl border border-red-100 text-red-700 text-xs font-mono">
-                            <p className="font-bold mb-2">DEBUG ADMIN INFO:</p>
-                            <p>User ID: {profile?.id}</p>
-                            <p>Global Clients Count: {clients.length}</p>
-                            <p>Check your RLS policies in Supabase Dashboard.</p>
-                        </div>
                     )}
                 </div>
             ) : (
@@ -955,6 +1017,12 @@ const ClientsContent = () => {
                                         <div className="flex items-center gap-2">
                                             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{normalizeRut(client.rut || '') || 'SIN RUT'}</p>
                                         </div>
+                                        {canViewAll && (
+                                            <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
+                                                <UserCircle2 size={12} />
+                                                {ownersById[client.created_by || ''] || 'Sin asignar'}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="space-y-3">
@@ -973,7 +1041,7 @@ const ClientsContent = () => {
                                                                 const { error } = await supabase.from('call_logs').insert({
                                                                     user_id: profile.id,
                                                                     client_id: client.id,
-                                                                    status: 'completada', // Default to completed as we don't track duration
+                                                                    status: 'contestada',
                                                                     interaction_type: 'Llamada',
                                                                     notes: 'Llamada iniciada desde ficha de cliente'
                                                                 });
@@ -1015,12 +1083,8 @@ const ClientsContent = () => {
                                     <button
                                         onClick={(e) => {
                                             e.preventDefault();
-                                            if (!navigator.geolocation) {
-                                                alert("Tu navegador no soporta geolocalización.");
-                                                return;
-                                            }
-                                            navigator.geolocation.getCurrentPosition(
-                                                (position) => {
+                                            checkGPSConnection({ showAlert: true, timeoutMs: 10000, retries: 1, minAccuracyMeters: 500 })
+                                                .then((position) => {
                                                     const userLat = position.coords.latitude;
                                                     const userLng = position.coords.longitude;
                                                     const dist = getDistanceFromLatLonInKm(userLat, userLng, client.lat || 0, client.lng || 0);
@@ -1035,13 +1099,10 @@ const ClientsContent = () => {
                                                         // Within 2km: Allowed seamlessly
                                                         navigate(`/visit/${client.id}`);
                                                     }
-                                                },
-                                                (error) => {
+                                                })
+                                                .catch((error) => {
                                                     console.error(error);
-                                                    alert("No pudimos obtener tu ubicación. Asegúrate de tener el GPS activado.");
-                                                },
-                                                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-                                            );
+                                                });
                                         }}
                                         className="flex-1 bg-gray-900 text-white py-4 rounded-2xl text-xs font-bold flex items-center justify-center shadow-lg active:scale-95 transition-all group-hover:bg-indigo-600"
                                     >
@@ -1233,7 +1294,7 @@ const ClientsContent = () => {
                                             </p>
                                         </div>
                                         <button onClick={() => setIsModalOpen(false)} className="p-2 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors">
-                                            <Trash2 size={20} className="text-gray-400" />
+                                            <X size={20} className="text-gray-400" />
                                         </button>
                                     </div>
                                     <form onSubmit={handleSaveClient} className="space-y-5">

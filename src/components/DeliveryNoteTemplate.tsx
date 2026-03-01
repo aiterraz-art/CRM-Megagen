@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { Printer, X } from 'lucide-react';
 
 interface DeliveryItem {
@@ -27,6 +27,8 @@ interface Props {
 
 const DeliveryNoteTemplate: React.FC<Props> = ({ data, onClose }) => {
     const contentRef = useRef<HTMLDivElement>(null);
+    const companyName = import.meta.env.VITE_COMPANY_NAME || 'Mi Empresa';
+    const companyLogo = import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png';
 
     const handlePrint = () => {
         window.print();
@@ -62,9 +64,9 @@ const DeliveryNoteTemplate: React.FC<Props> = ({ data, onClose }) => {
                     {/* Header */}
                     <div className="flex justify-between items-start mb-10 border-b-2 border-slate-900 pb-8">
                         <div className="flex items-center gap-4">
-                            <img src="/logo_megagen.png" alt="Megagen" className="h-16 w-auto grayscale" />
+                            <img src={companyLogo} alt={companyName} className="h-16 w-auto grayscale" />
                             <div>
-                                <p className="font-black text-xl uppercase tracking-tighter">Megagen<span className="font-light">Chile</span></p>
+                                <p className="font-black text-xl uppercase tracking-tighter">{companyName}</p>
                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Guía de Despacho</p>
                             </div>
                         </div>

@@ -55,6 +55,53 @@ const Schedule = () => {
         return day === 0 ? 6 : day - 1;
     };
 
+    const fetchTasksCompat = async (options?: {
+        withClientJoin?: boolean;
+        pendingOnly?: boolean;
+        requireDueDate?: boolean;
+        startDate?: string;
+        endDate?: string;
+    }) => {
+        if (!selectedSellerId) return [];
+
+        const { withClientJoin, pendingOnly, requireDueDate, startDate, endDate } = options || {};
+        const taskTables: Array<'tasks' | 'crm_tasks'> = ['tasks', 'crm_tasks'];
+        const ownerStrategies: Array<'or' | 'user_id' | 'assigned_to'> = ['or', 'user_id', 'assigned_to'];
+        let lastError: any = null;
+
+        for (const table of taskTables) {
+            for (const strategy of ownerStrategies) {
+                try {
+                    let query: any = supabase
+                        .from(table)
+                        .select(withClientJoin ? '*, clients(name)' : '*');
+
+                    if (strategy === 'or') {
+                        query = query.or(`user_id.eq.${selectedSellerId},assigned_to.eq.${selectedSellerId}`);
+                    } else {
+                        query = query.eq(strategy, selectedSellerId);
+                    }
+
+                    if (pendingOnly) query = query.eq('status', 'pending');
+                    if (requireDueDate) query = query.not('due_date', 'is', null);
+                    if (startDate) query = query.gte('due_date', startDate);
+                    if (endDate) query = query.lte('due_date', endDate);
+
+                    const { data, error } = await query;
+                    if (!error) return data || [];
+                    lastError = error;
+                } catch (error) {
+                    lastError = error;
+                }
+            }
+        }
+
+        if (lastError) {
+            console.error("Tasks compatibility query failed:", lastError);
+        }
+        return [];
+    };
+
     const fetchAllEvents = async () => {
         if (!selectedSellerId) return;
 
@@ -120,18 +167,16 @@ const Schedule = () => {
             console.error("CRM Visits error:", err);
         }
 
-        // 3. Internal Meetings (crm_tasks)
+        // 3. Internal Meetings (tasks / crm_tasks compatibility)
         try {
-            const { data: internalTasks } = await supabase
-                .from('crm_tasks')
-                .select('*')
-                .eq('assigned_to', selectedSellerId)
-                .gte('due_date', startOfMonth)
-                .lte('due_date', endOfMonth)
-                .not('due_date', 'is', null);
+            const internalTasks = await fetchTasksCompat({
+                requireDueDate: true,
+                startDate: startOfMonth,
+                endDate: endOfMonth
+            });
 
             if (internalTasks) {
-                allEvents.push(...internalTasks.map(task => ({
+                allEvents.push(...internalTasks.map((task: any) => ({
                     id: task.id,
                     summary: task.title || 'Reunión Interna',
                     description: task.description || '',
@@ -150,11 +195,11 @@ const Schedule = () => {
 
     const fetchTasks = async () => {
         if (!selectedSellerId) return;
-        const { data } = await supabase.from('crm_tasks')
-            .select('*, clients(name)')
-            .eq('assigned_to', selectedSellerId)
-            .eq('status', 'pending');
-        if (data) setTasks(data);
+        const data = await fetchTasksCompat({
+            withClientJoin: true,
+            pendingOnly: true
+        });
+        setTasks(data || []);
     };
 
     const deleteVisit = async (visitId: string) => {

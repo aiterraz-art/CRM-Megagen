@@ -37,12 +37,12 @@ const DriverDashboard: React.FC = () => {
                 .in('route_id', routeIds);
 
             if (items) {
-                const pending = items.filter(i => i.status === 'pending').length;
+                const pending = items.filter(i => i.status === 'pending' || i.status === 'rescheduled' || i.status === 'failed').length;
                 const delivered = items.filter(i => i.status === 'delivered').length;
                 setStats({
                     pending,
                     delivered,
-                    total: pending + delivered
+                    total: items.length
                 });
             }
         };

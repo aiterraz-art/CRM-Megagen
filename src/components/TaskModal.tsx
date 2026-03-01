@@ -89,9 +89,20 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onTaskAdded, pre
                 status: 'pending'
             };
 
-            console.log('Inserting Task:', taskData); // Debug
+            let { error } = await supabase.from('tasks').insert(taskData);
 
-            const { error } = await supabase.from('tasks').insert(taskData);
+            if (error) {
+                const retry = await (supabase.from('tasks') as any).insert({
+                    assigned_to: profile.id,
+                    title,
+                    description,
+                    client_id: finalClientId,
+                    due_date: combinedDate.toISOString(),
+                    priority,
+                    status: 'pending'
+                });
+                error = retry.error;
+            }
 
             if (error) throw error;
 

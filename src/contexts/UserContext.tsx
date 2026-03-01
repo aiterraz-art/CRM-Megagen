@@ -27,6 +27,8 @@ interface UserContextType {
     canViewMetas: boolean;
     hasPermission: (permission: string) => boolean;
     permissions: string[];
+    simulatedRole: string | null;
+    setSimulatedRole: (role: string | null) => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -36,15 +38,23 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
     const [impersonatedUser, setImpersonatedUser] = useState<Profile | null>(null);
     const [permissions, setPermissions] = useState<string[]>([]);
+    const [simulatedRole, setSimulatedRole] = useState<string | null>(null);
+    const normalizeRole = (role: string | null | undefined) => {
+        const baseRole = (role || '').trim().toLowerCase();
+        // Backward compatibility: legacy "manager" is now "admin".
+        if (baseRole === 'manager') return 'admin';
+        return baseRole;
+    };
 
     const fetchPermissions = async (role: string) => {
+        const normalizedRole = normalizeRole(role);
         const defaults: Record<string, string[]> = {
-            'manager': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS'],
-            'admin': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS'],
-            'jefe': ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS'],
-            'administrativo': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH'],
+            'admin': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS'],
+            'jefe': ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS'],
+            'administrativo': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS'],
             'seller': ['VIEW_METAS'],
-            'driver': ['EXECUTE_DELIVERY']
+            'driver': ['EXECUTE_DELIVERY'],
+            'supervisor': ['VIEW_TEAM_STATS', 'VIEW_OPERATIONS']
         };
 
         // NUCLEAR BYPASS: If current user is owner, give EVERYTHING regardless of DB
@@ -56,23 +66,23 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         try {
-            const { data, error } = await supabase.from('role_permissions').select('permission').eq('role', role);
-            console.log(`UserContext DB Perms (${role}):`, { data, error });
+            const { data, error } = await supabase.from('role_permissions').select('permission').eq('role', normalizedRole);
+            console.log(`UserContext DB Perms (${normalizedRole}):`, { data, error });
 
             if (error || !data || data.length === 0) {
-                console.warn(`UserContext: Using default permissions for ${role}`);
-                const fallback = defaults[role] || [];
-                console.log(`UserContext Fallback (${role}):`, fallback);
+                console.warn(`UserContext: Using default permissions for ${normalizedRole}`);
+                const fallback = defaults[normalizedRole] || [];
+                console.log(`UserContext Fallback (${normalizedRole}):`, fallback);
                 setPermissions(fallback);
                 return;
             }
 
-            const perms = data.map(p => p.permission);
-            console.log(`UserContext Final Perms (${role}):`, perms);
+            const perms = Array.from(new Set([...(defaults[normalizedRole] || []), ...data.map(p => p.permission)]));
+            console.log(`UserContext Final Perms (${normalizedRole}):`, perms);
             setPermissions(perms);
         } catch (err) {
             console.error("Error fetching permissions, using fallbacks:", err);
-            setPermissions(defaults[role] || []);
+            setPermissions(defaults[normalizedRole] || []);
         }
     };
 
@@ -103,6 +113,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 if (data && data.length > 0) {
                     let userProfile = data[0] as any as Profile;
+                    const normalizedSessionEmail = (session.user.email || '').toLowerCase();
 
                     const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
                     if (session.user.email === ownerEmail) {
@@ -116,7 +127,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         const { data: whitelistEntry } = await supabase
                             .from('user_whitelist')
                             .select('role')
-                            .eq('email', session.user.email)
+                            .eq('email', normalizedSessionEmail)
                             .maybeSingle();
 
                         if (whitelistEntry) {
@@ -125,11 +136,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                             // Force update DB
                             await supabase.from('profiles').update({
                                 status: 'active',
-                                role: whitelistEntry.role
+                                role: normalizeRole(whitelistEntry.role)
                             }).eq('id', session.user.id);
 
                             // Update local object
-                            userProfile = { ...userProfile, status: 'active', role: whitelistEntry.role };
+                            userProfile = { ...userProfile, status: 'active', role: normalizeRole(whitelistEntry.role) };
                         }
                     }
                     setProfile(userProfile);
@@ -149,7 +160,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const { data: whitelistEntry } = await supabase
                         .from('user_whitelist')
                         .select('role')
-                        .eq('email', session.user.email)
+                        .eq('email', (session.user.email || '').toLowerCase())
                         .maybeSingle();
 
                     if (whitelistEntry) {
@@ -157,7 +168,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         const newProfile = {
                             id: session.user.id,
                             email: session.user.email,
-                            role: whitelistEntry.role, // Use role from invitation
+                            role: normalizeRole(whitelistEntry.role), // Use role from invitation
                             status: 'active',
                             full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Nuevo Usuario'
                         };
@@ -195,6 +206,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             else {
                 setProfile(null);
                 setImpersonatedUser(null);
+                setSimulatedRole(null);
                 setLoading(false);
             }
         });
@@ -202,16 +214,22 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     useEffect(() => {
-        const role = (impersonatedUser || profile)?.role;
+        const role = normalizeRole(simulatedRole || (impersonatedUser || profile)?.role);
         if (role) fetchPermissions(role);
         else setPermissions([]);
-    }, [profile?.role, impersonatedUser?.role]);
+    }, [profile?.role, impersonatedUser?.role, simulatedRole]);
 
-    const getRoleBase = (r: string | null | undefined) => (r || '').trim().toLowerCase();
+    useEffect(() => {
+        if (!simulatedRole) return;
+        if (normalizeRole(profile?.role) !== 'admin') {
+            setSimulatedRole(null);
+        }
+    }, [profile?.role, simulatedRole]);
+
     const effectiveProfile = impersonatedUser || profile;
-    const effectiveRole = getRoleBase(effectiveProfile?.role);
+    const effectiveRole = normalizeRole(simulatedRole || effectiveProfile?.role);
 
-    const isManager = effectiveRole === 'manager' || effectiveRole === 'admin';
+    const isManager = effectiveRole === 'admin';
     const isChief = effectiveRole === 'jefe';
     const isAdminOps = effectiveRole === 'administrativo';
     const isSeller = effectiveRole === 'seller';
@@ -227,7 +245,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             profile: effectiveProfile, loading, isSupervisor, impersonatedUser, impersonateUser: async (email: string) => {
                 const { data } = await supabase.from('profiles').select('*').eq('email', email).single();
                 if (data) setImpersonatedUser(data as any as Profile);
-            }, stopImpersonation: () => setImpersonatedUser(null), effectiveRole, canImpersonate: bCanImpersonate, realRole: getRoleBase(profile?.role) || null, isManager, isChief, isAdminOps, isSeller, isDriver, canUploadData: bCanUploadData, canViewMetas: bCanViewMetas, hasPermission: bHasPermission, permissions
+            }, stopImpersonation: () => setImpersonatedUser(null), effectiveRole, canImpersonate: bCanImpersonate, realRole: normalizeRole(profile?.role) || null, isManager, isChief, isAdminOps, isSeller, isDriver, canUploadData: bCanUploadData, canViewMetas: bCanViewMetas, hasPermission: bHasPermission, permissions, simulatedRole, setSimulatedRole: (role: string | null) => setSimulatedRole(role ? normalizeRole(role) : null)
         }}>
             {children}
         </UserContext.Provider>

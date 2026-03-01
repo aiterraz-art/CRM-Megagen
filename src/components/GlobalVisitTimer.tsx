@@ -52,12 +52,14 @@ const GlobalVisitTimer = () => {
         setFinishing(true);
 
         try {
-            await endVisit({ notes: visitNotes });
-            setShowNotesModal(false);
-            setFinishing(false);
-            navigate('/');
+            const closed = await endVisit({ notes: visitNotes });
+            if (closed) {
+                setShowNotesModal(false);
+                navigate('/');
+            }
         } catch (err) {
             console.error("Checkout error in GlobalVisitTimer:", err);
+        } finally {
             setFinishing(false);
         }
     };

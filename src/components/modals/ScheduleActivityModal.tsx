@@ -65,13 +65,6 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
             const dueDateTime = new Date(`${formData.date}T${formData.time}:00`);
             const isoDue = dueDateTime.toISOString();
 
-            // 1.5 Pre-flight Google Check
-            const validToken = await googleService.ensureSession();
-            if (!validToken) {
-                setLoading(false);
-                return;
-            }
-
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) {
                 setLoading(false);
@@ -79,36 +72,38 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                 return;
             }
 
-            // 2. Insert into crm_tasks
+            // 2. Insert into tasks
             if (formData.assigneeId === 'all') {
                 // Bulk Insert for ALL sellers
                 const tasksToInsert = sellers.map(seller => ({
                     title: formData.title,
                     description: formData.notes,
+                    user_id: seller.id,
                     assigned_to: seller.id,
+                    assigned_by: session.user.id,
                     status: 'pending',
                     priority: 'medium',
-                    due_date: isoDue,
-                    task_type: 'meeting'
+                    due_date: isoDue
                 }));
 
                 const { error } = await supabase
-                    .from('crm_tasks')
+                    .from('tasks')
                     .insert(tasksToInsert);
 
                 if (error) throw error;
             } else {
                 // Single Insert
                 const { error } = await supabase
-                    .from('crm_tasks')
+                    .from('tasks')
                     .insert({
                         title: formData.title,
                         description: formData.notes,
+                        user_id: formData.assigneeId,
                         assigned_to: formData.assigneeId,
+                        assigned_by: session.user.id,
                         status: 'pending',
-                        priority: 'medium', // Default
-                        due_date: isoDue,
-                        task_type: 'meeting' // Custom type if schema supports, else just generic
+                        priority: 'medium',
+                        due_date: isoDue
                     });
 
                 if (error) throw error;
@@ -117,8 +112,17 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
             // 3. Sync to Google Calendar (Organizer Mode + Attendee Injection)
             // Session is already fetched above
             // Only sync if single assignment (not 'all') to avoid spamming self with N events
-            if (formData.assigneeId !== 'all' && session?.provider_token) {
+            if (formData.assigneeId !== 'all') {
                 try {
+                    const validToken = await googleService.ensureSession();
+                    if (!validToken) {
+                        onSaved();
+                        onClose();
+                        setFormData(p => ({ ...p, title: '', notes: '' }));
+                        alert("Actividad asignada correctamente. (Sincronización Google omitida)");
+                        return;
+                    }
+
                     const attendees = [];
                     // If not self, add as attendee
                     if (formData.assigneeId !== session.user.id) {

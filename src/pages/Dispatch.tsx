@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { read, utils } from 'xlsx';
-import { Truck, Upload, AlertCircle, CheckCircle2, Map as MapIcon, Calendar, Printer, X, Camera, ChevronRight, User, MapPin, Download } from 'lucide-react';
+import { Truck, Upload, AlertCircle, CheckCircle2, Map as MapIcon, Calendar, Printer, X, Camera, ChevronRight, User, MapPin, Download, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { APIProvider, Map as GoogleMap, AdvancedMarker, Pin, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import DeliveryNoteTemplate from '../components/DeliveryNoteTemplate';
 import { useUser } from '../contexts/UserContext';
 
 interface DeliveryRow {
-    RUT: string;
-    PEDIDO: string | number;
+    pedido: string;
+    razon_social: string;
+    direccion_maps: string;
+    repartidor: string;
+    vendedor: string;
     [key: string]: any;
 }
 
@@ -24,6 +27,13 @@ interface MatchedOrder {
     status: string; // current order status
     delivery_status: string;
     route_id?: string | null;
+    imported_address?: string;
+    imported_company?: string;
+    assigned_driver_email?: string;
+    assigned_driver_id?: string | null;
+    imported_seller_email?: string;
+    imported_seller_id?: string | null;
+    imported_seller_name?: string;
 }
 
 interface DeliveryRoute {
@@ -33,22 +43,52 @@ interface DeliveryRoute {
     status: string;
     created_at: string;
     order_count?: number;
+    pending_count?: number;
+    completed_count?: number;
 }
 
 interface DriverProfile {
     id: string;
     email: string;
     role: string;
-    name?: string; // Optional if not in profile yet
+    full_name?: string | null;
 }
 
+interface ImportIssue {
+    pedido: string;
+    razon_social: string;
+    repartidor: string;
+    vendedor: string;
+    reason: string;
+}
+
+const normalizeText = (value: unknown) => String(value || '').trim();
+const normalizeEmail = (value: unknown) => normalizeText(value).toLowerCase();
+const normalizeFolio = (value: unknown) => normalizeText(value).replace(/\s+/g, '');
+const cleanComparableText = (value: unknown) =>
+    normalizeText(value)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+const getValueByAliases = (row: Record<string, any>, aliases: string[]) => {
+    const keyMap = new Map<string, string>();
+    Object.keys(row || {}).forEach((k) => keyMap.set(cleanComparableText(k), k));
+    for (const alias of aliases) {
+        const key = keyMap.get(cleanComparableText(alias));
+        if (key) return row[key];
+    }
+    return undefined;
+};
+
 const Dispatch: React.FC = () => {
-    const { profile, hasPermission } = useUser();
+    const { profile, effectiveRole, hasPermission } = useUser();
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
     const [processedRows, setProcessedRows] = useState<DeliveryRow[]>([]);
     const [matchedOrders, setMatchedOrders] = useState<MatchedOrder[]>([]);
     const [notFound, setNotFound] = useState<DeliveryRow[]>([]);
+    const [importIssues, setImportIssues] = useState<ImportIssue[]>([]);
     const [isMapVisible, setIsMapVisible] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
@@ -61,6 +101,7 @@ const Dispatch: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'upload' | 'routes'>('upload');
     const [selectedOrdersForRoute, setSelectedOrdersForRoute] = useState<Set<string>>(new Set());
     const [drivers, setDrivers] = useState<DriverProfile[]>([]);
+    const [sellers, setSellers] = useState<DriverProfile[]>([]);
     const [selectedDriverId, setSelectedDriverId] = useState<string>("");
 
     // Route Details State
@@ -102,18 +143,27 @@ const Dispatch: React.FC = () => {
     useEffect(() => {
         fetchRoutes();
         fetchDrivers();
+        fetchSellers();
     }, []);
 
     const fetchDrivers = async () => {
-        const { data, error } = await supabase.from('profiles').select('*').eq('role', 'driver');
+        const { data, error } = await supabase.from('profiles').select('id, email, role, full_name').eq('role', 'driver');
         if (!error && data) setDrivers(data as DriverProfile[]);
+    };
+
+    const fetchSellers = async () => {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, email, role, full_name')
+            .in('role', ['seller', 'jefe', 'admin']);
+        if (!error && data) setSellers(data as DriverProfile[]);
     };
 
     const fetchRouteDetails = async (route: DeliveryRoute) => {
         try {
             setSelectedRouteForDetails(route);
             setIsDetailsModalOpen(true);
-            setSelectedRouteItems([]); // Reset previous
+            setSelectedRouteItems(null); // Loading state
 
             console.log("Fetching details for route:", route.id);
 
@@ -195,8 +245,16 @@ const Dispatch: React.FC = () => {
             // 3. Merge Data & Get Counts
             const enrichedRoutes = await Promise.all(routesData.map(async (route) => {
                 // Get counts
-                const { count: pending } = await supabase.from('route_items').select('*', { count: 'exact', head: true }).eq('route_id', route.id).neq('status', 'completed');
-                const { count: completed } = await supabase.from('route_items').select('*', { count: 'exact', head: true }).eq('route_id', route.id).eq('status', 'completed');
+                const { count: pending } = await supabase
+                    .from('route_items')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('route_id', route.id)
+                    .in('status', ['pending', 'rescheduled', 'failed']);
+                const { count: completed } = await supabase
+                    .from('route_items')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('route_id', route.id)
+                    .eq('status', 'delivered');
 
                 return {
                     ...route,
@@ -256,6 +314,21 @@ const Dispatch: React.FC = () => {
         setPrintingOrder(deliveryData);
     };
 
+    const handleDownloadImportTemplate = () => {
+        const headers = ['pedido', 'razon_social', 'direccion_maps', 'repartidor', 'vendedor'];
+        const example = ['100123', 'CLINICA DENTAL SPA', 'Av. Americo Vespucio 2880, Conchali, Chile', 'repartidor@empresa.cl', 'vendedor@empresa.cl'];
+        const csv = [headers.join(','), example.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'formato_despacho_importacion.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -264,118 +337,256 @@ const Dispatch: React.FC = () => {
         setProcessedRows([]);
         setMatchedOrders([]);
         setNotFound([]);
+        setImportIssues([]);
 
         try {
             const data = await file.arrayBuffer();
             const workbook = read(data);
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-            const jsonData: DeliveryRow[] = utils.sheet_to_json(worksheet);
+            const rawRows: Record<string, any>[] = utils.sheet_to_json(worksheet, { defval: '' });
 
-            console.log("Uploaded Data:", jsonData);
-            setProcessedRows(jsonData);
-            await matchOrders(jsonData);
+            const normalizedRows: DeliveryRow[] = rawRows.map((row) => ({
+                pedido: normalizeFolio(getValueByAliases(row, ['pedido', 'numero_pedido', 'nro_pedido', 'folio', 'pedido_numero'])),
+                razon_social: normalizeText(getValueByAliases(row, ['razon_social', 'razon social', 'cliente', 'cliente_razon_social'])),
+                direccion_maps: normalizeText(getValueByAliases(row, ['direccion_maps', 'direccion_google_maps', 'direccion_google', 'direccion_normalizada', 'direccion'])),
+                repartidor: normalizeEmail(getValueByAliases(row, ['repartidor', 'repartidor_email', 'driver', 'driver_email', 'conductor', 'conductor_email'])),
+                vendedor: normalizeEmail(getValueByAliases(row, ['vendedor', 'vendedor_email', 'seller', 'seller_email', 'ejecutivo', 'ejecutivo_email']))
+            }));
+
+            const initialIssues: ImportIssue[] = [];
+            const validRows = normalizedRows.filter((r) => {
+                if (!r.pedido) {
+                    initialIssues.push({ pedido: r.pedido, razon_social: r.razon_social, repartidor: r.repartidor, vendedor: r.vendedor, reason: 'Falta número de pedido' });
+                    return false;
+                }
+                if (!r.repartidor) {
+                    initialIssues.push({ pedido: r.pedido, razon_social: r.razon_social, repartidor: r.repartidor, vendedor: r.vendedor, reason: 'Falta repartidor' });
+                    return false;
+                }
+                if (!r.vendedor) {
+                    initialIssues.push({ pedido: r.pedido, razon_social: r.razon_social, repartidor: r.repartidor, vendedor: r.vendedor, reason: 'Falta vendedor' });
+                    return false;
+                }
+                return true;
+            });
+
+            setProcessedRows(validRows);
+            await matchOrders(validRows, initialIssues);
+            if (initialIssues.length > 0) {
+                alert(`Se detectaron ${initialIssues.length} filas con errores obligatorios (pedido/repartidor/vendedor). Corrige el archivo para continuar.`);
+            }
 
         } catch (error) {
             console.error("Error parsing Excel:", error);
-            alert("Error al leer el archivo Excel. Asegúrate de que tenga columnas 'RUT' y 'PEDIDO'.");
+            alert("Error al leer el archivo. Revisa formato con columnas: pedido, razon_social, direccion_maps, repartidor, vendedor.");
         } finally {
             setUploading(false);
+            e.target.value = '';
         }
     };
 
-    const matchOrders = async (rows: DeliveryRow[]) => {
+    const matchOrders = async (rows: DeliveryRow[], initialIssues: ImportIssue[] = []) => {
         const found: MatchedOrder[] = [];
         const missing: DeliveryRow[] = [];
+        const issues: ImportIssue[] = [...initialIssues];
+
+        const driverMap = new Map<string, DriverProfile>();
+        drivers.forEach((d) => driverMap.set(normalizeEmail(d.email), d));
+        const sellerMap = new Map<string, DriverProfile>();
+        sellers.forEach((s) => sellerMap.set(normalizeEmail(s.email), s));
 
         const { data: allOrders, error } = await supabase
             .from('orders')
             .select(`
-                id, status, delivery_status,
-                client:clients(name, address, zone, rut, comuna, office),
-                seller_location:seller_locations(lat, lng) 
+                id, folio, status, delivery_status,
+                client:clients(name, address, zone, rut, comuna, office, lat, lng)
             `)
-            .not('status', 'eq', 'rejected'); // Filter out rejected
+            .not('status', 'eq', 'rejected')
+            .not('delivery_status', 'eq', 'delivered');
 
         if (error || !allOrders) {
             console.error("Error fetching orders:", error);
             return;
         }
 
-        // Create a map for fast lookup
-        const orderMap = new Map();
+        // lookup by folio
+        const orderMap = new Map<string, any>();
         allOrders.forEach((o: any) => {
-            if (o.client?.rut) {
-                const rutClean = o.client.rut.replace(/\./g, '').replace(/-/g, '').toUpperCase();
-                // Use a fallback for key generation if folio is missing
-                const key = `${o.folio || 0}-${rutClean}`;
-                orderMap.set(key, o);
-            }
+            const normalized = normalizeFolio(o.folio);
+            if (!normalized) return;
+            orderMap.set(normalized, o);
         });
 
         rows.forEach(row => {
-            const rowRut = String(row.RUT || '').replace(/\./g, '').replace(/-/g, '').toUpperCase();
-            const rowFolio = String(row.PEDIDO || '').trim();
-            const key = `${rowFolio}-${rowRut}`;
-
-            const match = orderMap.get(key);
+            const rowFolio = normalizeFolio(row.pedido);
+            const match = orderMap.get(rowFolio);
 
             if (match) {
-                const loc = match.seller_location && match.seller_location.length > 0 ? match.seller_location[0] : null;
+                const assignedDriver = driverMap.get(normalizeEmail(row.repartidor));
+                const assignedSeller = sellerMap.get(normalizeEmail(row.vendedor));
+                const clientLat = Number(match.client?.lat);
+                const clientLng = Number(match.client?.lng);
 
                 found.push({
                     id: match.id,
-                    folio: match.folio,
+                    folio: match.folio || parseInt(match.id.slice(0, 4), 16),
                     client_name: match.client.name,
-                    client_address: match.client.address || match.client.comuna || match.client.zone,
+                    client_address: row.direccion_maps || match.client.address || match.client.comuna || match.client.zone,
                     client_office: match.client.office,
                     client_rut: match.client.rut,
-                    lat: loc?.lat,
-                    lng: loc?.lng,
+                    lat: Number.isFinite(clientLat) ? clientLat : undefined,
+                    lng: Number.isFinite(clientLng) ? clientLng : undefined,
                     status: match.status,
-                    delivery_status: match.delivery_status || 'pending'
+                    delivery_status: match.delivery_status || 'pending',
+                    imported_address: row.direccion_maps || undefined,
+                    imported_company: row.razon_social || undefined,
+                    assigned_driver_email: row.repartidor || undefined,
+                    assigned_driver_id: assignedDriver?.id || null,
+                    imported_seller_email: row.vendedor || undefined,
+                    imported_seller_id: assignedSeller?.id || null,
+                    imported_seller_name: assignedSeller?.full_name || assignedSeller?.email || ''
                 });
+                if (!assignedDriver) {
+                    issues.push({
+                        pedido: row.pedido,
+                        razon_social: row.razon_social,
+                        repartidor: row.repartidor,
+                        vendedor: row.vendedor,
+                        reason: `Repartidor no existe en perfiles: ${row.repartidor}`
+                    });
+                }
+                if (!assignedSeller) {
+                    issues.push({
+                        pedido: row.pedido,
+                        razon_social: row.razon_social,
+                        repartidor: row.repartidor,
+                        vendedor: row.vendedor,
+                        reason: `Vendedor no existe en perfiles: ${row.vendedor}`
+                    });
+                }
             } else {
                 missing.push(row);
+                issues.push({
+                    pedido: row.pedido,
+                    razon_social: row.razon_social,
+                    repartidor: row.repartidor,
+                    vendedor: row.vendedor,
+                    reason: 'Pedido no encontrado o no disponible para despacho'
+                });
             }
         });
 
         setMatchedOrders(found);
         setNotFound(missing);
+        setImportIssues(issues);
     };
 
-    const handleGenerateRoute = () => {
-        if (!directionsService || !directionsRenderer || matchedOrders.length === 0) return;
+    const moveOrder = (orderId: string, direction: 'up' | 'down') => {
+        setMatchedOrders((prev) => {
+            const index = prev.findIndex((o) => o.id === orderId);
+            if (index < 0) return prev;
+            const target = direction === 'up' ? index - 1 : index + 1;
+            if (target < 0 || target >= prev.length) return prev;
+            const next = [...prev];
+            [next[index], next[target]] = [next[target], next[index]];
+            return next;
+        });
+    };
 
-        const officeLocation = { lat: -33.3768, lng: -70.6725 }; // Americo Vespucio 2880, Conchali
+    const handleDriverChange = (orderId: string, driverId: string) => {
+        const driver = drivers.find((d) => d.id === driverId);
+        setMatchedOrders((prev) =>
+            prev.map((o) =>
+                o.id === orderId
+                    ? {
+                        ...o,
+                        assigned_driver_id: driverId || null,
+                        assigned_driver_email: driver?.email || ''
+                    }
+                    : o
+            )
+        );
+    };
 
-        const waypoints = matchedOrders
-            .filter(o => o.lat && o.lng)
-            .map(o => ({
+    const optimizeByDriver = async (): Promise<MatchedOrder[]> => {
+        if (!directionsService || matchedOrders.length === 0) return matchedOrders;
+
+        const officeLocation = { lat: -33.3768, lng: -70.6725 };
+        const grouped = new Map<string, MatchedOrder[]>();
+        matchedOrders.forEach((o) => {
+            const key = o.assigned_driver_id || '__no_driver__';
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push(o);
+        });
+
+        const optimizedAll: MatchedOrder[] = [];
+        for (const [, groupOrders] of grouped.entries()) {
+            const geocodedOrders = groupOrders.filter((o) => Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng)));
+            const noCoordinates = groupOrders.filter((o) => !(Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng))));
+            if (geocodedOrders.length <= 1) {
+                optimizedAll.push(...groupOrders);
+                continue;
+            }
+
+            const waypoints = geocodedOrders.map((o) => ({
                 location: { lat: Number(o.lat), lng: Number(o.lng) },
                 stopover: true
             }));
 
-        directionsService.route({
-            origin: officeLocation,
-            destination: officeLocation,
-            waypoints: waypoints,
-            optimizeWaypoints: true,
-            travelMode: google.maps.TravelMode.DRIVING
-        }, (result, status) => {
-            if (status === 'OK' && result) {
-                directionsRenderer.setDirections(result);
+            const optimizedGroup = await new Promise<MatchedOrder[]>((resolve) => {
+                directionsService.route(
+                    {
+                        origin: officeLocation,
+                        destination: officeLocation,
+                        waypoints,
+                        optimizeWaypoints: true,
+                        travelMode: google.maps.TravelMode.DRIVING
+                    },
+                    (result, status) => {
+                        if (status === 'OK' && result?.routes?.[0]?.waypoint_order) {
+                            const ordered = result.routes[0].waypoint_order
+                                .map((idx) => geocodedOrders[idx])
+                                .filter(Boolean);
+                            resolve([...ordered, ...noCoordinates]);
+                            return;
+                        }
+                        resolve([...geocodedOrders, ...noCoordinates]);
+                    }
+                );
+            });
 
-                // Reorder matchedOrders based on optimization result
-                if (result.routes[0] && result.routes[0].waypoint_order) {
-                    const optimizedOrder = result.routes[0].waypoint_order;
-                    const newOrders = optimizedOrder.map(index => matchedOrders[index]);
-                    setMatchedOrders(newOrders);
+            optimizedAll.push(...optimizedGroup);
+        }
+
+        setMatchedOrders(optimizedAll);
+        return optimizedAll;
+    };
+
+    const handleGenerateRoute = async () => {
+        if (!directionsService || !directionsRenderer || matchedOrders.length === 0) return;
+        const optimized = await optimizeByDriver();
+        const sourceList = optimized && optimized.length > 0 ? optimized : matchedOrders;
+        const geocodedOrders = sourceList.filter((o) => Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng)));
+        if (geocodedOrders.length === 0) return;
+        const officeLocation = { lat: -33.3768, lng: -70.6725 };
+        const waypoints = geocodedOrders.map((o) => ({
+            location: { lat: Number(o.lat), lng: Number(o.lng) },
+            stopover: true
+        }));
+        directionsService.route(
+            {
+                origin: officeLocation,
+                destination: officeLocation,
+                waypoints,
+                optimizeWaypoints: false,
+                travelMode: google.maps.TravelMode.DRIVING
+            },
+            (result, status) => {
+                if (status === 'OK' && result) {
+                    directionsRenderer.setDirections(result);
                 }
-            } else {
-                console.error("Directions request failed due to " + status);
-                alert("No se pudo generar la ruta: " + status);
             }
-        });
+        );
     };
 
     // Route Management Functions
@@ -405,67 +616,138 @@ const Dispatch: React.FC = () => {
             return;
         }
 
-        // Validate Driver (MANDATORY REQUEST)
-        if (!selectedDriverId) {
-            alert("⚠️ Debes asignar un conductor obligatoriamente antes de iniciar la ruta.");
+        const selected = matchedOrders.filter((o) => selectedOrdersForRoute.has(o.id));
+        const missingSeller = selected.filter((o) => !o.imported_seller_id);
+        if (missingSeller.length > 0) {
+            const sample = missingSeller.slice(0, 5).map((o) => `#${o.folio}`).join(', ');
+            alert(`No puedes avanzar: faltan vendedores válidos en ${missingSeller.length} pedidos (${sample}). Corrige columna vendedor en el importador.`);
             return;
         }
 
-        // Prompt for route name
-        const routeName = prompt("Nombre de la Ruta (ej. Ruta Centro - 20/01):", `Ruta ${new Date().toLocaleDateString()}`);
-        if (!routeName) return;
+        const missingDriver = selected.filter((o) => !(o.assigned_driver_id || selectedDriverId));
+        if (missingDriver.length > 0) {
+            const sample = missingDriver.slice(0, 5).map((o) => `#${o.folio}`).join(', ');
+            alert(`No puedes avanzar: faltan repartidores asignados en ${missingDriver.length} pedidos (${sample}).`);
+            return;
+        }
 
         setSubmitting(true);
+        const createdRouteIds: string[] = [];
+        const touchedOrderIds = new Set<string>();
+        const originalOrderState = new Map<string, { route_id: string | null; delivery_status: string | null }>(
+            selected.map((order) => [
+                order.id,
+                {
+                    route_id: order.route_id || null,
+                    delivery_status: order.delivery_status || null
+                }
+            ])
+        );
+
         try {
-            // 1. Create Route Header
-            const { data: routeData, error: routeError } = await supabase
-                .from('delivery_routes')
-                .insert({
-                    name: routeName,
-                    driver_id: selectedDriverId || null,
-                    status: 'in_progress',
-                })
-                .select()
-                .single();
+            const grouped = new Map<string, MatchedOrder[]>();
+            selected.forEach((o) => {
+                const driverId = o.assigned_driver_id || selectedDriverId || '';
+                if (!driverId) return;
+                if (!grouped.has(driverId)) grouped.set(driverId, []);
+                grouped.get(driverId)!.push(o);
+            });
 
-            if (routeError) throw routeError;
+            if (grouped.size === 0) {
+                alert("Debes asignar repartidor a los pedidos seleccionados (en archivo o manualmente).");
+                return;
+            }
 
-            // 2. Prepare Route Items
-            const itemsToInsert = Array.from(selectedOrdersForRoute).map((orderId, index) => ({
-                route_id: routeData.id,
-                order_id: orderId,
-                sequence_order: index + 1,
-                status: 'pending'
-            }));
+            const todayLabel = new Date().toLocaleDateString();
+            let routesCreated = 0;
 
-            // 3. Insert Route Items
-            const { error: itemsError } = await supabase
-                .from('route_items')
-                .insert(itemsToInsert);
+            for (const [driverId, ordersGroup] of grouped.entries()) {
+                const driver = drivers.find((d) => d.id === driverId);
+                const routeName = `Ruta ${driver?.full_name || driver?.email || driverId} - ${todayLabel}`;
 
-            if (itemsError) throw itemsError;
+                const { data: routeData, error: routeError } = await supabase
+                    .from('delivery_routes')
+                    .insert({
+                        name: routeName,
+                        driver_id: driverId,
+                        status: 'in_progress'
+                    })
+                    .select()
+                    .single();
+                if (!routeData || routeError) throw routeError || new Error("No se pudo crear la ruta.");
+                createdRouteIds.push(routeData.id);
 
-            // 4. Update Orders Status & Pointer (Dual-write for compatibility)
-            const { error: updateError } = await supabase
-                .from('orders')
-                .update({
+                const itemsToInsert = ordersGroup.map((order, index) => ({
                     route_id: routeData.id,
-                    delivery_status: 'out_for_delivery' // Mark as out immediately or keep pending? Let's say out for delivery for now or keep 'pending' until dispatched. 
-                    // Actually, keeping 'pending' allows the "Start Dispatch" button to do the transition.
-                    // But typically creating the route implies it's being prepared.
-                    // Let's set it to 'out_for_delivery' to simplify workflow for v1.
-                })
-                .in('id', Array.from(selectedOrdersForRoute));
+                    order_id: order.id,
+                    sequence_order: index + 1,
+                    status: 'pending'
+                }));
+                const { error: itemsError } = await supabase.from('route_items').insert(itemsToInsert);
+                if (itemsError) throw itemsError;
 
-            if (updateError) throw updateError;
+                const { error: updateError } = await supabase
+                    .from('orders')
+                    .update({
+                        route_id: routeData.id,
+                        delivery_status: 'out_for_delivery'
+                    })
+                    .in('id', ordersGroup.map((o) => o.id));
+                if (updateError) throw updateError;
+                ordersGroup.forEach((o) => touchedOrderIds.add(o.id));
 
-            alert("¡Ruta creada exitosamente!");
+                // Sync owner seller from import file (best effort with schema fallback)
+                for (const order of ordersGroup) {
+                    if (!order.imported_seller_id) continue;
+                    const sellerPayload = { seller_id: order.imported_seller_id } as any;
+                    const { error: sellerErr } = await (supabase.from('orders') as any)
+                        .update(sellerPayload)
+                        .eq('id', order.id);
+                    if (sellerErr) {
+                        const userPayload = { user_id: order.imported_seller_id } as any;
+                        const { error: userErr } = await (supabase.from('orders') as any)
+                            .update(userPayload)
+                            .eq('id', order.id);
+                        if (userErr) throw userErr;
+                    }
+                }
+                routesCreated += 1;
+            }
+
+            alert(`¡Rutas creadas exitosamente! (${routesCreated})`);
             setSelectedOrdersForRoute(new Set());
             fetchRoutes();
             setActiveTab('routes');
 
         } catch (error: any) {
             console.error("Error creating route:", error);
+            // Compensating rollback: keeps DB consistent when one grouped route fails mid-process.
+            if (createdRouteIds.length > 0) {
+                const { error: rollbackRoutesError } = await supabase
+                    .from('delivery_routes')
+                    .delete()
+                    .in('id', createdRouteIds);
+                if (rollbackRoutesError) {
+                    console.error("Rollback error deleting created routes:", rollbackRoutesError);
+                }
+            }
+
+            if (touchedOrderIds.size > 0) {
+                for (const orderId of touchedOrderIds) {
+                    const prev = originalOrderState.get(orderId);
+                    if (!prev) continue;
+                    const { error: restoreError } = await supabase
+                        .from('orders')
+                        .update({
+                            route_id: prev.route_id,
+                            delivery_status: prev.delivery_status
+                        })
+                        .eq('id', orderId);
+                    if (restoreError) {
+                        console.error(`Rollback error restoring order ${orderId}:`, restoreError);
+                    }
+                }
+            }
             alert("Error al crear ruta: " + error.message);
         } finally {
             setSubmitting(false);
@@ -502,62 +784,117 @@ const Dispatch: React.FC = () => {
         }
     };
 
+    const getRouteStatusLabel = (status: string) => {
+        if (status === 'completed') return 'Completada';
+        if (status === 'draft' || status === 'planning') return 'Planificación';
+        return 'Activa';
+    };
+
+    const getRouteStatusStyles = (status: string) => {
+        if (status === 'completed') return 'bg-green-100 text-green-700';
+        if (status === 'draft' || status === 'planning') return 'bg-amber-100 text-amber-700';
+        return 'bg-blue-100 text-blue-700';
+    };
+
+    const canManageDispatch = effectiveRole === 'admin' || effectiveRole === 'administrativo';
+    if (!canManageDispatch) {
+        return <div className="p-10 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para Admin y Administrativo.</div>;
+    }
+
     return (
         <div className="space-y-8 w-full mx-auto">
-            <div className="flex flex-col md:flex-row justify-between gap-6 items-start">
-                <div>
-                    <h2 className="text-4xl font-black text-gray-900 tracking-tight">Centro de Despacho</h2>
-                    <p className="text-gray-400 font-medium mt-1 text-lg">Carga masiva y planificación de rutas</p>
+            <div className="space-y-4">
+                <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-end">
+                    <div>
+                        <h2 className="text-4xl font-black text-gray-900 tracking-tight">Centro de Despacho</h2>
+                        <p className="text-gray-400 font-medium mt-1 text-lg">Carga masiva y planificación de rutas</p>
+                    </div>
 
-                </div>
-
-                {/* Tabs */}
-                <div className="flex gap-4 mb-4">
-                    <button
-                        onClick={() => setActiveTab('upload')}
-                        className={`px-4 py-2 rounded-lg font-bold transition-all ${activeTab === 'upload' ? 'bg-slate-900 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
-                    >
-                        Planificación (Excel)
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('routes')}
-                        className={`px-4 py-2 rounded-lg font-bold transition-all ${activeTab === 'routes' ? 'bg-slate-900 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
-                    >
-                        Historial de Rutas
-                    </button>
-                </div>
-
-                <div className="flex gap-4">
-                    <button
-                        onClick={handleGenerateRoute}
-                        className="px-6 py-4 rounded-2xl font-bold flex items-center transition-all bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-200 shadow-sm"
-                    >
-                        <MapIcon className="mr-2" size={20} />
-                        Optimizar Ruta
-                    </button>
-                    <button
-                        onClick={() => setIsMapVisible(!isMapVisible)}
-                        className={`px-6 py-4 rounded-2xl font-bold flex items-center transition-all ${isMapVisible ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
-                    >
-                        <MapIcon className="mr-2" size={20} />
-                        {isMapVisible ? 'Ocultar Mapa' : 'Ver en Mapa'}
-                    </button>
-
-                    <div className="relative">
-                        <input
-                            type="file"
-                            accept=".xlsx, .xls"
-                            onChange={handleFileUpload}
-                            className={`absolute inset-0 w-full h-full opacity-0 z-10 ${!hasPermission('UPLOAD_EXCEL') ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                            disabled={uploading || submitting || !hasPermission('UPLOAD_EXCEL')}
-                        />
+                    <div className="inline-flex bg-gray-100 p-1 rounded-2xl self-start lg:self-auto">
                         <button
-                            className={`${!hasPermission('UPLOAD_EXCEL') ? 'bg-gray-400' : 'bg-emerald-500 hover:bg-emerald-600'} text-white px-8 py-4 rounded-2xl font-bold flex items-center shadow-xl shadow-emerald-100 transition-all active:scale-95`}
-                            title={!hasPermission('UPLOAD_EXCEL') ? "No tienes permisos para cargar archivos" : ""}
+                            onClick={() => setActiveTab('upload')}
+                            className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${activeTab === 'upload' ? 'bg-slate-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}
                         >
-                            <Upload size={20} className="mr-3" />
-                            {uploading ? 'Procesando...' : 'Cargar Excel'}
+                            Planificación
                         </button>
+                        <button
+                            onClick={() => setActiveTab('routes')}
+                            className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${activeTab === 'routes' ? 'bg-slate-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            Historial
+                        </button>
+                    </div>
+                </div>
+
+                <div className="bg-white border border-gray-100 rounded-3xl p-4 shadow-sm">
+                    <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+                        <div>
+                            <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Acciones</p>
+                            <p className="text-sm font-bold text-gray-700">
+                                {activeTab === 'upload'
+                                    ? 'Sube pedidos y prepara rutas para despacho.'
+                                    : 'Revisa rutas ejecutadas y evidencias de entrega.'}
+                            </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            {activeTab === 'upload' && (
+                                <>
+                                    <div className="relative">
+                                        <input
+                                            type="file"
+                                            accept=".xlsx, .xls, .csv"
+                                            onChange={handleFileUpload}
+                                            className={`absolute inset-0 w-full h-full opacity-0 z-10 ${!hasPermission('UPLOAD_EXCEL') ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                                            disabled={uploading || submitting || !hasPermission('UPLOAD_EXCEL')}
+                                        />
+                                        <button
+                                            className={`${!hasPermission('UPLOAD_EXCEL') ? 'bg-gray-400' : 'bg-emerald-500 hover:bg-emerald-600'} text-white px-5 py-2.5 rounded-xl text-sm font-black flex items-center transition-all active:scale-95`}
+                                            title={!hasPermission('UPLOAD_EXCEL') ? "No tienes permisos para cargar archivos" : ""}
+                                        >
+                                            <Upload size={16} className="mr-2" />
+                                            {uploading ? 'Procesando...' : 'Cargar Excel'}
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={handleDownloadImportTemplate}
+                                        className="bg-white text-gray-700 px-4 py-2.5 rounded-xl text-sm font-bold flex items-center border border-gray-200 hover:bg-gray-50 transition-all"
+                                    >
+                                        <Download size={16} className="mr-2" />
+                                        Plantilla
+                                    </button>
+                                </>
+                            )}
+
+                            <button
+                                onClick={() => setIsMapVisible(!isMapVisible)}
+                                className={`px-4 py-2.5 rounded-xl text-sm font-bold flex items-center transition-all border ${isMapVisible ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                            >
+                                <MapIcon className="mr-2" size={16} />
+                                {isMapVisible ? 'Ocultar mapa' : 'Ver mapa'}
+                            </button>
+
+                            {activeTab === 'upload' && (
+                                <>
+                                    <button
+                                        onClick={handleGenerateRoute}
+                                        disabled={matchedOrders.length === 0}
+                                        className="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center transition-all bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <MapIcon className="mr-2" size={16} />
+                                        Optimizar
+                                    </button>
+                                    <button
+                                        onClick={optimizeByDriver}
+                                        disabled={matchedOrders.length === 0}
+                                        className="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center transition-all bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <RotateCcw className="mr-2" size={16} />
+                                        Recalcular
+                                    </button>
+                                </>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -585,13 +922,31 @@ const Dispatch: React.FC = () => {
                     </div>
                     <div className="bg-white p-6 rounded-3xl border border-red-100 shadow-sm flex items-center justify-between">
                         <div>
-                            <p className="text-[10px] uppercase font-black text-red-400 tracking-widest">No Encontrados</p>
-                            <p className="text-3xl font-black text-red-600">{notFound.length}</p>
+                            <p className="text-[10px] uppercase font-black text-red-400 tracking-widest">Errores</p>
+                            <p className="text-3xl font-black text-red-600">{importIssues.length}</p>
                         </div>
                         <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center text-red-500">
                             <AlertCircle size={24} />
                         </div>
                     </div>
+                </div>
+            )}
+
+            {importIssues.length > 0 && (
+                <div className="bg-red-50 border border-red-100 rounded-3xl p-5">
+                    <h4 className="font-black text-red-700 mb-3">Errores de importación que bloquean avance</h4>
+                    <div className="space-y-2 max-h-56 overflow-auto">
+                        {importIssues.slice(0, 100).map((issue, idx) => (
+                            <div key={`${issue.pedido}-${idx}`} className="text-xs text-red-800 font-bold bg-white/70 border border-red-100 rounded-xl px-3 py-2">
+                                Pedido: {issue.pedido || 'N/A'} | Cliente: {issue.razon_social || 'N/A'} | Error: {issue.reason}
+                            </div>
+                        ))}
+                    </div>
+                    {importIssues.length > 100 && (
+                        <p className="mt-2 text-[10px] text-red-500 font-bold uppercase tracking-wider">
+                            Mostrando 100 de {importIssues.length} errores.
+                        </p>
+                    )}
                 </div>
             )}
 
@@ -618,14 +973,13 @@ const Dispatch: React.FC = () => {
                             <select
                                 value={selectedDriverId}
                                 onChange={(e) => setSelectedDriverId(e.target.value)}
-                                className={`w-full md:w-64 pl-4 pr-10 py-3 rounded-xl appearance-none font-bold outline-none ring-2 transition-all cursor-pointer ${!selectedDriverId ? 'ring-red-200 bg-red-50 text-red-500 animate-pulse' : 'ring-gray-100 bg-gray-50 text-gray-800'
-                                    }`}
+                                className="w-full md:w-64 pl-4 pr-10 py-3 rounded-xl appearance-none font-bold outline-none ring-2 ring-gray-100 bg-gray-50 text-gray-800 transition-all cursor-pointer"
                             >
-                                <option value="">-- Asignar Conductor (Requerido) --</option>
+                                <option value="">-- Conductor por defecto (opcional) --</option>
                                 {drivers.length > 0 ? (
                                     drivers.map(d => (
                                         <option key={d.id} value={d.id}>
-                                            {d.name || d.email} ({d.role})
+                                            {d.full_name || d.email} ({d.role})
                                         </option>
                                     ))
                                 ) : (
@@ -641,10 +995,9 @@ const Dispatch: React.FC = () => {
                             onClick={handleCreateRoute}
                             disabled={submitting || selectedOrdersForRoute.size === 0}
                             className={`px-8 py-3 rounded-xl font-black text-lg shadow-lg flex items-center transition-all active:scale-95 ${submitting || selectedOrdersForRoute.size === 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' :
-                                !selectedDriverId ? 'bg-gray-800 text-gray-500 cursor-not-allowed' :
-                                    'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200'
+                                'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200'
                                 }`}
-                            title={!selectedDriverId ? "Selecciona un conductor primero" : ""}
+                            title="Crea rutas por repartidor asignado en cada pedido"
                         >
                             <MapIcon className="mr-2" size={20} />
                             {submitting ? 'Procesando...' : 'Crear & Iniciar Ruta'}
@@ -686,6 +1039,26 @@ const Dispatch: React.FC = () => {
                                                 {order.client_address}
                                                 {order.client_office && <span className="ml-1 text-indigo-500 font-bold">({order.client_office})</span>}
                                             </p>
+                                            <div className="mt-2">
+                                                <select
+                                                    value={order.assigned_driver_id || selectedDriverId || ''}
+                                                    onChange={(e) => handleDriverChange(order.id, e.target.value)}
+                                                    className="w-full max-w-[300px] px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-xs font-bold text-gray-700"
+                                                >
+                                                    <option value="">Asignar repartidor...</option>
+                                                    {drivers.map((d) => (
+                                                        <option key={d.id} value={d.id}>
+                                                            {d.full_name || d.email}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <p className="text-[10px] text-gray-400 mt-1">
+                                                    Importado: {order.assigned_driver_email || 'sin repartidor en archivo'}
+                                                </p>
+                                                <p className="text-[10px] text-gray-400">
+                                                    Vendedor: {order.imported_seller_name || order.imported_seller_email || 'sin vendedor en archivo'}
+                                                </p>
+                                            </div>
 
                                             <button
                                                 onClick={() => handlePrintGuide(order.id)}
@@ -702,6 +1075,22 @@ const Dispatch: React.FC = () => {
                                                     className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                 />
                                                 <span className="text-xs font-medium text-gray-600">Seleccionar para Ruta</span>
+                                            </div>
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <button
+                                                    onClick={() => moveOrder(order.id, 'up')}
+                                                    className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center justify-center"
+                                                    title="Mover arriba"
+                                                >
+                                                    <ArrowUp size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => moveOrder(order.id, 'down')}
+                                                    className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center justify-center"
+                                                    title="Mover abajo"
+                                                >
+                                                    <ArrowDown size={14} />
+                                                </button>
                                             </div>
                                         </div>
                                         {order.lat && order.lng ? (
@@ -726,13 +1115,13 @@ const Dispatch: React.FC = () => {
                                 <ul className="space-y-3">
                                     {notFound.map((row, idx) => (
                                         <li key={idx} className="flex items-center justify-between text-xs font-bold text-red-800 border-b border-red-100 last:border-0 pb-2 last:pb-0">
-                                            <span>RUT: {row.RUT}</span>
-                                            <span>Pedido: {row.PEDIDO}</span>
+                                            <span>Cliente: {row.razon_social || 'N/A'}</span>
+                                            <span>Pedido: {row.pedido || 'N/A'} | Vendedor: {row.vendedor || 'N/A'}</span>
                                         </li>
                                     ))}
                                 </ul>
                                 <p className="mt-4 text-[10px] text-red-400 uppercase font-black tracking-widest text-center">
-                                    Verifica que el RUT y el N° de Pedido coincidan exactamente.
+                                    Verifica que el N° de pedido exista y que el repartidor sea válido.
                                 </p>
                             </div>
                         </div>
@@ -765,12 +1154,11 @@ const Dispatch: React.FC = () => {
                                                     </p>
                                                     <p className="text-xs text-gray-500 font-medium">{new Date(route.created_at).toLocaleDateString()} • {new Date(route.created_at).toLocaleTimeString()}</p>
                                                 </div>
-                                                <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${route.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                                                    }`}>
-                                                    {route.status === 'completed' ? 'Completada' : 'Activa'}
+                                                <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${getRouteStatusStyles(route.status)}`}>
+                                                    {getRouteStatusLabel(route.status)}
                                                 </span>
                                             </div>
-                                            <p className="text-sm font-bold text-gray-600 mb-4">{route.order_count || ((route as any).pending_count + (route as any).completed_count)} Pedidos</p>
+                                            <p className="text-sm font-bold text-gray-600 mb-4">{route.order_count || ((route.pending_count || 0) + (route.completed_count || 0))} Pedidos</p>
                                             <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 uppercase tracking-widest">
                                                 Ver Detalles <ChevronRight size={12} />
                                             </div>

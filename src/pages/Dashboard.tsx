@@ -108,9 +108,12 @@ const Dashboard = () => {
 
     const [monthlyStats, setMonthlyStats] = useState({ goal: 0, currentSales: 0, commissionRate: 0 });
 
-    useEffect(() => {
-        // ... existing useEffect ...
-    }, [profile, selectedDate]);
+    const formatDateInput = (date: Date) => {
+        const y = date.getFullYear();
+        const m = `${date.getMonth() + 1}`.padStart(2, '0');
+        const d = `${date.getDate()}`.padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    };
 
     const fetchDashboardData = async () => {
         setLoading(true);
@@ -128,8 +131,8 @@ const Dashboard = () => {
                 const now = new Date();
                 const currentMonth = now.getMonth() + 1;
                 const currentYear = now.getFullYear();
-                const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-                const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
+                const firstDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)).toISOString();
+                const lastDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
 
                 // A. Get Goal (Note: Goals table uses separate month/year columns as numbers)
                 const { data: goalData, error: goalError } = await supabase
@@ -263,13 +266,24 @@ const Dashboard = () => {
                 setZoneData(zoneArray);
 
                 // Fetch Tasks
-                const { data: tasksData } = await supabase
+                let { data: tasksData } = await supabase
                     .from('tasks')
                     .select('*')
                     .eq('user_id', profile.id)
                     .eq('status', 'pending')
                     .lte('due_date', new Date(new Date().setHours(23, 59, 59, 999)).toISOString())
                     .order('due_date', { ascending: true });
+
+                if (!tasksData || tasksData.length === 0) {
+                    const { data: legacyTasks } = await supabase
+                        .from('tasks')
+                        .select('*')
+                        .eq('assigned_to', profile.id)
+                        .eq('status', 'pending')
+                        .lte('due_date', new Date(new Date().setHours(23, 59, 59, 999)).toISOString())
+                        .order('due_date', { ascending: true });
+                    tasksData = legacyTasks;
+                }
                 setTasks(tasksData || []);
 
                 // C. Neglected Clients
@@ -351,8 +365,8 @@ const Dashboard = () => {
                     // 6. Goal & Sales
                     const currentMonth = now.getMonth() + 1;
                     const currentYear = now.getFullYear();
-                    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-                    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
+                    const firstDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)).toISOString();
+                    const lastDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
                     const { data: sellerGoal } = await supabase.from('goals').select('target_amount').eq('user_id', seller.id).eq('month', currentMonth).eq('year', currentYear).maybeSingle();
                     const { data: mOrders } = await supabase.from('orders').select('total_amount').eq('user_id', seller.id).gte('created_at', firstDayOfMonth).lte('created_at', lastDayOfMonth);
 
@@ -389,13 +403,28 @@ const Dashboard = () => {
                         newClientNames: (cData || []).map(c => c.name),
                         quoteAmount: oData?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0,
                         quoteCount: oData?.length || 0,
+                        quotationCount: qData?.length || 0,
+                        callCount: lData?.length || 0,
                         hours: `${Math.floor(hours)}h ${Math.round((hours % 1) * 60)}m`,
+                        totalMinutes,
                         zone: (lastV?.clients as any)?.zone || 'N/A',
                         monthlyGoal: sellerGoal?.target_amount || 0,
                         monthlySales: sellerMonthSales
                     };
                 }));
                 setAdminSummary(summary);
+
+                const totalMinutes = summary.reduce((sum, seller) => sum + (seller.totalMinutes || 0), 0);
+                const totalHours = totalMinutes / 60;
+                const uniqueZones = Array.from(new Set(summary.map(seller => seller.zone).filter((z: string) => !!z && z !== 'N/A')));
+                setStats({
+                    todayVisits: summary.reduce((sum, seller) => sum + (seller.visits || 0), 0),
+                    effectiveHours: `${Math.floor(totalHours)}h ${Math.round((totalHours % 1) * 60)}m`,
+                    zones: uniqueZones,
+                    recentVisits: [],
+                    newClientsToday: summary.reduce((sum, seller) => sum + (seller.clientsCreated || 0), 0),
+                    quotationsToday: summary.reduce((sum, seller) => sum + (seller.quotationCount || 0), 0)
+                });
             } else if (profile && !hasPermission('VIEW_TEAM_STATS')) {
                 // Seller Stats
                 const { data: visits } = await supabase.from('visits').select('*, clients(name, zone)').eq('sales_rep_id', profile.id).gte('check_in_time', isoStart).lte('check_in_time', isoEnd).order('check_in_time', { ascending: false });
@@ -562,7 +591,8 @@ const Dashboard = () => {
                                                                 // Use endVisit from context if it's the active visit, 
                                                                 // or direct update if it's another rep's visit (supervisor case)
                                                                 if (visit.id === activeVisit?.id) {
-                                                                    await endVisit({ notes: 'Cierre forzado desde Dashboard' });
+                                                                    const closed = await endVisit({ notes: 'Cierre forzado desde Dashboard' });
+                                                                    if (!closed) throw new Error('No fue posible cerrar la visita activa.');
                                                                 } else {
                                                                     const { error } = await supabase.from('visits').update({
                                                                         check_out_time: new Date().toISOString(),
@@ -590,15 +620,6 @@ const Dashboard = () => {
                     </tbody>
                 </table>
             </div>
-
-            {/* Visual Evidence Modal */}
-            {selectedVisitForEvidence && (
-                <VisualEvidence
-                    visitId={selectedVisitForEvidence.id}
-                    clientName={selectedVisitForEvidence.clients?.name}
-                    onClose={() => setSelectedVisitForEvidence(null)}
-                />
-            )}
         </div>
     );
 
@@ -619,7 +640,7 @@ const Dashboard = () => {
                         <CalendarIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
                             type="date"
-                            value={selectedDate.toISOString().split('T')[0]}
+                            value={formatDateInput(selectedDate)}
                             onChange={(e) => {
                                 if (!e.target.value) return;
                                 const [y, m, d] = e.target.value.split('-').map(Number);

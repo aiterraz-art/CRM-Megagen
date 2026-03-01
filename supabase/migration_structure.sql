@@ -13,7 +13,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Tipos ENUM personalizados
 DO $$ BEGIN
-    CREATE TYPE app_role AS ENUM ('manager', 'jefe', 'administrativo', 'seller', 'driver');
+    CREATE TYPE app_role AS ENUM ('admin', 'jefe', 'administrativo', 'seller', 'driver');
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 DO $$ BEGIN
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
     full_name TEXT,
-    role TEXT DEFAULT 'seller' CHECK (role IN ('manager', 'jefe', 'administrativo', 'seller', 'driver')),
+    role TEXT DEFAULT 'seller' CHECK (role IN ('admin', 'jefe', 'administrativo', 'seller', 'driver')),
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'disabled')),
     phone TEXT,
     avatar_url TEXT,
@@ -87,7 +87,7 @@ ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 -- Políticas Clients
 CREATE POLICY "Sellers view own clients" ON clients FOR SELECT USING (
     created_by = auth.uid() OR 
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('manager', 'jefe', 'administrativo'))
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'administrativo'))
 );
 CREATE POLICY "Sellers insert clients" ON clients FOR INSERT WITH CHECK (auth.uid() = created_by);
 CREATE POLICY "Sellers update own clients" ON clients FOR UPDATE USING (created_by = auth.uid());
@@ -112,7 +112,7 @@ ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Everyone read products" ON products FOR SELECT USING (true);
 CREATE POLICY "Staff edit products" ON products FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('manager', 'jefe', 'administrativo'))
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'administrativo'))
 );
 
 -- NO SEED DATA FOR NEW INSTANCE
@@ -139,7 +139,7 @@ ALTER TABLE public.visits ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users view own visits" ON visits FOR SELECT USING (
     user_id = auth.uid() OR 
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('manager', 'jefe'))
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe'))
 );
 CREATE POLICY "Users create visits" ON visits FOR INSERT WITH CHECK (auth.uid() = user_id);
 
@@ -176,14 +176,14 @@ ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 -- Políticas Orders
 CREATE POLICY "View orders" ON orders FOR SELECT USING (
     user_id = auth.uid() OR 
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('manager', 'jefe', 'administrativo'))
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'administrativo'))
 );
 CREATE POLICY "Create orders" ON orders FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "View items" ON order_items FOR SELECT USING (
     EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND (
         orders.user_id = auth.uid() OR 
-        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('manager', 'jefe', 'administrativo'))
+        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'administrativo'))
     ))
 );
 
@@ -218,13 +218,13 @@ ALTER TABLE public.route_items ENABLE ROW LEVEL SECURITY;
 
 -- Políticas Delivery
 CREATE POLICY "Managers all routes" ON delivery_routes FOR ALL USING (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('manager', 'jefe', 'administrativo'))
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'administrativo'))
 );
 CREATE POLICY "Drivers view assigned" ON delivery_routes FOR SELECT USING (driver_id = auth.uid());
 CREATE POLICY "Drivers update status" ON delivery_routes FOR UPDATE USING (driver_id = auth.uid());
 
 CREATE POLICY "Managers all items" ON route_items FOR ALL USING (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('manager', 'jefe', 'administrativo'))
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'administrativo'))
 );
 CREATE POLICY "Drivers view items" ON route_items FOR SELECT USING (
     EXISTS (SELECT 1 FROM delivery_routes WHERE id = route_items.route_id AND driver_id = auth.uid())
@@ -249,7 +249,7 @@ ALTER TABLE public.call_logs ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "View logs" ON call_logs FOR SELECT USING (
     user_id = auth.uid() OR 
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('manager', 'jefe'))
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe'))
 );
 CREATE POLICY "Insert logs" ON call_logs FOR INSERT WITH CHECK (auth.uid() = user_id);
 

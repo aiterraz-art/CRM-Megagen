@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { calculateDistance } from '../utils/geo';
+import { checkGPSConnection } from '../utils/gps';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 type ClientInsert = Database['public']['Tables']['clients']['Insert'];
@@ -68,7 +69,7 @@ const MapContent = () => {
 
 
     // Tracking state
-    const { profile, isSupervisor, hasPermission } = useUser();
+    const { profile, isSupervisor, permissions } = useUser();
     const [isTrackingMode, setIsTrackingMode] = useState(false);
     const [sellerLocations, setSellerLocations] = useState<any[]>([]);
     const [selectedSellerLoc, setSelectedSellerLoc] = useState<any>(null);
@@ -118,22 +119,34 @@ const MapContent = () => {
 
     useEffect(() => {
         const fetchMapClients = async () => {
-            const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || isSupervisor;
+            const canViewAll = permissions.includes('VIEW_ALL_CLIENTS') || isSupervisor;
             const userIdToFilter = !canViewAll ? profile?.id : undefined;
             const data = await clientService.getClients(userIdToFilter);
             setClients(data);
         };
         fetchMapClients();
+    }, [profile?.id, isSupervisor, permissions]);
 
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                setUserLocation(loc);
-                if (map) map.panTo(loc);
-            },
-            (err) => console.error(err)
-        );
-    }, [map, profile, isSupervisor]);
+    useEffect(() => {
+        let mounted = true;
+        const loadLocation = async () => {
+            try {
+                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 500 });
+                if (!mounted) return;
+                setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            } catch (error) {
+                console.warn('MapView GPS unavailable:', error);
+            }
+        };
+        loadLocation();
+        return () => { mounted = false; };
+    }, []);
+
+    useEffect(() => {
+        if (map && userLocation) {
+            map.panTo(userLocation);
+        }
+    }, [map, userLocation]);
 
     useEffect(() => {
         if (isTrackingMode) {

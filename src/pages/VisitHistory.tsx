@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { format, differenceInMinutes, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { Navigate } from 'react-router-dom';
 
 interface VisitHistoryItem {
     id: string;
@@ -33,7 +34,7 @@ interface VisitHistoryItem {
 }
 
 const VisitHistory = () => {
-    const { profile, isSupervisor } = useUser();
+    const { profile, isSupervisor, effectiveRole } = useUser();
     const [visits, setVisits] = useState<VisitHistoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -110,6 +111,8 @@ const VisitHistory = () => {
         v.sales_rep_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (v.notes && v.notes.toLowerCase().includes(searchTerm.toLowerCase()))
     );
+
+    if (effectiveRole === 'seller') return <Navigate to="/" />;
 
     return (
         <div className="space-y-8 animate-in fade-in duration-700">

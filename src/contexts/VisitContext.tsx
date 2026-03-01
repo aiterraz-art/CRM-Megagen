@@ -10,7 +10,7 @@ interface VisitContextType {
     activeVisit: Visit | null;
     loading: boolean;
     startVisit: (clientId: string) => Promise<Visit | null>;
-    endVisit: (options?: { notes?: string }) => Promise<void>;
+    endVisit: (options?: { notes?: string }) => Promise<boolean>;
 }
 
 const VisitContext = createContext<VisitContextType | undefined>(undefined);
@@ -135,10 +135,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         let checkInLng = null;
 
         try {
-            const getPosition = () => new Promise<GeolocationPosition>((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000, enableHighAccuracy: true });
-            });
-            const pos = await getPosition();
+            const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 300 });
             checkInLat = pos.coords.latitude;
             checkInLng = pos.coords.longitude;
         } catch (geoError) {
@@ -171,21 +168,17 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     const endVisit = async (options?: { notes?: string }) => {
-        if (!activeVisit) return;
+        if (!activeVisit) return false;
 
         const closingVisitId = activeVisit.id;
 
         try {
             // Get location
-            const getPosition = () => new Promise<GeolocationPosition>((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
-            });
-
             let lat = null;
             let lng = null;
 
             try {
-                const pos = await getPosition();
+                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 10000, maximumAgeMs: 3000, retries: 0, minAccuracyMeters: 500 });
                 lat = pos.coords.latitude;
                 lng = pos.coords.longitude;
             } catch (geoError) {
@@ -205,14 +198,17 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 console.error("Error closing visit in DB:", error);
                 alert(`Error al guardar término de visita: ${error.message}\n\nAvisa a soporte si esto persiste.`);
                 // Do NOT clear activeVisit so user can try again
+                return false;
             } else {
                 // ONLY clear on success
                 setActiveVisit(null);
+                return true;
             }
 
         } catch (error: any) {
             console.error("Error in endVisit process:", error);
             alert(`Error inesperado al terminar visita: ${error.message || 'Error desconocido'}`);
+            return false;
         }
     };
 

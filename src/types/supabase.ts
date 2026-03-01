@@ -191,6 +191,7 @@ export interface Database {
             orders: {
                 Row: {
                     id: string
+                    folio: number | null
                     items: Json | null
                     status: string | null
                     total_amount: number | null
@@ -204,6 +205,7 @@ export interface Database {
                 }
                 Insert: {
                     id?: string
+                    folio?: number | null
                     items?: Json | null
                     status?: string | null
                     total_amount?: number | null
@@ -216,6 +218,7 @@ export interface Database {
                 }
                 Update: {
                     id?: string
+                    folio?: number | null
                     items?: Json | null
                     status?: string | null
                     total_amount?: number | null

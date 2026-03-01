@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { APIProvider, Map, AdvancedMarker, Pin, InfoWindow, useMap } from '@vis.gl/react-google-maps';
 import { supabase } from '../services/supabase';
 import { Calendar, User, Clock, MapPin, Navigation, Search } from 'lucide-react';
+import { Navigate } from 'react-router-dom';
+import { useUser } from '../contexts/UserContext';
 
 // Component to handle map bounds - Must be child of APIProvider
 const MapBoundsHandler = ({ locations }: { locations: any[] }) => {
@@ -33,6 +35,7 @@ const MapBoundsHandler = ({ locations }: { locations: any[] }) => {
 };
 
 const SellerRoutes = () => {
+    const { isSupervisor, effectiveRole } = useUser();
     const [locations, setLocations] = useState<any[]>([]);
     const [users, setUsers] = useState<any[]>([]);
     const [selectedUser, setSelectedUser] = useState<string>('');
@@ -99,6 +102,7 @@ const SellerRoutes = () => {
 
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
+    if (effectiveRole === 'seller' || !isSupervisor) return <Navigate to="/" />;
     if (!apiKey) return <div className="p-8">Missing Google Maps API Key</div>;
 
     return (

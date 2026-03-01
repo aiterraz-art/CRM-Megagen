@@ -4,10 +4,8 @@ import { checkGPSConnection } from '../utils/gps';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { useVisit } from '../contexts/VisitContext';
+import { queueVisitCheckinLocation } from '../services/locationQueue';
 import { User, MapPin, Building2, ChevronRight, Stethoscope } from 'lucide-react';
-import { Database } from '../types/supabase';
-
-type Client = Database['public']['Tables']['clients']['Row'];
 
 const ColdVisit = () => {
     const navigate = useNavigate();
@@ -20,55 +18,116 @@ const ColdVisit = () => {
     const [address, setAddress] = useState('');
     const [loading, setLoading] = useState(false);
     const [location, setLocation] = useState<{ lat: number, lng: number } | null>(null);
+    const [gpsReady, setGpsReady] = useState(false);
 
     // Get location on mount
     useEffect(() => {
-        if ('geolocation' in navigator) {
-            navigator.geolocation.getCurrentPosition((pos) => {
+        let mounted = true;
+        const loadLocation = async () => {
+            try {
+                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 400 });
+                if (!mounted) return;
                 setLocation({
                     lat: pos.coords.latitude,
                     lng: pos.coords.longitude
                 });
-                // Optional: Reverse geocode here to pre-fill address if desired
-            });
-        }
+                setGpsReady(true);
+            } catch (error) {
+                console.warn('ColdVisit GPS unavailable:', error);
+                if (mounted) setGpsReady(false);
+            }
+        };
+        loadLocation();
+        return () => { mounted = false; };
     }, []);
 
     const handleStartColdVisit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!clinicName || !doctorName) {
+        const clinicNameClean = clinicName.trim();
+        const doctorNameClean = doctorName.trim();
+        const addressClean = address.trim();
+
+        if (!clinicNameClean || !doctorNameClean) {
             alert('Por favor completa el nombre de la clínica y del doctor.');
+            return;
+        }
+        if (clinicNameClean.length < 3 || doctorNameClean.length < 3) {
+            alert('El nombre de clínica y doctor debe tener al menos 3 caracteres.');
             return;
         }
 
         if (!profile) return;
+        if (activeVisit) {
+            alert('Ya tienes una visita en curso. Debes finalizarla antes de iniciar una nueva.');
+            if (activeVisit.client_id) {
+                navigate(`/visit/${activeVisit.client_id}`);
+            }
+            return;
+        }
         setLoading(true);
 
         try {
+            let currentLocation = location;
+            if (!currentLocation) {
+                try {
+                    const gpsPosition = await checkGPSConnection({
+                        showAlert: false,
+                        timeoutMs: 12000,
+                        retries: 1,
+                        minAccuracyMeters: 600
+                    });
+                    currentLocation = {
+                        lat: gpsPosition.coords.latitude,
+                        lng: gpsPosition.coords.longitude
+                    };
+                    setLocation(currentLocation);
+                    setGpsReady(true);
+                } catch {
+                    currentLocation = null;
+                }
+            }
+
             // 1. Create "Prospect" Client
             const newClient = {
-                id: crypto.randomUUID(),
-                name: clinicName,
-                purchase_contact: doctorName,
-                address: address || 'Dirección detectada por GPS', // Fallback
-                lat: location?.lat || 0,
-                lng: location?.lng || 0,
+                name: clinicNameClean,
+                purchase_contact: doctorNameClean,
+                address: addressClean || null,
+                lat: currentLocation?.lat ?? null,
+                lng: currentLocation?.lng ?? null,
                 status: 'prospect', // New status for Cold Visits
                 created_by: profile.id,
                 zone: profile.zone || 'Sin Zona',
-                notes: `Visita en Frío iniciada el ${new Date().toLocaleDateString()}`
+                notes: `Visita en Frío iniciada el ${new Date().toLocaleDateString()}${currentLocation ? ' (con GPS)' : ' (GPS en cola)'}`
             };
 
-            const { error: clientError } = await supabase.from('clients').insert(newClient);
+            const { data: createdClient, error: clientError } = await supabase
+                .from('clients')
+                .insert(newClient)
+                .select('id')
+                .single();
 
             if (clientError) throw clientError;
+            if (!createdClient?.id) throw new Error('No se pudo crear el prospecto.');
 
             // 2. Start Visit immediately
-            const visit = await startVisit(newClient.id);
+            const visit = await startVisit(createdClient.id);
 
             if (visit) {
+                if (currentLocation) {
+                    await queueVisitCheckinLocation({
+                        visit_id: visit.id,
+                        seller_id: profile.id,
+                        lat: currentLocation.lat,
+                        lng: currentLocation.lng
+                    });
+                } else {
+                    await queueVisitCheckinLocation({
+                        visit_id: visit.id,
+                        seller_id: profile.id
+                    });
+                }
                 // 3. Redirect to Visit Log
-                navigate(`/visit/${newClient.id}`);
+                navigate(`/visit/${createdClient.id}`);
             } else {
                 throw new Error("No se pudo iniciar la visita después de crear el cliente.");
             }
@@ -163,13 +222,11 @@ const ColdVisit = () => {
 
             <div className="text-center mt-6">
                 <p className="text-xs text-gray-400 font-medium">
-                    Se registrará la ubicación GPS actual automáticamente.
+                    Se intentará registrar la ubicación GPS automáticamente.
                 </p>
-                {location && (
-                    <p className="text-[10px] text-green-500 font-bold mt-1 flex items-center justify-center">
-                        <MapPin size={10} className="mr-1" /> GPS Activo
-                    </p>
-                )}
+                <p className={`text-[10px] font-bold mt-1 flex items-center justify-center ${gpsReady ? 'text-green-500' : 'text-amber-500'}`}>
+                    <MapPin size={10} className="mr-1" /> {gpsReady ? 'GPS Activo' : 'GPS no disponible, se enviará en cola automáticamente'}
+                </p>
             </div>
 
         </div>

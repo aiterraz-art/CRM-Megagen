@@ -18,7 +18,7 @@ type Client = Database['public']['Tables']['clients']['Row'];
 
 const VisitLog = () => {
     const { clientId } = useParams<{ clientId: string }>();
-    const { profile } = useUser();
+    const { profile, hasPermission, effectiveRole } = useUser();
     const { startVisit, activeVisit, endVisit } = useVisit(); // Use context
     const navigate = useNavigate();
     const [client, setClient] = useState<Client | null>(null);
@@ -58,7 +58,7 @@ const VisitLog = () => {
             const { data } = await (supabase.from('clients') as any).select('*').eq('id', clientId).single();
             if (data) {
                 // Security Check
-                const canViewAll = profile?.role === 'admin' || profile?.role === 'supervisor' || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
+                const canViewAll = effectiveRole === 'admin' || hasPermission('VIEW_ALL_CLIENTS') || hasPermission('VIEW_TEAM_STATS') || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
                 if (!canViewAll && data.created_by !== profile?.id) {
                     alert('Acceso denegado: Este cliente no está en tu cartera.');
                     navigate('/');
@@ -71,19 +71,23 @@ const VisitLog = () => {
             setLoading(false);
         };
         if (profile) fetchClient();
-    }, [clientId, profile]);
+    }, [clientId, profile, effectiveRole, hasPermission, navigate]);
 
     const checkGeofence = async (clientData: Client) => {
+        if (!clientData.lat || !clientData.lng) {
+            // No origin point to compare: allow normal check-in flow.
+            setIsNear(true);
+            return;
+        }
         try {
             // Non-blocking check for UI feedback
-            const position = await checkGPSConnection();
-            if (clientData.lat && clientData.lng) {
-                const dist = calculateDistance(position.coords.latitude, position.coords.longitude, clientData.lat, clientData.lng);
-                setIsNear(dist < 2000); // 2km toleranceance
-            }
+            const position = await checkGPSConnection({ showAlert: false, timeoutMs: 10000, retries: 1, minAccuracyMeters: 800 });
+            const dist = calculateDistance(position.coords.latitude, position.coords.longitude, clientData.lat, clientData.lng);
+            setIsNear(dist < 2000); // 2km toleranceance
         } catch (e) {
             console.warn("Geofence check failed due to GPS", e);
-            // Don't alert here to avoid spamming on mount, just default isNear to false (yellow state)
+            // If GPS is unavailable we keep the flow available with warning only.
+            setIsNear(false);
         }
     };
 
@@ -126,7 +130,9 @@ const VisitLog = () => {
             if (newVisit) {
                 console.log("Check-in success:", newVisit);
                 setVisitId(newVisit.id);
-                setVisitStartTime(new Date());
+                setVisitStartTime(newVisit.check_in_time ? new Date(newVisit.check_in_time) : new Date());
+            } else if (activeVisit?.id) {
+                alert('Ya existe una visita activa en tu sesión.');
             }
         } catch (error: any) {
             console.error("Catch error:", error);
@@ -150,11 +156,14 @@ const VisitLog = () => {
         setFinishing(true);
 
         try {
-            await endVisit({ notes: visitNotes });
-            navigate('/');
+            const closed = await endVisit({ notes: visitNotes });
+            if (closed) {
+                navigate('/');
+            }
         } catch (error) {
-            setFinishing(false);
             console.error("CheckOut error in VisitLog:", error);
+        } finally {
+            setFinishing(false);
         }
     };
 

@@ -96,13 +96,6 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
             const isoStart = startDateTime.toISOString();
             const isoEnd = endDateTime.toISOString();
 
-            // 2. Google Token Validity Check
-            const validToken = await googleService.ensureSession();
-            if (!validToken) {
-                setLoading(false);
-                return;
-            }
-
             const { data: { session } } = await supabase.auth.getSession();
             if (!session?.user) {
                 setLoading(false);
@@ -131,7 +124,8 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
             // 4. Sync to Google Calendar
             // FIX: We now sync ALWAYS if we have a token, effectively behaving as the "Organizer".
             // If assigning to another rep, we add them as an 'attendee' so it injects into their calendar.
-            if (session.provider_token) {
+            const validToken = await googleService.ensureSession().catch(() => null);
+            if (session.provider_token && validToken) {
                 try {
                     // Determine attendees
                     const attendees = [];

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Search, Bell, Settings, ShieldCheck, ShoppingBag, UserCircle, Truck, Menu, X, Stethoscope, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -13,33 +13,55 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { profile, isSupervisor, impersonatedUser, impersonateUser, stopImpersonation, effectiveRole, canImpersonate, realRole, hasPermission } = useUser();
+    const { profile, isSupervisor, effectiveRole, realRole, simulatedRole, setSimulatedRole } = useUser();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
     const menuItems = [
         { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/' },
-        { icon: <Stethoscope size={20} />, label: 'Visita en Frío', path: '/cold-visit' },
-        { icon: <MapIcon size={20} />, label: 'Mapa', path: '/map' },
-        { icon: <Users size={20} />, label: 'Clientes', path: '/clients' },
-        { icon: <ShoppingBag size={20} />, label: 'Cotizaciones', path: '/quotations' },
-        { icon: <LayoutDashboard size={20} className="rotate-90" />, label: 'Embudo', path: '/pipeline' },
-        { icon: <Package size={20} />, label: 'Inventario', path: '/inventory' },
-        { icon: <Calendar size={20} />, label: 'Agenda', path: '/schedule' },
-        { icon: <ClipboardList size={20} />, label: 'Historial', path: '/visits' },
     ];
+
+    if (effectiveRole !== 'administrativo') {
+        menuItems.push({ icon: <Stethoscope size={20} />, label: 'Visita en Frío', path: '/cold-visit' });
+        menuItems.push({ icon: <MapIcon size={20} />, label: 'Mapa', path: '/map' });
+    }
+
+    menuItems.push({ icon: <Users size={20} />, label: 'Clientes', path: '/clients' });
+    menuItems.push({ icon: <ShoppingBag size={20} />, label: 'Cotizaciones', path: '/quotations' });
+
+    if (effectiveRole !== 'administrativo') {
+        menuItems.push({ icon: <CircleDollarSign size={20} />, label: 'Cobranzas', path: '/collections' });
+        menuItems.push({ icon: <LayoutDashboard size={20} className="rotate-90" />, label: 'Embudo', path: '/pipeline' });
+    }
+
+    menuItems.push({ icon: <Package size={20} />, label: 'Inventario', path: '/inventory' });
+    menuItems.push({ icon: <Calendar size={20} />, label: 'Agenda', path: '/schedule' });
+
+    if (effectiveRole !== 'seller' && effectiveRole !== 'administrativo') {
+        menuItems.push({ icon: <ClipboardList size={20} />, label: 'Historial', path: '/visits' });
+    }
 
     if (effectiveRole === 'driver') {
         menuItems.length = 0;
         menuItems.push({ icon: <LayoutDashboard size={20} />, label: 'Mi Panel', path: '/' });
         menuItems.push({ icon: <Truck size={20} />, label: 'Ruta', path: '/delivery' });
-    } else if (isSupervisor) {
+    } else if (isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'administrativo') {
         menuItems.push({ icon: <ShieldCheck size={20} />, label: 'Mi Equipo', path: '/team' });
         menuItems.push({ icon: <React.Fragment><MapIcon size={20} className="text-indigo-400" /></React.Fragment>, label: 'Rutas', path: '/routes' });
+    }
+
+    if (effectiveRole === 'seller') {
+        menuItems.push({ icon: <Truck size={20} />, label: 'Estado Entregas', path: '/my-deliveries' });
+    }
+
+    if (effectiveRole === 'admin' || effectiveRole === 'administrativo') {
         menuItems.push({ icon: <Truck size={20} />, label: 'Despacho', path: '/dispatch' });
     }
 
-    if (hasPermission('MANAGE_USERS') || hasPermission('MANAGE_PERMISSIONS')) {
+    if (effectiveRole === 'admin') {
         menuItems.push({ icon: <Settings size={20} />, label: 'Configuración', path: '/settings' });
+    }
+    if (effectiveRole === 'admin' || effectiveRole === 'jefe') {
+        menuItems.push({ icon: <ActivitySquare size={20} />, label: 'Operaciones', path: '/operations' });
     }
 
     const handleLogout = async () => {
@@ -109,6 +131,30 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                                 <p className="text-white/60 text-[8px] font-black uppercase tracking-widest">{effectiveRole || profile?.role || 'Vendedor'}</p>
                             </div>
                         </div>
+                        {realRole === 'admin' && (
+                            <div className="mt-4 space-y-2">
+                                <p className="text-[9px] text-white/70 font-black uppercase tracking-wider">Modo Prueba</p>
+                                <select
+                                    value={simulatedRole || ''}
+                                    onChange={(e) => setSimulatedRole(e.target.value || null)}
+                                    className="w-full py-2 px-3 rounded-xl bg-white/15 border border-white/20 text-white text-[11px] font-bold"
+                                >
+                                    <option value="" className="text-gray-800">Ver como Admin</option>
+                                    <option value="seller" className="text-gray-800">Ver como Vendedor</option>
+                                    <option value="jefe" className="text-gray-800">Ver como Jefe</option>
+                                    <option value="administrativo" className="text-gray-800">Ver como Administrativo</option>
+                                    <option value="driver" className="text-gray-800">Ver como Repartidor</option>
+                                </select>
+                                {simulatedRole && (
+                                    <button
+                                        onClick={() => setSimulatedRole(null)}
+                                        className="w-full py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase tracking-wider"
+                                    >
+                                        Salir de Modo Prueba
+                                    </button>
+                                )}
+                            </div>
+                        )}
                         <button
                             onClick={handleLogout}
                             className="w-full mt-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl flex items-center justify-center space-x-2 transition-all border border-white/10 group text-[10px] font-bold uppercase tracking-widest"
@@ -122,6 +168,19 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Main Content */}
             <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+                {realRole === 'admin' && simulatedRole && (
+                    <div className="h-12 bg-amber-500 text-white flex items-center justify-center gap-3 px-4 shrink-0 border-b border-amber-400">
+                        <span className="text-[11px] font-black uppercase tracking-wider">
+                            Modo Prueba Activo: {simulatedRole.toUpperCase()}
+                        </span>
+                        <button
+                            onClick={() => setSimulatedRole(null)}
+                            className="text-[10px] font-black uppercase tracking-wider bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg transition-all"
+                        >
+                            Salir
+                        </button>
+                    </div>
+                )}
                 {/* Mobile Header */}
                 <header className="lg:hidden h-20 bg-white border-b border-gray-100 flex items-center justify-between px-6 shrink-0 relative z-30">
                     <div className="flex items-center space-x-3">
@@ -152,4 +211,3 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
     );
 };
-

@@ -7,5 +7,18 @@ export default defineConfig({
   server: {
     port: 5175,
     host: true
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          supabase: ['@supabase/supabase-js'],
+          maps: ['@vis.gl/react-google-maps'],
+          charts: ['recharts'],
+          dnd: ['@hello-pangea/dnd']
+        }
+      }
+    }
   }
 })

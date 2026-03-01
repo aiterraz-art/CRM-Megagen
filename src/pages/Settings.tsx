@@ -6,7 +6,8 @@ import { Profile } from '../contexts/UserContext';
 import { googleService } from '../services/googleService';
 
 const Settings: React.FC = () => {
-    const { profile, isSupervisor, hasPermission } = useUser();
+    const { profile, effectiveRole } = useUser();
+    const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'owner@company.com';
     const [users, setUsers] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -25,7 +26,8 @@ const Settings: React.FC = () => {
     const [inviteData, setInviteData] = useState({ email: '', full_name: '', role: 'seller' });
     const [pendingInvites, setPendingInvites] = useState<any[]>([]); // New state for Pending Invites
 
-    const roles = ['jefe', 'administrativo', 'seller', 'driver'];
+    const normalizeRole = (role: string | null | undefined) => ((role || '').toLowerCase().trim() === 'manager' ? 'admin' : (role || '').toLowerCase().trim());
+    const roles = ['admin', 'jefe', 'administrativo', 'seller', 'driver'];
     const permissionList = [
         { key: 'UPLOAD_EXCEL', label: 'Cargar Excel', desc: 'Permite subir archivos de inventario, precios y despacho.' },
         { key: 'MANAGE_INVENTORY', label: 'Gestión Inventario', desc: 'Crear, editar y eliminar productos.' },
@@ -44,7 +46,6 @@ const Settings: React.FC = () => {
     ];
 
     useEffect(() => {
-        fetchUsers();
         fetchUsers();
         fetchRolePermissions();
         fetchPendingInvites(); // Fetch whitelisted users
@@ -68,13 +69,14 @@ const Settings: React.FC = () => {
         if (data && data.length > 0) {
             const matrix: Record<string, string[]> = {};
             data.forEach((p: any) => {
-                if (!matrix[p.role]) matrix[p.role] = [];
-                matrix[p.role].push(p.permission);
+                const roleKey = normalizeRole(p.role);
+                if (!matrix[roleKey]) matrix[roleKey] = [];
+                matrix[roleKey].push(p.permission);
             });
             setRolePerms(matrix);
         } else {
             setRolePerms({
-                'manager': permissionList.map(p => p.key),
+                'admin': permissionList.map(p => p.key),
                 'jefe': ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS'],
                 'administrativo': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH'],
                 'seller': ['VIEW_METAS'],
@@ -100,11 +102,29 @@ const Settings: React.FC = () => {
 
     const handleSave = async (id: string) => {
         try {
-            const { error } = await supabase.from('profiles').update({
+            const statusToPersist = tempStatus === 'disabled' ? 'disabled' : tempStatus;
+            let { error } = await supabase.from('profiles').update({
                 role: tempRole,
-                status: tempStatus,
+                status: statusToPersist,
                 supervisor_id: tempSupervisor || null
             }).eq('id', id);
+
+            if (error) {
+                const retry = await supabase.from('profiles').update({
+                    role: tempRole,
+                    status: statusToPersist
+                }).eq('id', id);
+                error = retry.error;
+            }
+
+            // Backward compatibility for instances that still enforce "suspended" instead of "disabled".
+            if (error && statusToPersist === 'disabled') {
+                const legacyRetry = await supabase.from('profiles').update({
+                    role: tempRole,
+                    status: 'suspended'
+                } as any).eq('id', id);
+                error = legacyRetry.error;
+            }
 
             if (error) {
                 alert('Error al actualizar en tabla principal: ' + error.message);
@@ -112,7 +132,7 @@ const Settings: React.FC = () => {
             }
 
             try {
-                await (supabase.schema('crm').from('profiles') as any).update({ role: tempRole, status: tempStatus }).eq('id', id);
+                await (supabase.schema('crm').from('profiles') as any).update({ role: tempRole, status: statusToPersist }).eq('id', id);
             } catch (e) {
                 console.warn("Silent failure updating crm schema profile:", e);
             }
@@ -127,7 +147,7 @@ const Settings: React.FC = () => {
     };
 
     const handleTogglePermission = (role: string, perm: string) => {
-        if (role === 'manager') return; // Manager always has everything
+        if (role === 'admin') return; // Admin always has everything
         setRolePerms(prev => {
             const current = prev[role] || [];
             if (current.includes(perm)) {
@@ -144,15 +164,14 @@ const Settings: React.FC = () => {
             // Transform matrix into array of rows
             const rows: any[] = [];
 
-            // 1. Force 'manager' and 'admin' to always have EVERYTHING (Safety redundancy)
+            // 1. Force 'admin' to always have EVERYTHING (Safety redundancy)
             permissionList.forEach(p => {
-                rows.push({ role: 'manager', permission: p.key });
                 rows.push({ role: 'admin', permission: p.key });
             });
 
-            // 2. Add other roles from current state (excluding managers as we already forced them)
+            // 2. Add other roles from current state (excluding admin as we already forced it)
             Object.entries(rolePerms).forEach(([role, perms]) => {
-                if (role === 'manager' || role === 'admin') return;
+                if (role === 'admin') return;
                 perms.forEach(p => {
                     rows.push({ role, permission: p });
                 });
@@ -176,15 +195,21 @@ const Settings: React.FC = () => {
         e.preventDefault();
         setSendingInvite(true);
         try {
+            const normalizedEmail = inviteData.email.trim().toLowerCase();
+            if (!normalizedEmail) {
+                alert('Debes indicar un email válido para invitar.');
+                return;
+            }
+
             // 1. Verify existence in Profiles or Whitelist
-            const { data: existingProfile } = await supabase.from('profiles').select('id').eq('email', inviteData.email.toLowerCase()).maybeSingle();
+            const { data: existingProfile } = await supabase.from('profiles').select('id').eq('email', normalizedEmail).maybeSingle();
             if (existingProfile) {
                 alert("Este usuario ya está registrado en el sistema.");
                 setSendingInvite(false);
                 return;
             }
 
-            const { data: existingWhitelist } = await supabase.from('user_whitelist').select('email').eq('email', inviteData.email.toLowerCase()).maybeSingle();
+            const { data: existingWhitelist } = await supabase.from('user_whitelist').select('email').eq('email', normalizedEmail).maybeSingle();
             if (existingWhitelist) {
                 if (!confirm("Este usuario ya fue invitado previamente. ¿Deseas actualizar su rol y reenviar el correo?")) {
                     setSendingInvite(false);
@@ -194,9 +219,8 @@ const Settings: React.FC = () => {
 
             // 2. Upsert to Whitelist
             const { error: whitelistError } = await supabase.from('user_whitelist').upsert({
-                email: inviteData.email.toLowerCase(),
-                role: inviteData.role,
-                created_by: profile?.id
+                email: normalizedEmail,
+                role: inviteData.role
             });
 
             if (whitelistError) throw whitelistError;
@@ -215,7 +239,7 @@ const Settings: React.FC = () => {
                     const subjectEncoded = btoa(String.fromCharCode(...utf8Encode.encode(subject)));
                     const rawMimeMessage = [
                         `From: ${session?.user.email}`,
-                        `To: ${inviteData.email}`,
+                        `To: ${normalizedEmail}`,
                         `Subject: =?utf-8?B?${subjectEncoded}?=`,
                         'MIME-Version: 1.0',
                         'Content-Type: text/plain; charset="UTF-8"',
@@ -230,7 +254,7 @@ const Settings: React.FC = () => {
                         return;
                     }
 
-                    await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+                    const sendResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${token}`,
@@ -238,6 +262,10 @@ const Settings: React.FC = () => {
                         },
                         body: JSON.stringify({ raw: btoa(unescape(encodeURIComponent(rawMimeMessage))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') })
                     });
+                    if (!sendResponse.ok) {
+                        const errorText = await sendResponse.text();
+                        throw new Error(`Gmail API ${sendResponse.status}: ${errorText}`);
+                    }
                     alert('✅ Invitación creada y correo enviado.');
                 } else {
                     alert('⚠️ Invitación creada pero NO enviada (falta sesión Google). Notificar manualmente.');
@@ -260,7 +288,6 @@ const Settings: React.FC = () => {
     };
 
     const handleDeleteUser = async (id: string, email: string) => {
-        const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
         if (email === ownerEmail || !window.confirm(`¿BORRADO DEFINITIVO de ${email}?`)) return;
 
         try {
@@ -276,9 +303,14 @@ const Settings: React.FC = () => {
             await supabase.from('visits').delete().eq('sales_rep_id', id);
             await supabase.from('quotations').update({ seller_id: null }).eq('seller_id', id);
             await supabase.from('delivery_routes').update({ driver_id: null }).eq('driver_id', id);
+            await supabase.from('tasks').delete().eq('user_id', id);
             await supabase.from('tasks').delete().eq('assigned_to', id);
             await supabase.from('tasks').delete().eq('assigned_by', id);
-            await supabase.from('meta_config').delete().eq('id', id);
+            try {
+                await supabase.from('meta_config').delete().eq('id', id);
+            } catch (e) {
+                console.warn("meta_config cleanup skipped:", e);
+            }
 
             // 2. Borrado Esquema CRM (Silencioso - best effort)
             try { await (supabase.schema('crm').from('profiles') as any).delete().eq('id', id); } catch (e) { }
@@ -330,7 +362,7 @@ const Settings: React.FC = () => {
         }
     };
 
-    if (!profile || (!isSupervisor && !hasPermission('MANAGE_USERS'))) return <div className="p-20 text-center font-bold">Acceso Denegado</div>;
+    if (!profile || effectiveRole !== 'admin') return <div className="p-20 text-center font-bold">Acceso Denegado</div>;
 
     const filteredUsers = users.filter(u => (u.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || (u.full_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()));
 
@@ -393,7 +425,7 @@ const Settings: React.FC = () => {
                                                         {roles.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
                                                     </select>
                                                 ) : (
-                                                    <span className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm ${user.role === 'manager' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{user.role || 'Sin Rol'}</span>
+                                                    <span className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm ${normalizeRole(user.role) === 'admin' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{normalizeRole(user.role) || 'Sin Rol'}</span>
                                                 )}
                                             </td>
                                             <td className="px-8 py-6">
@@ -401,7 +433,8 @@ const Settings: React.FC = () => {
                                                     <select value={tempStatus} onChange={(e) => setTempStatus(e.target.value)} className="bg-gray-50 border-none text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 block w-full p-3 font-bold shadow-sm">
                                                         <option value="pending">Pendiente</option>
                                                         <option value="active">Activo</option>
-                                                        <option value="suspended">Suspendido</option>
+                                                        <option value="disabled">Deshabilitado</option>
+                                                        <option value="suspended">Suspendido (Legacy)</option>
                                                     </select>
                                                 ) : (
                                                     <div className="flex items-center gap-2">
@@ -418,7 +451,7 @@ const Settings: React.FC = () => {
                                                         className="bg-gray-50 border-none text-gray-900 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 block w-full p-3 font-bold shadow-sm"
                                                     >
                                                         <option value="">Sin Supervisor</option>
-                                                        {users.filter(u => u.id !== user.id && (u.role === 'jefe' || u.role === 'manager' || u.role === 'admin')).map(u => (
+                                                        {users.filter(u => u.id !== user.id && (u.role === 'jefe' || normalizeRole(u.role) === 'admin')).map(u => (
                                                             <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
                                                         ))}
                                                     </select>
@@ -436,16 +469,16 @@ const Settings: React.FC = () => {
                                                     </div>
                                                 ) : (
                                                     <div className="flex justify-end items-center gap-6">
-                                                        <button onClick={() => handleDeleteUser(user.id, user.email || '')} disabled={user.email === 'aterraza@imegagen.cl'} className="text-gray-300 hover:text-rose-500 transition-all disabled:opacity-0 hover:scale-125"><Trash2 size={18} /></button>
+                                                        <button onClick={() => handleDeleteUser(user.id, user.email || '')} disabled={user.email === ownerEmail} className="text-gray-300 hover:text-rose-500 transition-all disabled:opacity-0 hover:scale-125"><Trash2 size={18} /></button>
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 setEditingId(user.id);
-                                                                setTempRole(user.role || 'seller');
+                                                                setTempRole(normalizeRole(user.role) || 'seller');
                                                                 setTempStatus(user.status || 'active');
                                                                 setTempSupervisor(user.supervisor_id || null);
                                                             }}
-                                                            disabled={user.email === 'aterraza@imegagen.cl'}
+                                                            disabled={user.email === ownerEmail}
                                                             className="text-indigo-600 hover:text-indigo-800 font-black text-[10px] uppercase tracking-widest group-hover:translate-x-[-4px] transition-all flex items-center gap-2 disabled:opacity-20"
                                                         >
                                                             <Edit size={14} /> Editar
@@ -520,10 +553,10 @@ const Settings: React.FC = () => {
                             <thead>
                                 <tr>
                                     <th className="p-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest bg-gray-50 rounded-xl">Módulo / Capacidad</th>
-                                    {['manager', ...roles].map(role => (
+                                    {roles.map(role => (
                                         <th key={role} className="p-4 text-center text-[10px] font-black uppercase tracking-widest bg-gray-50 rounded-xl min-w-[120px]">
-                                            <span className={role === 'manager' ? 'text-indigo-600' : 'text-gray-600'}>
-                                                {role === 'manager' ? 'Manager (Fijo)' : role}
+                                            <span className={role === 'admin' ? 'text-indigo-600' : 'text-gray-600'}>
+                                                {role === 'admin' ? 'Admin (Fijo)' : role}
                                             </span>
                                         </th>
                                     ))}
@@ -536,17 +569,17 @@ const Settings: React.FC = () => {
                                             <p className="font-black text-gray-800 text-sm leading-none">{perm.label}</p>
                                             <p className="text-[10px] text-gray-400 font-bold mt-1.5 leading-tight">{perm.desc}</p>
                                         </td>
-                                        {['manager', ...roles].map(role => {
-                                            const isActive = role === 'manager' || (rolePerms[role] || []).includes(perm.key);
+                                        {roles.map(role => {
+                                            const isActive = role === 'admin' || (rolePerms[role] || []).includes(perm.key);
                                             return (
                                                 <td key={role} className="p-4 text-center">
                                                     <button
                                                         onClick={() => handleTogglePermission(role, perm.key)}
-                                                        disabled={role === 'manager'}
+                                                        disabled={role === 'admin'}
                                                         className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isActive
                                                             ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 scale-105'
                                                             : 'bg-gray-100 text-gray-300 hover:bg-gray-200'
-                                                            } ${role === 'manager' ? 'cursor-default opacity-80' : ''}`}
+                                                            } ${role === 'admin' ? 'cursor-default opacity-80' : ''}`}
                                                     >
                                                         {isActive ? <CheckCircle size={20} /> : <Ban size={20} />}
                                                     </button>
@@ -620,7 +653,7 @@ const Settings: React.FC = () => {
                                         <option value="administrativo">Administrativo</option>
                                         <option value="jefe">Jefe de Ventas</option>
                                         <option value="driver">Repartidor</option>
-                                        <option value="manager">Gerente / Admin</option>
+                                        <option value="admin">Admin</option>
                                     </select>
                                 </div>
 

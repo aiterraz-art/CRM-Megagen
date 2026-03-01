@@ -8,7 +8,10 @@ import Papa from 'papaparse';
 type InventoryItem = Database['public']['Tables']['inventory']['Row'] & { sku?: string | null };
 
 const Inventory = () => {
-    const { isSupervisor, hasPermission } = useUser();
+    const { hasPermission, effectiveRole } = useUser();
+    const isSellerReadOnly = effectiveRole === 'seller';
+    const canManageInventory = !isSellerReadOnly && hasPermission('MANAGE_INVENTORY');
+    const canUploadInventory = !isSellerReadOnly && hasPermission('UPLOAD_EXCEL');
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(true);
@@ -27,7 +30,10 @@ const Inventory = () => {
 
     const fetchInventory = async () => {
         setLoading(true);
-        const { data } = await (supabase.from('inventory') as any).select('*').order('name');
+        // Explicit projection: avoid leaking internal cost/margin columns to client UI.
+        const { data } = await (supabase.from('inventory') as any)
+            .select('id, sku, name, price, stock_qty, category, created_at, updated_at')
+            .order('name');
         if (data) setItems(data as any as InventoryItem[]);
         setLoading(false);
     };
@@ -71,6 +77,10 @@ const Inventory = () => {
     };
 
     const handleImportClick = (type: 'inventory' | 'pricing') => {
+        if (!canUploadInventory) {
+            alert('No tienes permisos para importar datos de inventario.');
+            return;
+        }
         setImportType(type);
         fileInputRef.current?.click();
     };
@@ -78,6 +88,10 @@ const Inventory = () => {
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file || !importType) return;
+        if (!canUploadInventory) {
+            alert('No tienes permisos para importar datos de inventario.');
+            return;
+        }
 
         setIsImporting(true);
 
@@ -97,7 +111,7 @@ const Inventory = () => {
                     };
 
                     if (importType === 'inventory') {
-                        const newItems = csvData.map(row => ({
+                        const parsedItems = csvData.map(row => ({
                             sku: (getValue(row, ['digo', 'SKU']) || '').toString().trim(),
                             name: (getValue(row, ['descrip', 'Nombre', 'Name', 'Detail']) || '').toString().trim(),
                             stock_qty: parseInt(getValue(row, ['Saldo', 'Stock', 'Cantidad']) || '0') || 0,
@@ -105,11 +119,19 @@ const Inventory = () => {
                             price: parseFloat(getValue(row, ['Precio', 'Price', 'Neto', 'Valor', 'P.Unit']) || '0')
                         })).filter(item => item.name && item.sku);
 
+                        // Replace-by-file semantics: if the CSV repeats SKUs, keep the last row.
+                        const dedupedBySku = new Map<string, typeof parsedItems[number]>();
+                        parsedItems.forEach((item) => {
+                            dedupedBySku.set(item.sku, item);
+                        });
+                        const newItems = Array.from(dedupedBySku.values());
+
                         if (newItems.length === 0) {
                             throw new Error('No se encontraron columnas de SKU y Nombre. Asegúrese de que el archivo tenga las columnas correspondientes (Código, Descripción, Saldo).');
                         }
 
-                        const { error: deleteError } = await (supabase.from('inventory') as any).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                        // Always remove previous inventory before inserting the new file.
+                        const { error: deleteError } = await (supabase.from('inventory') as any).delete().not('id', 'is', null);
                         if (deleteError) throw deleteError;
 
                         const { error: insertError } = await (supabase.from('inventory') as any).insert(newItems);
@@ -157,6 +179,10 @@ const Inventory = () => {
 
     const handleCreateProduct = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!canManageInventory) {
+            alert('No tienes permisos para crear productos.');
+            return;
+        }
         if (!newProduct.sku || !newProduct.name) {
             alert("SKU y Nombre son obligatorios");
             return;
@@ -194,6 +220,7 @@ const Inventory = () => {
     );
 
     const lowStockCount = items.filter(i => (i.stock_qty || 0) < 5).length;
+    const totalUnits = items.reduce((acc, i) => acc + (i.stock_qty || 0), 0);
 
     return (
         <div className="space-y-8 max-w-6xl mx-auto">
@@ -231,8 +258,8 @@ const Inventory = () => {
                 <div className="premium-card p-6 border-l-4 border-l-emerald-500">
                     <div className="flex justify-between items-start">
                         <div>
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Valor Inventario</p>
-                            <h3 className="text-3xl font-black text-gray-900">${items.reduce((acc, i) => acc + (i.price || 0) * (i.stock_qty || 0), 0).toLocaleString()}</h3>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">{isSellerReadOnly ? 'Unidades Totales' : 'Valor Inventario'}</p>
+                            <h3 className="text-3xl font-black text-gray-900">{isSellerReadOnly ? `${totalUnits.toLocaleString()} uds` : `$${items.reduce((acc, i) => acc + (i.price || 0) * (i.stock_qty || 0), 0).toLocaleString()}`}</h3>
                         </div>
                         <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
                             <TrendingUp size={24} />
@@ -252,7 +279,7 @@ const Inventory = () => {
                         onChange={(e) => setSearch(e.target.value)}
                     />
                 </div>
-                {hasPermission('UPLOAD_EXCEL') && (
+                {canUploadInventory && (
                     <div className="flex items-center space-x-3">
                         <button
                             onClick={() => handleImportClick('inventory')}
@@ -291,7 +318,7 @@ const Inventory = () => {
 
             <div>
                 <h2 className="text-3xl font-extrabold text-gray-900 mb-1">Gestión de Inventario</h2>
-                <p className="text-gray-400 font-medium">Control de stock y precios de venta</p>
+                <p className="text-gray-400 font-medium">{isSellerReadOnly ? 'Consulta de stock disponible por producto' : 'Control de stock y precios de venta'}</p>
             </div>
 
             {loading ? (
@@ -308,8 +335,8 @@ const Inventory = () => {
                                 <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Producto</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">SKU</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Stock</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Precio</th>
-                                {hasPermission('MANAGE_INVENTORY') && <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Acciones</th>}
+                                {!isSellerReadOnly && <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Precio</th>}
+                                {canManageInventory && <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Acciones</th>}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
@@ -334,10 +361,12 @@ const Inventory = () => {
                                             {item.stock_qty} uds
                                         </span>
                                     </td>
-                                    <td className="px-6 py-5 text-center text-sm font-bold text-gray-900">
-                                        ${item.price?.toLocaleString()}
-                                    </td>
-                                    {hasPermission('MANAGE_INVENTORY') && (
+                                    {!isSellerReadOnly && (
+                                        <td className="px-6 py-5 text-center text-sm font-bold text-gray-900">
+                                            ${item.price?.toLocaleString()}
+                                        </td>
+                                    )}
+                                    {canManageInventory && (
                                         <td className="px-6 py-5 text-right">
                                             <div className="flex justify-end gap-2">
                                                 <button
@@ -426,7 +455,7 @@ const Inventory = () => {
             )}
 
             {/* New Product Modal */}
-            {showNewProductModal && (
+            {showNewProductModal && canManageInventory && (
                 <div className="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
                         <div className="p-6 bg-indigo-600 text-white flex justify-between items-center">

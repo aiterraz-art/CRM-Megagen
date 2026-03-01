@@ -17,7 +17,8 @@ const OrderManagement = ({ visitId, onComplete }: { visitId: string, onComplete:
 
     useEffect(() => {
         const fetchInventory = async () => {
-            const { data } = await (supabase.from('inventory') as any).select('*');
+            const { data } = await (supabase.from('inventory') as any)
+                .select('id, sku, name, price, stock_qty, category, created_at, updated_at');
             if (data) setItems(data as any as InventoryItem[]);
         };
         fetchInventory();
