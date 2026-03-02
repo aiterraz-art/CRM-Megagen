@@ -274,18 +274,16 @@ const LeadPipeline = () => {
         }
     };
 
+    const isTemplateCompatible = (template: MessageTemplate | undefined, requiredChannel: 'email' | 'whatsapp') => {
+        if (!template) return false;
+        return template.channel === 'both' || template.channel === requiredChannel;
+    };
+
     const getSelectedTemplate = (leadId: string, requiredChannel: 'email' | 'whatsapp') => {
         const selectedId = selectedTemplateByLead[leadId];
         const selected = selectedId ? templateById[selectedId] : undefined;
-
-        const isChannelCompatible = (template: MessageTemplate | undefined) => {
-            if (!template) return false;
-            return template.channel === 'both' || template.channel === requiredChannel;
-        };
-
-        if (isChannelCompatible(selected)) return selected;
-
-        return templates.find((template) => isChannelCompatible(template));
+        if (isTemplateCompatible(selected, requiredChannel)) return selected;
+        return undefined;
     };
 
     const getRenderedTemplatePreview = (lead: LeadClient) => {
@@ -376,16 +374,24 @@ const LeadPipeline = () => {
                 profileId: profile?.id
             });
 
-            await logLeadMessage({
-                lead,
-                templateId: template.id,
-                channel: 'email',
-                destination: lead.email,
-                status: 'sent'
-            });
+            try {
+                await logLeadMessage({
+                    lead,
+                    templateId: template.id,
+                    channel: 'email',
+                    destination: lead.email,
+                    status: 'sent'
+                });
+            } catch (logError) {
+                console.error('No se pudo guardar log de envio email:', logError);
+            }
 
-            await moveLeadToContacted(lead);
-            alert('Correo enviado correctamente al lead.');
+            try {
+                await moveLeadToContacted(lead);
+                alert('Correo enviado correctamente al lead.');
+            } catch (moveError: any) {
+                alert(`Correo enviado, pero no se pudo actualizar etapa del lead: ${moveError.message}`);
+            }
         } catch (error: any) {
             try {
                 await logLeadMessage({
@@ -422,15 +428,23 @@ const LeadPipeline = () => {
             const url = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`;
             window.open(url, '_blank', 'noopener,noreferrer');
 
-            await logLeadMessage({
-                lead,
-                templateId: template.id,
-                channel: 'whatsapp',
-                destination: normalizedPhone,
-                status: 'opened_external'
-            });
+            try {
+                await logLeadMessage({
+                    lead,
+                    templateId: template.id,
+                    channel: 'whatsapp',
+                    destination: normalizedPhone,
+                    status: 'opened_external'
+                });
+            } catch (logError) {
+                console.error('No se pudo guardar log de envio whatsapp:', logError);
+            }
 
-            await moveLeadToContacted(lead);
+            try {
+                await moveLeadToContacted(lead);
+            } catch (moveError) {
+                console.error('No se pudo mover lead a Contactado tras WhatsApp:', moveError);
+            }
         } catch (error: any) {
             try {
                 await logLeadMessage({
@@ -548,6 +562,8 @@ const LeadPipeline = () => {
                                         {(provided) => (
                                             <div ref={provided.innerRef} {...provided.droppableProps} className="p-3 space-y-3 flex-1">
                                                 {items.map((lead, index) => {
+                                                    const selectedTemplateId = selectedTemplateByLead[lead.id];
+                                                    const selectedTemplateRaw = selectedTemplateId ? templateById[selectedTemplateId] : undefined;
                                                     const selectedTemplate = getSelectedTemplate(lead.id, 'email');
                                                     const selectedWhatsAppTemplate = getSelectedTemplate(lead.id, 'whatsapp');
                                                     const validPhone = normalizeChileanPhone(lead.phone);
@@ -580,12 +596,22 @@ const LeadPipeline = () => {
                                                                                     className="w-full p-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-700"
                                                                                 >
                                                                                     <option value="" disabled>Selecciona plantilla</option>
-                                                                                    {templates.map((template) => (
-                                                                                        <option key={template.id} value={template.id}>
-                                                                                            {template.name} ({template.channel})
-                                                                                        </option>
-                                                                                    ))}
-                                                                                </select>
+                                                                                {templates.map((template) => (
+                                                                                    <option key={template.id} value={template.id}>
+                                                                                        {template.name} ({template.channel})
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
+                                                                                {selectedTemplateRaw && (
+                                                                                    <div className="flex gap-1">
+                                                                                        <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${isTemplateCompatible(selectedTemplateRaw, 'email') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}>
+                                                                                            Email
+                                                                                        </span>
+                                                                                        <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${isTemplateCompatible(selectedTemplateRaw, 'whatsapp') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}>
+                                                                                            WhatsApp
+                                                                                        </span>
+                                                                                    </div>
+                                                                                )}
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => setPreviewOpenByLead((prev) => ({ ...prev, [lead.id]: !prev[lead.id] }))}
