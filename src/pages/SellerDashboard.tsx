@@ -10,8 +10,10 @@ type VisitRow = {
     check_in_time: string | null;
     check_out_time: string | null;
     status: string | null;
+    type?: string | null;
     notes: string | null;
-    clients?: { name?: string | null; comuna?: string | null; zone?: string | null } | null;
+    client_id?: string | null;
+    clients?: { name?: string | null; comuna?: string | null; zone?: string | null; status?: string | null } | null;
 };
 
 type DailySeries = { date: string; label: string; visits: number };
@@ -44,6 +46,8 @@ const SellerDashboard = () => {
     const [monthGoal, setMonthGoal] = useState(0);
     const [visitSeries, setVisitSeries] = useState<DailySeries[]>([]);
     const [recentVisits, setRecentVisits] = useState<VisitRow[]>([]);
+    const [coldVisitsTotal, setColdVisitsTotal] = useState(0);
+    const [coldVisitsConverted, setColdVisitsConverted] = useState(0);
 
     useEffect(() => {
         if (preset === 'today') {
@@ -84,10 +88,10 @@ const SellerDashboard = () => {
             const todayStart = new Date(`${today}T00:00:00`);
             const todayEnd = new Date(`${today}T23:59:59.999`);
 
-            const [{ data: rangeVisits, error: rangeError }, { data: todayRows, error: todayError }, { data: monthOrders }, { data: goalRow }] = await Promise.all([
+            const [{ data: rangeVisits, error: rangeError }, { data: todayRows, error: todayError }, { data: monthOrders }, { data: goalRow }, { data: coldRows, error: coldError }] = await Promise.all([
                 supabase
                     .from('visits')
-                    .select('id, check_in_time, check_out_time, status, notes, clients(name, comuna, zone)')
+                    .select('id, check_in_time, check_out_time, status, type, notes, client_id, clients(name, comuna, zone, status)')
                     .eq('sales_rep_id', profile.id)
                     .gte('check_in_time', rangeStart.toISOString())
                     .lte('check_in_time', rangeEnd.toISOString())
@@ -119,10 +123,18 @@ const SellerDashboard = () => {
                         .eq('year', now.getFullYear())
                         .maybeSingle();
                 })(),
+                supabase
+                    .from('visits')
+                    .select('id, client_id, type, clients(status)')
+                    .eq('sales_rep_id', profile.id)
+                    .eq('type', 'cold_visit')
+                    .gte('check_in_time', rangeStart.toISOString())
+                    .lte('check_in_time', rangeEnd.toISOString()),
             ]);
 
             if (rangeError) throw rangeError;
             if (todayError) throw todayError;
+            if (coldError) throw coldError;
 
             const visits = (rangeVisits || []) as VisitRow[];
             setRecentVisits(visits.slice(0, 10));
@@ -159,6 +171,15 @@ const SellerDashboard = () => {
             setMonthSales(monthlySalesAmount);
             setMonthGoal(Number((goalRow as any)?.target_amount) || 0);
             setDailyGoal(Number((goalRow as any)?.daily_visits_goal) || DEFAULT_DAILY_VISITS_GOAL);
+
+            const coldVisits = (coldRows || []) as Array<{ id: string; client_id: string | null; clients?: { status?: string | null } | null }>;
+            const convertedClientIds = new Set(
+                coldVisits
+                    .filter((row) => row.client_id && row.clients?.status === 'active')
+                    .map((row) => row.client_id as string)
+            );
+            setColdVisitsTotal(coldVisits.length);
+            setColdVisitsConverted(convertedClientIds.size);
         } catch (e) {
             console.error('SellerDashboard error:', e);
             alert(`Error cargando dashboard vendedor: ${(e as any)?.message || 'desconocido'}`);
@@ -173,6 +194,7 @@ const SellerDashboard = () => {
     }, [visitSeries]);
 
     const todayGoalPct = Math.min(100, Math.round((todayVisits / Math.max(dailyGoal, 1)) * 100));
+    const coldConversionPct = coldVisitsTotal > 0 ? Math.round((coldVisitsConverted / coldVisitsTotal) * 100) : 0;
     const maxBar = Math.max(1, ...visitSeries.map(v => v.visits));
 
     if (loading) {
@@ -205,6 +227,16 @@ const SellerDashboard = () => {
                 <KPICard title="Meta Diaria" value={`${todayGoalPct}%`} icon={Target} color="indigo" trend={`${todayVisits}/${dailyGoal} visitas`} trendUp={todayGoalPct >= 100} />
                 <KPICard title="Promedio Diario" value={avgVisits} icon={TrendingUp} color="amber" trend={`Rango ${fromDate} a ${toDate}`} trendUp={avgVisits >= dailyGoal} />
                 <KPICard title="Venta Mes" value={`$${monthSales.toLocaleString()}`} icon={Clock} color="blue" trend={monthGoal > 0 ? `${Math.round((monthSales / monthGoal) * 100)}% de meta` : 'Sin meta cargada'} trendUp={monthGoal > 0 && monthSales >= monthGoal} />
+            </div>
+            <div className="grid grid-cols-1 gap-6">
+                <KPICard
+                    title="Conversión Prospección"
+                    value={`${coldConversionPct}%`}
+                    icon={Target}
+                    color="indigo"
+                    trend={`${coldVisitsConverted}/${coldVisitsTotal} prospectos convertidos`}
+                    trendUp={coldConversionPct >= 40}
+                />
             </div>
 
             <div className="premium-card p-6">

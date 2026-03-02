@@ -10,7 +10,7 @@ type Visit = Database['public']['Tables']['visits']['Row'];
 interface VisitContextType {
     activeVisit: Visit | null;
     loading: boolean;
-    startVisit: (clientId: string) => Promise<Visit | null>;
+    startVisit: (clientId: string, options?: { type?: string }) => Promise<Visit | null>;
     endVisit: (options?: { notes?: string }) => Promise<boolean>;
 }
 
@@ -101,7 +101,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
     }, [profile]);
 
-    const startVisit = async (clientId: string) => {
+    const startVisit = async (clientId: string, options?: { type?: string }) => {
         if (!profile?.id) return null;
 
         if (activeVisit) {
@@ -151,6 +151,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 check_in_time: new Date().toISOString(),
                 sales_rep_id: profile.id,
                 status: 'in_progress',
+                type: options?.type || null,
                 lat: checkInLat, // Audit: Check-in location
                 lng: checkInLng, // Audit: Check-in location
                 scheduled_at: new Date().toISOString() // Required by DB constraint

@@ -21,6 +21,8 @@ export interface Database {
                     status: string | null
                     zone: string | null
                     created_by: string | null
+                    created_at: string
+                    updated_at: string
                     rut: string | null
                     phone: string | null
                     email: string | null
@@ -28,6 +30,7 @@ export interface Database {
                     giro: string | null
                     comuna: string | null
                     office: string | null
+                    lead_score: number | null
                 }
                 Insert: {
                     address?: string | null
@@ -39,6 +42,8 @@ export interface Database {
                     purchase_contact?: string | null
                     status?: string | null
                     zone?: string | null
+                    created_at?: string
+                    updated_at?: string
                     rut?: string | null
                     phone?: string | null
                     email?: string | null
@@ -46,6 +51,7 @@ export interface Database {
                     giro?: string | null
                     comuna?: string | null
                     office?: string | null
+                    lead_score?: number | null
                 }
                 Update: {
                     address?: string | null
@@ -57,6 +63,8 @@ export interface Database {
                     purchase_contact?: string | null
                     status?: string | null
                     zone?: string | null
+                    created_at?: string
+                    updated_at?: string
                     rut?: string | null
                     phone?: string | null
                     email?: string | null
@@ -64,6 +72,7 @@ export interface Database {
                     giro?: string | null
                     comuna?: string | null
                     office?: string | null
+                    lead_score?: number | null
                 }
             }
             inventory: {

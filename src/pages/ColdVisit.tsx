@@ -125,7 +125,7 @@ const ColdVisit = () => {
                 address: resolvedAddress,
                 lat: currentLocation?.lat ?? null,
                 lng: currentLocation?.lng ?? null,
-                status: 'prospect', // New status for Cold Visits
+                status: 'prospect_new',
                 created_by: profile.id,
                 zone: profile.zone || 'Sin Zona',
                 notes: `Visita en Frío iniciada el ${new Date().toLocaleDateString()} (con GPS ±${Math.round(currentLocation.accuracy)}m)`
@@ -141,7 +141,7 @@ const ColdVisit = () => {
             if (!createdClient?.id) throw new Error('No se pudo crear el prospecto.');
 
             // 2. Start Visit immediately
-            const visit = await startVisit(createdClient.id);
+            const visit = await startVisit(createdClient.id, { type: 'cold_visit' });
 
             if (visit) {
                 await queueVisitCheckinLocation({

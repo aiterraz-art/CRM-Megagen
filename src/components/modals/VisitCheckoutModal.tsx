@@ -8,9 +8,22 @@ interface VisitCheckoutModalProps {
     onClose: () => void;
     onSchedule?: () => void;
     saving: boolean;
+    showLeadScore?: boolean;
+    leadScore?: number | null;
+    onLeadScoreChange?: (score: number) => void;
 }
 
-const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({ notes, onNotesChange, onSave, onClose, onSchedule, saving }) => {
+const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
+    notes,
+    onNotesChange,
+    onSave,
+    onClose,
+    onSchedule,
+    saving,
+    showLeadScore = false,
+    leadScore = null,
+    onLeadScoreChange
+}) => {
     return (
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl animate-in slide-in-from-bottom-10 duration-300">
@@ -28,6 +41,31 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({ notes, onNotesC
                             autoFocus
                         />
                     </div>
+                    {showLeadScore && (
+                        <div>
+                            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Nivel de Interés del Prospecto</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {[
+                                    { value: 1, label: 'Bajo' },
+                                    { value: 2, label: 'Medio' },
+                                    { value: 3, label: 'Alto' }
+                                ].map((item) => (
+                                    <button
+                                        key={item.value}
+                                        type="button"
+                                        disabled={saving}
+                                        onClick={() => onLeadScoreChange?.(item.value)}
+                                        className={`p-3 rounded-xl border text-xs font-black uppercase tracking-wider transition-all ${leadScore === item.value
+                                            ? 'bg-indigo-600 text-white border-indigo-600'
+                                            : 'bg-gray-50 text-gray-600 border-gray-100 hover:bg-gray-100'
+                                            }`}
+                                    >
+                                        {item.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {onSchedule && (
                         <button

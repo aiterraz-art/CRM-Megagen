@@ -13,6 +13,7 @@ import VisitCheckoutModal from '../components/modals/VisitCheckoutModal';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import ClientFormModal from '../components/modals/ClientFormModal';
 import ScheduleVisitModal from '../components/modals/ScheduleVisitModal';
+import { isProspectStatus } from '../utils/prospect';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -35,6 +36,7 @@ const VisitLog = () => {
     const [finishing, setFinishing] = useState(false);
     const [showNotesModal, setShowNotesModal] = useState(false);
     const [visitNotes, setVisitNotes] = useState('');
+    const [leadScore, setLeadScore] = useState<number | null>(null);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
 
     // Client Validation State
@@ -156,6 +158,14 @@ const VisitLog = () => {
         setFinishing(true);
 
         try {
+            if (client && isProspectStatus(client.status) && leadScore !== null) {
+                const { error: clientUpdateError } = await supabase
+                    .from('clients')
+                    .update({ lead_score: leadScore })
+                    .eq('id', client.id);
+
+                if (clientUpdateError) throw clientUpdateError;
+            }
             const closed = await endVisit({ notes: visitNotes });
             if (closed) {
                 navigate('/');
@@ -172,7 +182,7 @@ const VisitLog = () => {
 
         // Validation Logic for Prospects
         // Check if status is prospect OR if critical fields are missing
-        const isProspect = (client as any).status === 'prospect';
+        const isProspect = isProspectStatus((client as any).status);
         const isMissingData = !client.rut || !client.email || !client.phone;
 
         if (isProspect || isMissingData) {
@@ -205,6 +215,9 @@ const VisitLog = () => {
                     <VisitCheckoutModal
                         notes={visitNotes}
                         onNotesChange={setVisitNotes}
+                        leadScore={leadScore}
+                        onLeadScoreChange={setLeadScore}
+                        showLeadScore={isProspectStatus(client?.status)}
                         onSave={() => {
                             setShowNotesModal(false);
                             handleCheckOut();
@@ -329,7 +342,10 @@ const VisitLog = () => {
 
                         {/* Checkout Button */}
                         <button
-                            onClick={() => setShowNotesModal(true)}
+                            onClick={() => {
+                                setLeadScore(client?.lead_score ?? null);
+                                setShowNotesModal(true);
+                            }}
                             disabled={finishing}
                             className="md:col-span-2 p-6 bg-red-50 text-red-600 rounded-2xl font-black text-lg hover:bg-red-600 hover:text-white transition-all shadow-lg active:scale-95"
                         >

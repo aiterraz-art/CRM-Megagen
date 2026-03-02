@@ -17,6 +17,7 @@ import {
 import { format, differenceInMinutes, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Navigate } from 'react-router-dom';
+import { isProspectStatus } from '../utils/prospect';
 
 interface VisitHistoryItem {
     id: string;
@@ -223,7 +224,7 @@ const VisitHistory = () => {
                                     <tr key={visit.id} className="hover:bg-gray-50/80 transition-colors group">
                                         <td className="px-8 py-8">
                                             <div className="flex items-center space-x-4">
-                                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${visit.client_status === 'prospect' ? 'bg-amber-100 text-amber-600' : 'bg-dental-100 text-dental-600'}`}>
+                                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isProspectStatus(visit.client_status) ? 'bg-amber-100 text-amber-600' : 'bg-dental-100 text-dental-600'}`}>
                                                     <User size={20} />
                                                 </div>
                                                 <div>
@@ -233,7 +234,7 @@ const VisitHistory = () => {
                                                         {visit.doctor_name && (
                                                             <span className="text-[10px] font-black text-indigo-600 mr-2">Dr(a). {visit.doctor_name}</span>
                                                         )}
-                                                        {visit.client_status === 'prospect' && (
+                                                        {isProspectStatus(visit.client_status) && (
                                                             <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest">Visita en Frío</span>
                                                         )}
                                                     </p>

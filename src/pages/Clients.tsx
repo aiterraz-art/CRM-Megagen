@@ -8,8 +8,9 @@ import { Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary, useMap } from '@vis.gl/react-google-maps';
 import ClientDetailModal from '../components/modals/ClientDetailModal';
-import { googleService } from '../services/googleService';
 import { checkGPSConnection } from '../utils/gps';
+import { sendGmailMessage } from '../utils/gmail';
+import { isProspectStatus } from '../utils/prospect';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -60,6 +61,14 @@ const deg2rad = (deg: number) => {
     return deg * (Math.PI / 180);
 };
 
+const isAbandonedProspect = (client: Client, thresholdDays = 30) => {
+    if (!isProspectStatus(client.status)) return false;
+    const now = Date.now();
+    const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
+    const lastContactDate = client.last_visit_date ? new Date(client.last_visit_date).getTime() : new Date(client.created_at).getTime();
+    return now - lastContactDate >= thresholdMs;
+};
+
 const ClientsContent = () => {
     const { profile, hasPermission, isSupervisor, effectiveRole } = useUser();
     const navigate = useNavigate();
@@ -101,7 +110,11 @@ const ClientsContent = () => {
     const [importing, setImporting] = useState(false);
 
     const [viewMode, setViewMode] = useState<'all' | 'mine'>('all'); // For Admins
+    const [portfolioTab, setPortfolioTab] = useState<'portfolio' | 'pool'>('portfolio');
+    const [clientTypeFilter, setClientTypeFilter] = useState<'all' | 'active' | 'prospect'>('all');
+    const [poolAssigneeId, setPoolAssigneeId] = useState<string>('');
     const isSellerRole = effectiveRole === 'seller';
+    const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
@@ -225,12 +238,11 @@ const ClientsContent = () => {
         setLoading(true);
         setErrorMessage(null);
         try {
-            let query = supabase
-                .from('clients')
-                .select('*')
-                .order('name');
+            let query = supabase.from('clients').select('*').order('name');
 
-            if (isSellerRole && profile?.id) {
+            if (portfolioTab === 'pool') {
+                query = query.or('status.eq.prospect,status.ilike.prospect_%');
+            } else if (isSellerRole && profile?.id) {
                 query = query.eq('created_by', profile.id);
             } else if (!canViewAll && profile?.id) {
                 query = query.eq('created_by', profile.id);
@@ -244,7 +256,10 @@ const ClientsContent = () => {
             }
 
             if (data) {
-                setClients(data);
+                const visibleClients = portfolioTab === 'pool'
+                    ? data.filter((client) => isAbandonedProspect(client as Client))
+                    : data;
+                setClients(visibleClients);
                 setLastRefreshAt(new Date().toISOString());
 
                 // OPTIMIZATION: Use 'last_visit_date' directly from client record
@@ -252,7 +267,7 @@ const ClientsContent = () => {
                 const neglectMap: Record<string, number> = {};
                 const now = new Date();
 
-                data.forEach(client => {
+                visibleClients.forEach(client => {
                     if (client.last_visit_date) {
                         const days = Math.floor((now.getTime() - new Date(client.last_visit_date).getTime()) / (1000 * 60 * 60 * 24));
                         neglectMap[client.id] = days;
@@ -271,8 +286,14 @@ const ClientsContent = () => {
     };
 
     const fetchProfiles = async () => {
-        const { data } = await supabase.from('profiles').select('id, email, full_name');
-        if (data) setProfiles(data);
+        const { data } = await supabase.from('profiles').select('id, email, full_name, role');
+        if (data) {
+            setProfiles(data);
+            const firstSeller = data.find((p) => (p.role || '').toLowerCase() === 'seller');
+            if (firstSeller && !poolAssigneeId) {
+                setPoolAssigneeId(firstSeller.id);
+            }
+        }
     };
 
     useEffect(() => {
@@ -280,7 +301,7 @@ const ClientsContent = () => {
             fetchClients();
             fetchProfiles();
         }
-    }, [profile?.id]);
+    }, [profile?.id, portfolioTab]);
 
     const handleOpenModal = (clientToEdit?: Client) => {
         if (clientToEdit) {
@@ -351,97 +372,14 @@ const ClientsContent = () => {
         e.preventDefault();
         setSendingEmail(true);
         try {
-            const { data: { session } } = await supabase.auth.getSession();
-            const validToken = await googleService.ensureSession();
-            if (!validToken) {
-                setSendingEmail(false);
-                return;
-            }
-
-            // MIME boundary
-            const boundary = "foo_bar_baz";
-
-            if (!session) {
-                setSendingEmail(false);
-                return;
-            }
-
-            // Build the MIME message parts
-            let messageParts = [
-                `From: ${session.user.email}`,
-                `To: ${emailData.to}`,
-                emailData.cc ? `Cc: ${emailData.cc}` : null,
-                `Subject: =?utf-8?B?${btoa(unescape(encodeURIComponent(emailData.subject)))}?=`,
-                'MIME-Version: 1.0',
-                `Content-Type: multipart/mixed; boundary="${boundary}"`,
-                '',
-                `--${boundary}`,
-                'Content-Type: text/plain; charset="UTF-8"',
-                'Content-Transfer-Encoding: 7bit',
-                '',
-                emailData.message,
-                ''
-            ];
-
-            // Add attachment if present
-            if (attachment) {
-                const reader = new FileReader();
-                await new Promise((resolve, reject) => {
-                    reader.onload = () => resolve(reader.result);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(attachment);
-                });
-
-                const base64Data = (reader.result as string).split(',')[1];
-
-                messageParts.push(
-                    `--${boundary}`,
-                    `Content-Type: ${attachment.type}; name="${attachment.name}"`,
-                    `Content-Disposition: attachment; filename="${attachment.name}"`,
-                    'Content-Transfer-Encoding: base64',
-                    '',
-                    base64Data,
-                    ''
-                );
-            }
-
-            // Close boundary
-            messageParts.push(`--${boundary}--`);
-
-            // Join with CRLF for RFC compliance
-            const rawMimeMessage = messageParts
-                .filter(part => part != null)
-                .join('\r\n');
-
-            // Encode to Web-Safe Base64
-            const encodedMessage = btoa(unescape(encodeURIComponent(rawMimeMessage)))
-                .replace(/\+/g, '-')
-                .replace(/\//g, '_')
-                .replace(/=+$/, '');
-
-            // Send via Standard Gmail API
-            const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${validToken}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    raw: encodedMessage
-                })
-            });
-
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.error?.message || 'Error al enviar correo. Verifica tus permisos de Google.');
-            }
-
-            // LOG THE EMAIL
-            await supabase.from('email_logs').insert({
-                client_id: emailData.clientId,
-                user_id: profile?.id,
+            await sendGmailMessage({
+                to: emailData.to,
+                cc: emailData.cc,
                 subject: emailData.subject,
-                snippet: emailData.message.substring(0, 100) + '...'
+                message: emailData.message,
+                attachment,
+                clientId: emailData.clientId,
+                profileId: profile?.id
             });
 
             alert('¡Correo enviado exitosamente!');
@@ -594,6 +532,29 @@ const ClientsContent = () => {
         }
     };
 
+    const handleReassignLead = async (clientId: string, clientName: string) => {
+        if (!canReassignPoolLead) return;
+        if (!poolAssigneeId) {
+            alert('Selecciona primero el vendedor destino para reasignar.');
+            return;
+        }
+        const targetName = ownersById[poolAssigneeId] || 'vendedor seleccionado';
+        const confirmed = window.confirm(`Estás a punto de re-asignar este lead libre a la cartera de ${targetName}. ¿Confirmas?`);
+        if (!confirmed) return;
+
+        try {
+            const { error } = await supabase
+                .from('clients')
+                .update({ created_by: poolAssigneeId, last_visit_date: null })
+                .eq('id', clientId);
+            if (error) throw error;
+            alert(`Lead ${clientName} reasignado correctamente a ${targetName}.`);
+            fetchClients();
+        } catch (error: any) {
+            alert(`Error al reasignar lead: ${error.message}`);
+        }
+    };
+
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -740,6 +701,11 @@ const ClientsContent = () => {
         return map;
     }, [profiles]);
 
+    const sellerOptions = useMemo(
+        () => profiles.filter((p) => (p.role || '').toLowerCase() === 'seller'),
+        [profiles]
+    );
+
     const filteredClients = useMemo(() => {
         const normalizedSearch = search.trim().toLowerCase();
         return clients.filter(c => {
@@ -751,13 +717,21 @@ const ClientsContent = () => {
             const isOwner = c.created_by === profile?.id;
             const isNeglected = (neglectedData[c.id] || 0) >= 15;
             const passesNeglect = neglectFilter === 'all' || isNeglected;
+            const isProspect = isProspectStatus(c.status);
+            const passesTypeFilter = clientTypeFilter === 'all'
+                || (clientTypeFilter === 'active' && !isProspect)
+                || (clientTypeFilter === 'prospect' && isProspect);
+
+            if (portfolioTab === 'pool') {
+                return matchesSearch && passesNeglect && passesTypeFilter;
+            }
 
             if (canViewAll) {
-                return (viewMode === 'all' || isOwner) && matchesSearch && passesNeglect;
+                return (viewMode === 'all' || isOwner) && matchesSearch && passesNeglect && passesTypeFilter;
             }
-            return isOwner && matchesSearch && passesNeglect;
+            return isOwner && matchesSearch && passesNeglect && passesTypeFilter;
         });
-    }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode]);
+    }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode, clientTypeFilter, portfolioTab]);
 
     const clientStats = useMemo(() => {
         const inRisk = filteredClients.filter((client) => (neglectedData[client.id] || 0) >= 15).length;
@@ -777,7 +751,9 @@ const ClientsContent = () => {
                 <div>
                     <h2 className="text-3xl font-black text-gray-900 leading-tight">Gestión de Clientes</h2>
                     <p className="text-gray-500 font-medium mt-1">
-                        {canViewAll ? 'Administración total de la cartera' : 'Tu cartera de clientes asignada'}
+                        {portfolioTab === 'pool'
+                            ? 'Pool de Leads Libres (sin gestión por más de 30 días)'
+                            : (canViewAll ? 'Administración total de la cartera' : 'Tu cartera de clientes asignada')}
                     </p>
                     {lastRefreshAt && (
                         <p className="text-xs text-gray-400 mt-2">Última actualización: {new Date(lastRefreshAt).toLocaleString()}</p>
@@ -867,6 +843,62 @@ const ClientsContent = () => {
                         Actualizar
                     </button>
                 </div>
+            </div>
+
+            <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        onClick={() => setPortfolioTab('portfolio')}
+                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${portfolioTab === 'portfolio' ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}
+                    >
+                        Mis Clientes
+                    </button>
+                    <button
+                        onClick={() => setPortfolioTab('pool')}
+                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${portfolioTab === 'pool' ? 'bg-amber-500 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}
+                    >
+                        Pool de Leads Libres
+                    </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-widest text-gray-400 font-black">Ver:</span>
+                    <button
+                        onClick={() => setClientTypeFilter('all')}
+                        className={`px-4 py-2 rounded-xl text-xs font-black ${clientTypeFilter === 'all' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}
+                    >
+                        Todos
+                    </button>
+                    <button
+                        onClick={() => setClientTypeFilter('active')}
+                        className={`px-4 py-2 rounded-xl text-xs font-black ${clientTypeFilter === 'active' ? 'bg-emerald-600 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}
+                    >
+                        Solo Clientes Activos
+                    </button>
+                    <button
+                        onClick={() => setClientTypeFilter('prospect')}
+                        className={`px-4 py-2 rounded-xl text-xs font-black ${clientTypeFilter === 'prospect' ? 'bg-amber-500 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}
+                    >
+                        Solo Prospectos
+                    </button>
+                </div>
+                {portfolioTab === 'pool' && canReassignPoolLead && (
+                    <div className="flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-100 rounded-2xl p-3">
+                        <span className="text-[10px] uppercase tracking-widest text-amber-700 font-black">Reasignar a:</span>
+                        <select
+                            value={poolAssigneeId}
+                            onChange={(e) => setPoolAssigneeId(e.target.value)}
+                            className="px-3 py-2 rounded-xl bg-white border border-amber-200 text-sm font-bold text-gray-700"
+                        >
+                            <option value="">Selecciona vendedor</option>
+                            {sellerOptions.map((seller) => (
+                                <option key={seller.id} value={seller.id}>
+                                    {seller.full_name || seller.email}
+                                </option>
+                            ))}
+                        </select>
+                        <span className="text-xs text-amber-700 font-medium">Solo admin/jefe pueden ejecutar reasignación.</span>
+                    </div>
+                )}
             </div>
 
             {errorMessage && (
@@ -1071,6 +1103,15 @@ const ClientsContent = () => {
                                     >
                                         <FileText size={20} />
                                     </button>
+                                    {portfolioTab === 'pool' && canReassignPoolLead && (
+                                        <button
+                                            onClick={() => handleReassignLead(client.id, client.name)}
+                                            className="p-4 bg-amber-50 text-amber-700 rounded-2xl hover:bg-amber-100 transition-colors"
+                                            title="Reasignar lead"
+                                        >
+                                            <Users size={20} />
+                                        </button>
+                                    )}
                                 </div >
                             </div>
                         )
