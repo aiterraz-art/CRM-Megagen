@@ -2,10 +2,12 @@ import { supabase } from '../services/supabase';
 
 const Login = () => {
     const handleGoogleLogin = async () => {
+        const authRedirectUrl = (import.meta.env.VITE_AUTH_REDIRECT_URL || `${window.location.origin}/`).trim();
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/`,
+                // Force frontend callback target (prevents falling back to Supabase host root)
+                redirectTo: authRedirectUrl,
                 queryParams: {
                     access_type: 'offline',
                     prompt: 'select_account',
