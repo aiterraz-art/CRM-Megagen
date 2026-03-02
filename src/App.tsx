@@ -61,6 +61,15 @@ const NonAdministrativeGuard = ({ children }: { children: JSX.Element }) => {
     return children;
 };
 
+const LeadModuleGuard = ({ children }: { children: JSX.Element }) => {
+    const { effectiveRole, loading } = useUser();
+    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
+    if (!(effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'seller')) {
+        return <Navigate to="/" replace />;
+    }
+    return children;
+};
+
 function App() {
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
@@ -171,8 +180,8 @@ function App() {
                                 <Route path="inventory" element={<Inventory />} />
                                 <Route path="team" element={<NonAdministrativeGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonAdministrativeGuard>} />
                                 <Route path="pipeline" element={<NonAdministrativeGuard><Pipeline /></NonAdministrativeGuard>} />
-                                <Route path="lead-pipeline" element={<NonAdministrativeGuard><LeadPipeline /></NonAdministrativeGuard>} />
-                                <Route path="lead-messages" element={<NonAdministrativeGuard><LeadMessages /></NonAdministrativeGuard>} />
+                                <Route path="lead-pipeline" element={<LeadModuleGuard><LeadPipeline /></LeadModuleGuard>} />
+                                <Route path="lead-messages" element={<LeadModuleGuard><LeadMessages /></LeadModuleGuard>} />
                                 <Route path="dispatch" element={<Dispatch />} />
                                 <Route path="delivery" element={<DeliveryRoute />} />
                                 <Route path="my-deliveries" element={<MyDeliveries />} />
