@@ -721,10 +721,10 @@ const Quotations: React.FC = () => {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {loading ? (
                     Array(4).fill(0).map((_, i) => (
-                        <div key={i} className="bg-white rounded-[2.5rem] p-8 h-48 animate-pulse shadow-sm"></div>
+                        <div key={i} className="bg-white rounded-2xl p-4 h-32 animate-pulse shadow-sm"></div>
                     ))
                 ) : filteredQuotations.length === 0 ? (
                     <div className="md:col-span-2 bg-white rounded-[2rem] border border-gray-100 p-12 text-center">
@@ -733,17 +733,17 @@ const Quotations: React.FC = () => {
                     </div>
                 ) : (
                     filteredQuotations.map((q) => (
-                        <div key={q.id} className="premium-card p-6 flex flex-col justify-between group h-auto">
-                            <div className="space-y-5">
+                        <div key={q.id} className="premium-card p-4 flex flex-col justify-between group">
+                            <div className="space-y-3">
                                 <div className="flex justify-between items-start">
-                                    <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center border border-indigo-100 text-indigo-600 font-black text-xl uppercase shadow-sm">
+                                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center border border-indigo-100 text-indigo-600 font-black text-sm uppercase shadow-sm">
                                         {(q.client_name || 'CL').substring(0, 2)}
                                     </div>
-                                    <div className="flex flex-col items-end gap-1.5">
-                                        <div className="flex gap-1.5">
+                                    <div className="flex flex-col items-end gap-1">
+                                        <div className="flex gap-1">
                                             {/* Stage Badge */}
                                             {q.stage && (
-                                                <span className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wide border ${q.stage === 'won' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                                                <span className={`px-1.5 py-0.5 rounded-md text-[7px] font-black uppercase tracking-wide border ${q.stage === 'won' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
                                                     q.stage === 'lost' ? 'bg-red-100 text-red-700 border-red-200' :
                                                         q.stage === 'negotiation' ? 'bg-amber-100 text-amber-700 border-amber-200' :
                                                             q.stage === 'contacted' ? 'bg-blue-100 text-blue-700 border-blue-200' :
@@ -752,73 +752,61 @@ const Quotations: React.FC = () => {
                                                     {q.stage === 'won' ? 'Ganada' :
                                                         q.stage === 'lost' ? 'Perdida' :
                                                             q.stage === 'negotiation' ? 'Negociación' :
-                                                                q.stage === 'contacted' ? 'Contactado' : 'Nueva'}
+                                                        q.stage === 'contacted' ? 'Contactado' : 'Nueva'}
                                                 </span>
                                             )}
-                                            <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border shadow-sm ${getStatusStyles(q.status)}`}>
+                                            <span className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest border shadow-sm ${getStatusStyles(q.status)}`}>
                                                 {getStatusLabel(q.status)}
                                             </span>
                                         </div>
                                         {q.interaction_type && (
-                                            <span className={`px-2 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wide border ${q.interaction_type === 'Presencial' ? 'bg-purple-50 text-purple-700 border-purple-100' :
+                                            <span className={`px-1.5 py-0.5 rounded-md text-[7px] font-bold uppercase tracking-wide border ${q.interaction_type === 'Presencial' ? 'bg-purple-50 text-purple-700 border-purple-100' :
                                                 q.interaction_type === 'WhatsApp' ? 'bg-green-50 text-green-700 border-green-100' :
                                                     'bg-blue-50 text-blue-700 border-blue-100'
                                                 }`}>
                                                 {q.interaction_type}
                                             </span>
                                         )}
-                                        <p className="text-[10px] font-bold text-gray-400 italic mt-0.5">Folio {q.folio || 'N/A'}</p>
+                                        <p className="text-[9px] font-bold text-gray-400 italic">Folio {q.folio || 'N/A'}</p>
                                     </div>
                                 </div>
 
                                 <div>
-                                    <h3 className="text-lg font-black text-gray-900 group-hover:text-indigo-600 transition-colors truncate uppercase tracking-tight" title={q.client_name}>
+                                    <h3 className="text-base font-black text-gray-900 group-hover:text-indigo-600 transition-colors truncate uppercase tracking-tight" title={q.client_name}>
                                         {q.client_name}
                                     </h3>
-                                    <div className="flex items-center text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-1">
-                                        <Clock size={12} className="mr-1.5 text-indigo-400" />
+                                    <div className="flex items-center text-[9px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">
+                                        <Clock size={11} className="mr-1 text-indigo-400" />
                                         <span>{new Date(q.created_at).toLocaleDateString()}</span>
-                                        <span className="mx-2 text-gray-200">|</span>
+                                        <span className="mx-1.5 text-gray-200">|</span>
                                         <span>{new Date(q.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4 py-4 border-t border-gray-50 mt-2">
+                                <div className="grid grid-cols-2 gap-2 py-2 border-t border-gray-50">
                                     <div>
                                         <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest mb-1">Vendedor</p>
-                                        <p className="text-xs font-bold text-gray-700 truncate">{q.seller_name}</p>
+                                        <p className="text-[11px] font-bold text-gray-700 truncate">{q.seller_name}</p>
                                     </div>
                                     <div className="text-right">
                                         <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest mb-1">Total Cotizado</p>
-                                        <p className="text-sm font-black text-indigo-600">{formatMoney(q.total_amount)}</p>
+                                        <p className="text-xs font-black text-indigo-600">{formatMoney(q.total_amount)}</p>
                                     </div>
                                 </div>
 
-                                <div className="p-4 bg-gray-50/50 rounded-2xl border border-gray-100 space-y-3">
-                                    <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest border-b border-gray-100 pb-1">Contacto del Cliente</p>
-                                    <div className="space-y-1">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Atención:</span>
-                                            <span className="text-[10px] font-bold text-gray-900 truncate ml-2 max-w-[150px]">{q.client_contact}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Teléfono:</span>
-                                            <span className="text-[10px] font-bold text-gray-900">{q.client_phone}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Email:</span>
-                                            <span className="text-[10px] font-bold text-indigo-500 lowercase truncate ml-2 max-w-[150px]">{q.client_email}</span>
-                                        </div>
-                                    </div>
+                                <div className="px-3 py-2 bg-gray-50/60 rounded-xl border border-gray-100">
+                                    <p className="text-[9px] font-bold text-gray-500 uppercase truncate">
+                                        {q.client_contact || 'Sin contacto'} | {q.client_phone || 'Sin teléfono'}
+                                    </p>
                                 </div>
                             </div>
 
-                            <div className="pt-6 flex items-center gap-2 mt-auto">
+                            <div className="pt-3 flex items-center gap-2 mt-auto">
                                 <button
                                     onClick={() => setSelectedForTemplate(q)}
-                                    className="flex-1 bg-gray-900 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center hover:bg-indigo-700 hover:shadow-indigo-100"
+                                    className="flex-1 bg-gray-900 text-white py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center hover:bg-indigo-700 hover:shadow-indigo-100"
                                 >
-                                    <Eye size={14} className="mr-2" />
+                                    <Eye size={12} className="mr-1.5" />
                                     Ver Documento
                                 </button>
 
@@ -826,48 +814,48 @@ const Quotations: React.FC = () => {
                                     <button
                                         onClick={() => handleConvertToOrder(q)}
                                         disabled={submitting || q.status === 'rejected' || q.discount_approval?.status === 'pending' || q.discount_approval?.status === 'rejected'}
-                                        className="bg-green-50 text-green-600 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm border border-green-100 active:scale-95 transition-all flex items-center justify-center hover:bg-green-600 hover:text-white"
+                                        className="bg-green-50 text-green-600 px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border border-green-100 active:scale-95 transition-all flex items-center justify-center hover:bg-green-600 hover:text-white"
                                         title="Convertir en Venta Real"
                                     >
-                                        <ShoppingBag size={14} className="mr-1" />
+                                        <ShoppingBag size={12} className="mr-1" />
                                         {q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}
                                     </button>
                                 )}
 
                                 <div className="flex gap-1">
                                     {q.discount_approval?.status && (
-                                        <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border ${q.discount_approval.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-100' : q.discount_approval.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
+                                        <span className={`px-1.5 py-1 rounded-lg text-[8px] font-black uppercase border ${q.discount_approval.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-100' : q.discount_approval.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
                                             Desc. {q.discount_approval.status === 'pending' ? 'Pendiente' : q.discount_approval.status === 'approved' ? 'Aprobado' : 'Rechazado'}
                                         </span>
                                     )}
                                     {q.location && (
                                         <button
                                             onClick={() => setSelectedLocation(q)}
-                                            className="p-3 bg-white text-gray-400 rounded-xl border border-gray-100 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                                            className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
                                             title="Ver Ubicación"
                                         >
-                                            <MapPin size={16} />
+                                            <MapPin size={14} />
                                         </button>
                                     )}
                                     {(isSupervisor || q.seller_id === profile?.id) && (
                                         <>
                                             <button
                                                 onClick={() => handleEditQuotation(q)}
-                                                className="p-3 bg-white text-gray-400 rounded-xl border border-gray-100 hover:text-amber-600 hover:bg-amber-50 transition-all"
+                                                className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-amber-600 hover:bg-amber-50 transition-all"
                                                 title="Editar"
                                             >
-                                                <Edit2 size={16} />
+                                                <Edit2 size={14} />
                                             </button>
                                             <button
                                                 onClick={() => handleDeleteQuotation(q.id)}
                                                 disabled={isDeleting === q.id}
-                                                className={`p-3 bg-white text-gray-400 rounded-xl border border-gray-100 hover:text-red-600 hover:bg-red-50 transition-all ${isDeleting === q.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                className={`p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-red-600 hover:bg-red-50 transition-all ${isDeleting === q.id ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 title="Eliminar"
                                             >
                                                 {isDeleting === q.id ? (
                                                     <div className="w-4 h-4 border-2 border-red-600 border-t-transparent animate-spin rounded-full"></div>
                                                 ) : (
-                                                    <Trash2 size={16} />
+                                                    <Trash2 size={14} />
                                                 )}
                                             </button>
                                         </>
