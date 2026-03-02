@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -27,6 +27,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     menuItems.push({ icon: <Users size={20} />, label: 'Clientes', path: '/clients' });
     menuItems.push({ icon: <ShoppingBag size={20} />, label: 'Cotizaciones', path: '/quotations' });
+    menuItems.push({ icon: <Trophy size={20} />, label: 'Conversiones', path: '/conversions' });
 
     if (effectiveRole !== 'administrativo') {
         menuItems.push({ icon: <CircleDollarSign size={20} />, label: 'Cobranzas', path: '/collections' });
@@ -46,6 +47,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         menuItems.length = 0;
         menuItems.push({ icon: <LayoutDashboard size={20} />, label: 'Mi Panel', path: '/' });
         menuItems.push({ icon: <Truck size={20} />, label: 'Ruta', path: '/delivery' });
+        menuItems.push({ icon: <Trophy size={20} />, label: 'Conversiones', path: '/conversions' });
     } else if (isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'administrativo') {
         menuItems.push({ icon: <ShieldCheck size={20} />, label: 'Mi Equipo', path: '/team' });
         menuItems.push({ icon: <React.Fragment><MapIcon size={20} className="text-indigo-400" /></React.Fragment>, label: 'Rutas', path: '/routes' });

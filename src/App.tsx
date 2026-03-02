@@ -32,6 +32,7 @@ const VisitHistory = lazy(() => import('./pages/VisitHistory'));
 const OperationsCenter = lazy(() => import('./pages/OperationsCenter'));
 const Collections = lazy(() => import('./pages/Collections'));
 const MyDeliveries = lazy(() => import('./pages/MyDeliveries'));
+const ConversionsRanking = lazy(() => import('./pages/ConversionsRanking'));
 
 const ScreenLoader = () => (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -176,6 +177,7 @@ function App() {
                                 <Route path="schedule" element={<Schedule />} />
                                 <Route path="clients" element={<Clients />} />
                                 <Route path="quotations" element={<Quotations />} />
+                                <Route path="conversions" element={<ConversionsRanking />} />
                                 <Route path="routes" element={<NonAdministrativeGuard><SellerRoutes /></NonAdministrativeGuard>} />
                                 <Route path="inventory" element={<Inventory />} />
                                 <Route path="team" element={<NonAdministrativeGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonAdministrativeGuard>} />
