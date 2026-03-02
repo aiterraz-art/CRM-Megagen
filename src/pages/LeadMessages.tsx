@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { MessageSquare, Plus, Save, Trash2, Upload, FileText, Link as LinkIcon } from 'lucide-react';
@@ -37,6 +37,8 @@ const LeadMessages = () => {
     const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const subjectRef = useRef<HTMLInputElement | null>(null);
+    const bodyRef = useRef<HTMLTextAreaElement | null>(null);
 
     const [draft, setDraft] = useState({
         name: '',
@@ -180,6 +182,13 @@ const LeadMessages = () => {
 
     const handleUploadAttachment = async (file: File) => {
         if (!canManage || !selectedTemplateId) return;
+        const allowedMimeTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+        const fileName = file.name.toLowerCase();
+        const allowedExtension = fileName.endsWith('.pdf') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png');
+        if (!allowedMimeTypes.includes(file.type) && !allowedExtension) {
+            alert('Solo se permiten archivos PDF, JPG, JPEG o PNG.');
+            return;
+        }
         setUploading(true);
         try {
             const sanitizedName = file.name.replace(/\s+/g, '_');
@@ -227,6 +236,27 @@ const LeadMessages = () => {
         const { data, error } = await supabase.storage.from('lead-assets').createSignedUrl(path, 60 * 60);
         if (error) throw error;
         return data.signedUrl;
+    };
+
+    const insertTagInField = (field: 'subject' | 'body', tag: string) => {
+        if (!canManage) return;
+        const target = field === 'subject' ? subjectRef.current : bodyRef.current;
+        if (!target) {
+            setDraft((prev) => ({ ...prev, [field]: `${prev[field]}${tag}` }));
+            return;
+        }
+
+        const start = target.selectionStart ?? target.value.length;
+        const end = target.selectionEnd ?? target.value.length;
+        const currentValue = draft[field];
+        const nextValue = `${currentValue.slice(0, start)}${tag}${currentValue.slice(end)}`;
+
+        setDraft((prev) => ({ ...prev, [field]: nextValue }));
+        setTimeout(() => {
+            target.focus();
+            const nextPos = start + tag.length;
+            target.setSelectionRange(nextPos, nextPos);
+        }, 0);
     };
 
     return (
@@ -290,6 +320,7 @@ const LeadMessages = () => {
                     </div>
 
                     <input
+                        ref={subjectRef}
                         value={draft.subject}
                         onChange={(e) => setDraft((prev) => ({ ...prev, subject: e.target.value }))}
                         placeholder="Asunto (email)"
@@ -298,6 +329,7 @@ const LeadMessages = () => {
                     />
 
                     <textarea
+                        ref={bodyRef}
                         value={draft.body}
                         onChange={(e) => setDraft((prev) => ({ ...prev, body: e.target.value }))}
                         rows={8}
@@ -320,7 +352,26 @@ const LeadMessages = () => {
                         <p className="text-[10px] font-black text-indigo-700 uppercase tracking-widest mb-2">Tags disponibles</p>
                         <div className="flex flex-wrap gap-2">
                             {TEMPLATE_TAGS.map((tag) => (
-                                <span key={tag} className="px-2 py-1 rounded-lg bg-white border border-indigo-100 text-[11px] font-bold text-indigo-700">{tag}</span>
+                                <div key={tag} className="flex items-center gap-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => insertTagInField('subject', tag)}
+                                        disabled={!canManage}
+                                        className="px-2 py-1 rounded-lg bg-white border border-indigo-100 text-[11px] font-bold text-indigo-700 disabled:opacity-40"
+                                        title="Insertar en asunto"
+                                    >
+                                        {tag}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => insertTagInField('body', tag)}
+                                        disabled={!canManage}
+                                        className="px-2 py-1 rounded-lg bg-indigo-600 text-white text-[10px] font-black uppercase disabled:opacity-40"
+                                        title="Insertar en cuerpo"
+                                    >
+                                        + cuerpo
+                                    </button>
+                                </div>
                             ))}
                         </div>
                     </div>
@@ -342,17 +393,27 @@ const LeadMessages = () => {
 
                     <div className="pt-2 border-t border-gray-100 space-y-3">
                         <p className="text-xs font-black text-gray-800 uppercase tracking-wider">Adjuntos (catálogos/ofertas)</p>
-                        {selectedTemplateId && canManage && (
+                        {selectedTemplateId && canManage ? (
                             <label className="inline-flex items-center px-4 py-2 rounded-xl border border-gray-200 bg-white text-xs font-black uppercase cursor-pointer">
                                 <Upload size={14} className="mr-2" />
-                                {uploading ? 'Subiendo...' : 'Subir archivo'}
-                                <input type="file" className="hidden" disabled={uploading} onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) handleUploadAttachment(file);
-                                    e.currentTarget.value = '';
-                                }} />
+                                {uploading ? 'Subiendo...' : 'Subir PDF/JPG/PNG'}
+                                <input
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png,image/jpeg,image/png,application/pdf"
+                                    className="hidden"
+                                    disabled={uploading}
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleUploadAttachment(file);
+                                        e.currentTarget.value = '';
+                                    }}
+                                />
                             </label>
-                        )}
+                        ) : canManage ? (
+                            <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                                Guarda o selecciona una plantilla para cargar catálogos/promociones.
+                            </p>
+                        ) : null}
 
                         <div className="space-y-2">
                             {(selectedTemplateId ? (attachmentsByTemplate[selectedTemplateId] || []) : []).map((attachment) => (
