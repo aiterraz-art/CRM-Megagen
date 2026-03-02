@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { Target, Mail, UserCircle2, Pencil, Phone, MessageCircle, Map as MapIcon, KanbanSquare } from 'lucide-react';
+import { Target, Mail, UserCircle2, Pencil, Phone, MessageCircle, Map as MapIcon, KanbanSquare, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { sendGmailMessage } from '../utils/gmail';
@@ -74,6 +74,7 @@ const LeadPipeline = () => {
     const [templates, setTemplates] = useState<MessageTemplate[]>([]);
     const [attachmentsByTemplate, setAttachmentsByTemplate] = useState<Record<string, TemplateAttachment[]>>({});
     const [selectedTemplateByLead, setSelectedTemplateByLead] = useState<Record<string, string>>({});
+    const [previewOpenByLead, setPreviewOpenByLead] = useState<Record<string, boolean>>({});
 
     const canViewAll = effectiveRole === 'admin' || effectiveRole === 'jefe';
 
@@ -287,6 +288,19 @@ const LeadPipeline = () => {
         return templates.find((template) => isChannelCompatible(template));
     };
 
+    const getRenderedTemplatePreview = (lead: LeadClient) => {
+        const selectedId = selectedTemplateByLead[lead.id];
+        if (!selectedId) return null;
+        const template = templateById[selectedId];
+        if (!template) return null;
+
+        const context = buildTemplateContext(lead, sellerName);
+        return {
+            subject: renderSubject(template.subject || '', context),
+            body: renderTemplate(template.body, context)
+        };
+    };
+
     const getSignedLinksForTemplate = async (templateId: string): Promise<string[]> => {
         const attachments = attachmentsByTemplate[templateId] || [];
         if (attachments.length === 0) return [];
@@ -373,14 +387,18 @@ const LeadPipeline = () => {
             await moveLeadToContacted(lead);
             alert('Correo enviado correctamente al lead.');
         } catch (error: any) {
-            await logLeadMessage({
-                lead,
-                templateId: getSelectedTemplate(lead.id, 'email')?.id,
-                channel: 'email',
-                destination: lead.email,
-                status: 'failed',
-                errorMessage: error.message
-            });
+            try {
+                await logLeadMessage({
+                    lead,
+                    templateId: getSelectedTemplate(lead.id, 'email')?.id,
+                    channel: 'email',
+                    destination: lead.email,
+                    status: 'failed',
+                    errorMessage: error.message
+                });
+            } catch (logError) {
+                console.error('No se pudo guardar log de error email:', logError);
+            }
             alert(`No se pudo enviar el correo: ${error.message}`);
         } finally {
             setSendingLeadId(null);
@@ -414,14 +432,18 @@ const LeadPipeline = () => {
 
             await moveLeadToContacted(lead);
         } catch (error: any) {
-            await logLeadMessage({
-                lead,
-                templateId: getSelectedTemplate(lead.id, 'whatsapp')?.id,
-                channel: 'whatsapp',
-                destination: normalizedPhone,
-                status: 'failed',
-                errorMessage: error.message
-            });
+            try {
+                await logLeadMessage({
+                    lead,
+                    templateId: getSelectedTemplate(lead.id, 'whatsapp')?.id,
+                    channel: 'whatsapp',
+                    destination: normalizedPhone,
+                    status: 'failed',
+                    errorMessage: error.message
+                });
+            } catch (logError) {
+                console.error('No se pudo guardar log de error whatsapp:', logError);
+            }
             alert(`No se pudo abrir WhatsApp: ${error.message}`);
         }
     };
@@ -551,18 +573,41 @@ const LeadPipeline = () => {
                                                                         <div className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Score: {lead.lead_score || 'N/A'}</div>
 
                                                                         {templates.length > 0 && (
-                                                                            <select
-                                                                                value={selectedTemplateByLead[lead.id] || ''}
-                                                                                onChange={(e) => setSelectedTemplateByLead((prev) => ({ ...prev, [lead.id]: e.target.value }))}
-                                                                                className="w-full p-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-700"
-                                                                            >
-                                                                                <option value="" disabled>Selecciona plantilla</option>
-                                                                                {templates.map((template) => (
-                                                                                    <option key={template.id} value={template.id}>
-                                                                                        {template.name} ({template.channel})
-                                                                                    </option>
-                                                                                ))}
-                                                                            </select>
+                                                                            <div className="space-y-2">
+                                                                                <select
+                                                                                    value={selectedTemplateByLead[lead.id] || ''}
+                                                                                    onChange={(e) => setSelectedTemplateByLead((prev) => ({ ...prev, [lead.id]: e.target.value }))}
+                                                                                    className="w-full p-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-700"
+                                                                                >
+                                                                                    <option value="" disabled>Selecciona plantilla</option>
+                                                                                    {templates.map((template) => (
+                                                                                        <option key={template.id} value={template.id}>
+                                                                                            {template.name} ({template.channel})
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setPreviewOpenByLead((prev) => ({ ...prev, [lead.id]: !prev[lead.id] }))}
+                                                                                    className="w-full p-2 rounded-xl border border-gray-200 bg-gray-50 text-gray-700 text-[11px] font-black uppercase tracking-wide flex items-center justify-center hover:bg-gray-100"
+                                                                                >
+                                                                                    {previewOpenByLead[lead.id] ? <EyeOff size={12} className="mr-1.5" /> : <Eye size={12} className="mr-1.5" />}
+                                                                                    {previewOpenByLead[lead.id] ? 'Ocultar Preview' : 'Ver Preview'}
+                                                                                </button>
+                                                                                {previewOpenByLead[lead.id] && (() => {
+                                                                                    const preview = getRenderedTemplatePreview(lead);
+                                                                                    return (
+                                                                                        <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-2 space-y-1">
+                                                                                            <p className="text-[10px] font-black uppercase tracking-wider text-indigo-700">
+                                                                                                Asunto: {preview?.subject || '(sin asunto)'}
+                                                                                            </p>
+                                                                                            <p className="text-[11px] text-gray-700 whitespace-pre-wrap">
+                                                                                                {preview?.body || '(sin cuerpo)'}
+                                                                                            </p>
+                                                                                        </div>
+                                                                                    );
+                                                                                })()}
+                                                                            </div>
                                                                         )}
 
                                                                         {!lead.email && (
