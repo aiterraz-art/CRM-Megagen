@@ -14,6 +14,7 @@ import { APIProvider } from '@vis.gl/react-google-maps';
 import ClientFormModal from '../components/modals/ClientFormModal';
 import ScheduleVisitModal from '../components/modals/ScheduleVisitModal';
 import { isProspectStatus } from '../utils/prospect';
+import ConfettiBurst, { ConfettiBurstController } from '../components/ConfettiBurst';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -39,6 +40,7 @@ const VisitLog = () => {
     const [leadScore, setLeadScore] = useState<number | null>(null);
     const [checkoutClientEmail, setCheckoutClientEmail] = useState('');
     const [showScheduleModal, setShowScheduleModal] = useState(false);
+    const [confettiController, setConfettiController] = useState<ConfettiBurstController | null>(null);
 
     // Client Validation State
     // Client Validation State
@@ -261,6 +263,7 @@ const VisitLog = () => {
                         initialData={client}
                         title="Completar Ficha Cliente"
                         onSave={async (updatedData) => {
+                            const wasProspect = isProspectStatus(client.status);
                             const { error } = await supabase
                                 .from('clients')
                                 .update({ ...updatedData, status: 'active' }) // Upgrade to active once saved
@@ -270,6 +273,13 @@ const VisitLog = () => {
 
                             // Update local state
                             setClient({ ...client, ...updatedData, status: 'active' } as any);
+                            if (wasProspect) {
+                                try {
+                                    confettiController?.celebrate();
+                                } catch (confettiError) {
+                                    console.warn('Confetti failed but conversion succeeded:', confettiError);
+                                }
+                            }
                             alert("Ficha actualizada correctamente. Ahora puedes cotizar.");
                             navigate('/quotations', { state: { client: { ...client, ...updatedData, status: 'active' } } });
                         }}
@@ -369,6 +379,7 @@ const VisitLog = () => {
 
                     </div>
                 )}
+                <ConfettiBurst onReady={(controller) => setConfettiController(controller)} />
             </div>
         </APIProvider>
     );

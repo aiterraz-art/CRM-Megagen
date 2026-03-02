@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { Calendar, MapPin, Target, TrendingUp, Clock, Filter, Award } from 'lucide-react';
+import { Calendar, MapPin, Target, TrendingUp, Clock, Filter, Award, Medal, Trophy } from 'lucide-react';
 import KPICard from '../components/KPICard';
 import GoalProgressChart from '../components/charts/GoalProgressChart';
 
@@ -219,26 +219,28 @@ const SellerDashboard = () => {
     const coldConversionPct = coldVisitsTotal > 0 ? Math.round((coldVisitsConverted / coldVisitsTotal) * 100) : 0;
     const maxBar = Math.max(1, ...visitSeries.map(v => v.visits));
     const medal = useMemo(() => {
-        if (coldVisitsConverted < 5) return null;
-        if (coldConversionPct >= 75) {
+        if (coldConversionPct >= 75 && coldVisitsConverted >= 15) {
             return {
                 label: 'Master Hunter Megagen',
                 level: 'Oro',
-                className: 'bg-amber-500 text-white border-amber-400'
+                className: 'bg-yellow-100 text-yellow-600 border-yellow-200 animate-pulse',
+                icon: Trophy
             };
         }
-        if (coldConversionPct >= 50) {
+        if (coldConversionPct >= 50 && coldVisitsConverted >= 10) {
             return {
-                label: 'Nivel Plata',
+                label: 'Experto en Frío',
                 level: 'Plata',
-                className: 'bg-gray-300 text-gray-900 border-gray-200'
+                className: 'bg-slate-200 text-slate-700 border-slate-300',
+                icon: Medal
             };
         }
-        if (coldConversionPct >= 30) {
+        if (coldConversionPct >= 30 && coldVisitsConverted >= 5) {
             return {
-                label: 'Nivel Bronce',
+                label: 'Cazador Inicial',
                 level: 'Bronce',
-                className: 'bg-orange-700 text-white border-orange-600'
+                className: 'bg-orange-100 text-orange-700 border-orange-200',
+                icon: Award
             };
         }
         return null;
@@ -262,6 +264,15 @@ const SellerDashboard = () => {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                    {medal && (
+                        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border font-black ${medal.className}`}>
+                            <medal.icon size={16} />
+                            <div className="leading-tight">
+                                <p className="text-[10px] uppercase tracking-wider">{medal.level}</p>
+                                <p className="text-xs">{medal.label}</p>
+                            </div>
+                        </div>
+                    )}
                     <button onClick={() => setPreset('today')} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${preset === 'today' ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}>Hoy</button>
                     <button onClick={() => setPreset('7d')} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${preset === '7d' ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}>7 días</button>
                     <button onClick={() => setPreset('30d')} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${preset === '30d' ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}>30 días</button>
@@ -285,23 +296,6 @@ const SellerDashboard = () => {
                     trendUp={coldConversionPct >= 40}
                 />
             </div>
-            <div className="premium-card p-5 border border-gray-100">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Gamificación comercial</p>
-                {medal ? (
-                    <div className={`inline-flex items-center gap-3 px-4 py-3 rounded-2xl border font-black ${medal.className}`}>
-                        <Award size={18} />
-                        <div>
-                            <p className="text-xs uppercase tracking-wider">{medal.level}</p>
-                            <p className="text-sm">{medal.label}</p>
-                        </div>
-                    </div>
-                ) : (
-                    <p className="text-sm font-bold text-gray-500">
-                        Sigue prospectando. Necesitas al menos 5 conversiones para desbloquear medalla.
-                    </p>
-                )}
-            </div>
-
             <div className="premium-card p-6">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
                     <h3 className="text-lg font-black text-gray-900 flex items-center"><Filter size={18} className="mr-2 text-indigo-600" />Filtro histórico</h3>
