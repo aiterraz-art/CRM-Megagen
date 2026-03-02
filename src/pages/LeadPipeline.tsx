@@ -711,7 +711,7 @@ const LeadPipeline = () => {
                                                                                     </button>
                                                                                 </div>
                                                                             </div>
-                                                                        ) : (
+                                                                        ) : !lead.email ? (
                                                                             <button
                                                                                 type="button"
                                                                                 onClick={() => handleStartEmailEdit(lead)}
@@ -720,7 +720,7 @@ const LeadPipeline = () => {
                                                                                 <Pencil size={12} className="mr-1.5" />
                                                                                 Completar Correo
                                                                             </button>
-                                                                        )}
+                                                                        ) : null}
 
                                                                         {editingPhoneLeadId === lead.id ? (
                                                                             <div className="space-y-2">
@@ -752,7 +752,7 @@ const LeadPipeline = () => {
                                                                                     </button>
                                                                                 </div>
                                                                             </div>
-                                                                        ) : (
+                                                                        ) : !validPhone ? (
                                                                             <button
                                                                                 type="button"
                                                                                 onClick={() => handleStartPhoneEdit(lead)}
@@ -761,7 +761,7 @@ const LeadPipeline = () => {
                                                                                 <Phone size={12} className="mr-1.5" />
                                                                                 Completar Celular
                                                                             </button>
-                                                                        )}
+                                                                        ) : null}
 
                                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                                                             <button
