@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { Shield, User, Search, CheckCircle, Ban, Edit, Save, AlertTriangle, Trash2 } from 'lucide-react';
+import { Shield, User, Search, CheckCircle, Ban, Edit, Save, AlertTriangle, Trash2, Mail } from 'lucide-react';
 import { Profile } from '../contexts/UserContext';
 import { googleService } from '../services/googleService';
+
+type InvitePayload = {
+    email: string;
+    full_name?: string | null;
+    role: string;
+};
 
 const Settings: React.FC = () => {
     const { profile, effectiveRole } = useUser();
@@ -25,6 +31,7 @@ const Settings: React.FC = () => {
     const [sendingInvite, setSendingInvite] = useState(false);
     const [inviteData, setInviteData] = useState({ email: '', full_name: '', role: 'seller' });
     const [pendingInvites, setPendingInvites] = useState<any[]>([]); // New state for Pending Invites
+    const [resendingInviteEmail, setResendingInviteEmail] = useState<string | null>(null);
 
     const normalizeRole = (role: string | null | undefined) => ((role || '').toLowerCase().trim() === 'manager' ? 'admin' : (role || '').toLowerCase().trim());
     const roles = ['admin', 'jefe', 'administrativo', 'seller', 'driver'];
@@ -226,54 +233,16 @@ const Settings: React.FC = () => {
             if (whitelistError) throw whitelistError;
 
             // 3. Send Email (Best Effort via Gmail API)
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                const providerToken = (session as any)?.provider_token;
+            const mailResult = await sendInvitationEmail({
+                email: normalizedEmail,
+                full_name: inviteData.full_name,
+                role: inviteData.role
+            });
 
-                if (providerToken) {
-                    const companyName = import.meta.env.VITE_COMPANY_NAME || 'Megagen';
-                    const subject = `Invitación a ${companyName} CRM 🏥`;
-                    const message = `Hola ${inviteData.full_name},\n\nHas sido invitado al CRM de ${companyName} con el rol de ${inviteData.role.toUpperCase()}.\n\nPara ingresar, simplemente inicia sesión con tu cuenta de Google (${inviteData.email}) en:\n\n${window.location.origin}/\n\nSaludos,\nEquipo ${companyName}`;
-
-                    const utf8Encode = new TextEncoder();
-                    const subjectEncoded = btoa(String.fromCharCode(...utf8Encode.encode(subject)));
-                    const rawMimeMessage = [
-                        `From: ${session?.user.email}`,
-                        `To: ${normalizedEmail}`,
-                        `Subject: =?utf-8?B?${subjectEncoded}?=`,
-                        'MIME-Version: 1.0',
-                        'Content-Type: text/plain; charset="UTF-8"',
-                        'Content-Transfer-Encoding: 7bit',
-                        '',
-                        message
-                    ].join('\r\n');
-
-                    const token = await googleService.ensureSession();
-                    if (!token) {
-                        setSendingInvite(false);
-                        return;
-                    }
-
-                    const sendResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ raw: btoa(unescape(encodeURIComponent(rawMimeMessage))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') })
-                    });
-                    if (!sendResponse.ok) {
-                        const errorText = await sendResponse.text();
-                        throw new Error(`Gmail API ${sendResponse.status}: ${errorText}`);
-                    }
-                    alert('✅ Invitación creada y correo enviado.');
-                } else {
-                    alert('⚠️ Invitación creada pero NO enviada (falta sesión Google). Notificar manualmente.');
-                }
-            } catch (mailErr: any) {
-                console.warn("Mail verify error:", mailErr);
-                const mailDetail = JSON.stringify(mailErr, Object.getOwnPropertyNames(mailErr), 2);
-                alert(`⚠️ Invitación creada, pero falló el envío del correo.\n\nDetalle Correo:\n${mailDetail}`);
+            if (mailResult.sent) {
+                alert('✅ Invitación creada y correo enviado.');
+            } else {
+                alert('⚠️ Invitación creada pero NO enviada (falta sesión Google). Notificar manualmente.');
             }
 
             setIsInviteModalOpen(false);
@@ -284,6 +253,65 @@ const Settings: React.FC = () => {
             alert('Error al procesar invitación: ' + (error.message || 'Error desconocido'));
         } finally {
             setSendingInvite(false);
+        }
+    };
+
+    const sendInvitationEmail = async (invite: InvitePayload): Promise<{ sent: boolean }> => {
+        const { data: { session } } = await supabase.auth.getSession();
+        const providerToken = (session as any)?.provider_token;
+        if (!providerToken) return { sent: false };
+
+        const token = await googleService.ensureSession().catch(() => null);
+        if (!token) return { sent: false };
+
+        const companyName = import.meta.env.VITE_COMPANY_NAME || 'Megagen';
+        const contactName = invite.full_name?.trim() || invite.email.split('@')[0];
+        const subject = `Invitación a ${companyName} CRM 🏥`;
+        const message = `Hola ${contactName},\n\nHas sido invitado al CRM de ${companyName} con el rol de ${invite.role.toUpperCase()}.\n\nPara ingresar, simplemente inicia sesión con tu cuenta de Google (${invite.email}) en:\n\n${window.location.origin}/\n\nSaludos,\nEquipo ${companyName}`;
+
+        const utf8Encode = new TextEncoder();
+        const subjectEncoded = btoa(String.fromCharCode(...utf8Encode.encode(subject)));
+        const rawMimeMessage = [
+            `From: ${session?.user.email}`,
+            `To: ${invite.email.toLowerCase()}`,
+            `Subject: =?utf-8?B?${subjectEncoded}?=`,
+            'MIME-Version: 1.0',
+            'Content-Type: text/plain; charset="UTF-8"',
+            'Content-Transfer-Encoding: 7bit',
+            '',
+            message
+        ].join('\r\n');
+
+        const sendResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ raw: btoa(unescape(encodeURIComponent(rawMimeMessage))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') })
+        });
+        if (!sendResponse.ok) {
+            const errorText = await sendResponse.text();
+            throw new Error(`Gmail API ${sendResponse.status}: ${errorText}`);
+        }
+
+        return { sent: true };
+    };
+
+    const handleResendInvite = async (invite: InvitePayload) => {
+        setResendingInviteEmail(invite.email);
+        try {
+            const mailResult = await sendInvitationEmail(invite);
+            if (mailResult.sent) {
+                alert(`✅ Invitación reenviada a ${invite.email}.`);
+            } else {
+                alert('⚠️ No se pudo reenviar: falta sesión Google activa. Reconecta Google e intenta nuevamente.');
+            }
+        } catch (error: any) {
+            console.error('Error resending invite:', error);
+            alert(`❌ Error al reenviar invitación: ${error.message || 'Error desconocido'}`);
+        } finally {
+            setResendingInviteEmail(null);
         }
     };
 
@@ -514,17 +542,31 @@ const Settings: React.FC = () => {
                                                     <p className="text-xs text-orange-400 font-medium">Esperando registro (Rol: {invite.role})</p>
                                                 </div>
                                             </div>
-                                            <button
-                                                onClick={async () => {
-                                                    if (confirm(`¿Eliminar invitación para ${invite.email}?`)) {
-                                                        await supabase.from('user_whitelist').delete().eq('email', invite.email);
-                                                        fetchPendingInvites();
-                                                    }
-                                                }}
-                                                className="text-gray-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-lg transition-all"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => handleResendInvite({
+                                                        email: invite.email,
+                                                        full_name: invite.full_name || null,
+                                                        role: invite.role || 'seller'
+                                                    })}
+                                                    disabled={resendingInviteEmail === invite.email}
+                                                    className="text-indigo-600 hover:text-indigo-700 px-3 py-2 hover:bg-indigo-50 rounded-lg transition-all font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-40"
+                                                >
+                                                    <Mail size={14} />
+                                                    {resendingInviteEmail === invite.email ? 'Enviando...' : 'Reenviar'}
+                                                </button>
+                                                <button
+                                                    onClick={async () => {
+                                                        if (confirm(`¿Eliminar invitación para ${invite.email}?`)) {
+                                                            await supabase.from('user_whitelist').delete().eq('email', invite.email);
+                                                            fetchPendingInvites();
+                                                        }
+                                                    }}
+                                                    className="text-gray-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-lg transition-all"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
