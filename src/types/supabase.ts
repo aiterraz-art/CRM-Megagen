@@ -338,6 +338,105 @@ export interface Database {
                     created_at?: string | null
                 }
             }
+            lead_message_templates: {
+                Row: {
+                    id: string
+                    name: string
+                    channel: 'email' | 'whatsapp' | 'both'
+                    subject: string | null
+                    body: string
+                    is_active: boolean
+                    created_by: string | null
+                    created_at: string
+                    updated_at: string
+                }
+                Insert: {
+                    id?: string
+                    name: string
+                    channel: 'email' | 'whatsapp' | 'both'
+                    subject?: string | null
+                    body: string
+                    is_active?: boolean
+                    created_by?: string | null
+                    created_at?: string
+                    updated_at?: string
+                }
+                Update: {
+                    id?: string
+                    name?: string
+                    channel?: 'email' | 'whatsapp' | 'both'
+                    subject?: string | null
+                    body?: string
+                    is_active?: boolean
+                    created_by?: string | null
+                    created_at?: string
+                    updated_at?: string
+                }
+            }
+            lead_message_attachments: {
+                Row: {
+                    id: string
+                    template_id: string
+                    file_name: string
+                    file_path: string
+                    mime_type: string | null
+                    size_bytes: number | null
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    template_id: string
+                    file_name: string
+                    file_path: string
+                    mime_type?: string | null
+                    size_bytes?: number | null
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    template_id?: string
+                    file_name?: string
+                    file_path?: string
+                    mime_type?: string | null
+                    size_bytes?: number | null
+                    created_at?: string
+                }
+            }
+            lead_message_logs: {
+                Row: {
+                    id: string
+                    template_id: string | null
+                    client_id: string | null
+                    user_id: string | null
+                    channel: 'email' | 'whatsapp'
+                    destination: string | null
+                    status: 'sent' | 'failed' | 'opened_external'
+                    error_message: string | null
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    template_id?: string | null
+                    client_id?: string | null
+                    user_id?: string | null
+                    channel: 'email' | 'whatsapp'
+                    destination?: string | null
+                    status: 'sent' | 'failed' | 'opened_external'
+                    error_message?: string | null
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    template_id?: string | null
+                    client_id?: string | null
+                    user_id?: string | null
+                    channel?: 'email' | 'whatsapp'
+                    destination?: string | null
+                    status?: 'sent' | 'failed' | 'opened_external'
+                    error_message?: string | null
+                    created_at?: string
+                }
+            }
         }
     }
 }

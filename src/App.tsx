@@ -20,6 +20,7 @@ const Quotations = lazy(() => import('./pages/Quotations'));
 const SellerRoutes = lazy(() => import('./pages/SellerRoutes'));
 const Pipeline = lazy(() => import('./pages/Pipeline'));
 const LeadPipeline = lazy(() => import('./pages/LeadPipeline'));
+const LeadMessages = lazy(() => import('./pages/LeadMessages'));
 const ColdVisit = lazy(() => import('./pages/ColdVisit'));
 const Dispatch = lazy(() => import('./pages/Dispatch'));
 const DeliveryRoute = lazy(() => import('./pages/DeliveryRoute'));
@@ -171,6 +172,7 @@ function App() {
                                 <Route path="team" element={<NonAdministrativeGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonAdministrativeGuard>} />
                                 <Route path="pipeline" element={<NonAdministrativeGuard><Pipeline /></NonAdministrativeGuard>} />
                                 <Route path="lead-pipeline" element={<NonAdministrativeGuard><LeadPipeline /></NonAdministrativeGuard>} />
+                                <Route path="lead-messages" element={<NonAdministrativeGuard><LeadMessages /></NonAdministrativeGuard>} />
                                 <Route path="dispatch" element={<Dispatch />} />
                                 <Route path="delivery" element={<DeliveryRoute />} />
                                 <Route path="my-deliveries" element={<MyDeliveries />} />

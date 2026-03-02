@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target } from 'lucide-react';
+import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -32,6 +32,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         menuItems.push({ icon: <CircleDollarSign size={20} />, label: 'Cobranzas', path: '/collections' });
         menuItems.push({ icon: <LayoutDashboard size={20} className="rotate-90" />, label: 'Embudo', path: '/pipeline' });
         menuItems.push({ icon: <Target size={20} />, label: 'Leads', path: '/lead-pipeline' });
+        menuItems.push({ icon: <MessageSquare size={20} />, label: 'Mensajes', path: '/lead-messages' });
     }
 
     menuItems.push({ icon: <Package size={20} />, label: 'Inventario', path: '/inventory' });

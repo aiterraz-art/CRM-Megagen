@@ -33,6 +33,9 @@ const TeamStats = () => {
     const [exportTo, setExportTo] = useState(() => new Date().toISOString().split('T')[0]);
     const [exportSellerId, setExportSellerId] = useState<'all' | string>('all');
     const [exporting, setExporting] = useState(false);
+    const [cleaningLeads, setCleaningLeads] = useState(false);
+    const normalizedCurrentRole = (currentUser?.role || '').toLowerCase();
+    const canCleanGhostLeads = normalizedCurrentRole === 'admin' || normalizedCurrentRole === 'jefe' || normalizedCurrentRole === 'manager';
 
     const handleOpenGoalModal = async (rep: any) => {
         setSelectedRep(rep);
@@ -823,6 +826,23 @@ const TeamStats = () => {
         }
     };
 
+    const handleCleanGhostLeads = async () => {
+        if (!canCleanGhostLeads) return;
+        const confirmed = window.confirm('Esta acción archivará leads prospecto sin email/teléfono y sin movimiento por más de 60 días. ¿Deseas continuar?');
+        if (!confirmed) return;
+
+        setCleaningLeads(true);
+        try {
+            const { data, error } = await supabase.rpc('archive_abandoned_prospects');
+            if (error) throw error;
+            alert(`Limpieza ejecutada. Leads archivados: ${Number(data || 0)}.`);
+        } catch (error: any) {
+            alert(`No se pudo ejecutar la limpieza: ${error.message}`);
+        } finally {
+            setCleaningLeads(false);
+        }
+    };
+
     if (userLoading || (hasPermission('VIEW_TEAM_STATS') && loading && teamData.length === 0)) return <div className="p-8 text-center text-gray-500 italic font-black uppercase tracking-widest animate-pulse">Cargando ecosistema...</div>;
     if (!hasPermission('VIEW_TEAM_STATS')) return <Navigate to="/" />;
 
@@ -906,6 +926,15 @@ const TeamStats = () => {
                             <Download size={14} className="mr-2" />
                             {exporting ? 'Exportando...' : 'Data Lake CRM'}
                         </button>
+                        {canCleanGhostLeads && (
+                            <button
+                                onClick={handleCleanGhostLeads}
+                                disabled={cleaningLeads}
+                                className="px-4 py-2.5 rounded-xl bg-rose-600 text-white font-black text-xs uppercase tracking-wider hover:bg-rose-700 disabled:opacity-50"
+                            >
+                                {cleaningLeads ? 'Limpiando...' : 'Limpiar Leads Fantasma'}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

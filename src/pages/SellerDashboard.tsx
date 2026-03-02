@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { Calendar, MapPin, Target, TrendingUp, Clock, Filter } from 'lucide-react';
+import { Calendar, MapPin, Target, TrendingUp, Clock, Filter, Award } from 'lucide-react';
 import KPICard from '../components/KPICard';
 import GoalProgressChart from '../components/charts/GoalProgressChart';
 
@@ -218,6 +218,31 @@ const SellerDashboard = () => {
     const todayGoalPct = Math.min(100, Math.round((todayVisits / Math.max(dailyGoal, 1)) * 100));
     const coldConversionPct = coldVisitsTotal > 0 ? Math.round((coldVisitsConverted / coldVisitsTotal) * 100) : 0;
     const maxBar = Math.max(1, ...visitSeries.map(v => v.visits));
+    const medal = useMemo(() => {
+        if (coldVisitsConverted < 5) return null;
+        if (coldConversionPct >= 75) {
+            return {
+                label: 'Master Hunter Megagen',
+                level: 'Oro',
+                className: 'bg-amber-500 text-white border-amber-400'
+            };
+        }
+        if (coldConversionPct >= 50) {
+            return {
+                label: 'Nivel Plata',
+                level: 'Plata',
+                className: 'bg-gray-300 text-gray-900 border-gray-200'
+            };
+        }
+        if (coldConversionPct >= 30) {
+            return {
+                label: 'Nivel Bronce',
+                level: 'Bronce',
+                className: 'bg-orange-700 text-white border-orange-600'
+            };
+        }
+        return null;
+    }, [coldConversionPct, coldVisitsConverted]);
 
     if (loading) {
         return (
@@ -259,6 +284,22 @@ const SellerDashboard = () => {
                     trend={`${coldVisitsConverted}/${coldVisitsTotal} prospectos convertidos`}
                     trendUp={coldConversionPct >= 40}
                 />
+            </div>
+            <div className="premium-card p-5 border border-gray-100">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Gamificación comercial</p>
+                {medal ? (
+                    <div className={`inline-flex items-center gap-3 px-4 py-3 rounded-2xl border font-black ${medal.className}`}>
+                        <Award size={18} />
+                        <div>
+                            <p className="text-xs uppercase tracking-wider">{medal.level}</p>
+                            <p className="text-sm">{medal.label}</p>
+                        </div>
+                    </div>
+                ) : (
+                    <p className="text-sm font-bold text-gray-500">
+                        Sigue prospectando. Necesitas al menos 5 conversiones para desbloquear medalla.
+                    </p>
+                )}
             </div>
 
             <div className="premium-card p-6">
