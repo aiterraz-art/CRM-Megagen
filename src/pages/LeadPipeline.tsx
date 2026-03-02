@@ -69,6 +69,9 @@ const LeadPipeline = () => {
     const [editingEmailLeadId, setEditingEmailLeadId] = useState<string | null>(null);
     const [draftEmail, setDraftEmail] = useState('');
     const [savingEmailLeadId, setSavingEmailLeadId] = useState<string | null>(null);
+    const [editingPhoneLeadId, setEditingPhoneLeadId] = useState<string | null>(null);
+    const [draftPhone, setDraftPhone] = useState('');
+    const [savingPhoneLeadId, setSavingPhoneLeadId] = useState<string | null>(null);
     const [viewMode, setViewMode] = useState<'kanban' | 'map'>('kanban');
 
     const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -271,6 +274,37 @@ const LeadPipeline = () => {
             alert(`No se pudo guardar el correo: ${error.message}`);
         } finally {
             setSavingEmailLeadId(null);
+        }
+    };
+
+    const handleStartPhoneEdit = (lead: LeadClient) => {
+        setEditingPhoneLeadId(lead.id);
+        setDraftPhone(lead.phone || '');
+    };
+
+    const handleSaveLeadPhone = async (leadId: string) => {
+        const normalizedPhone = normalizeChileanPhone(draftPhone.trim());
+        if (!normalizedPhone) {
+            alert('Ingresa un celular válido de Chile para habilitar WhatsApp.');
+            return;
+        }
+
+        try {
+            setSavingPhoneLeadId(leadId);
+            const { error } = await supabase
+                .from('clients')
+                .update({ phone: normalizedPhone })
+                .eq('id', leadId);
+            if (error) throw error;
+
+            setLeads((prev) => prev.map((item) => item.id === leadId ? { ...item, phone: normalizedPhone } : item));
+            setEditingPhoneLeadId(null);
+            setDraftPhone('');
+            alert('Celular del lead actualizado.');
+        } catch (error: any) {
+            alert(`No se pudo guardar el celular: ${error.message}`);
+        } finally {
+            setSavingPhoneLeadId(null);
         }
     };
 
@@ -641,6 +675,11 @@ const LeadPipeline = () => {
                                                                                 Falta correo del cliente para enviar email.
                                                                             </p>
                                                                         )}
+                                                                        {!validPhone && (
+                                                                            <p className="text-[11px] font-black text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                                                                                Falta celular válido para WhatsApp.
+                                                                            </p>
+                                                                        )}
 
                                                                         {editingEmailLeadId === lead.id ? (
                                                                             <div className="space-y-2">
@@ -680,6 +719,47 @@ const LeadPipeline = () => {
                                                                             >
                                                                                 <Pencil size={12} className="mr-1.5" />
                                                                                 Completar Correo
+                                                                            </button>
+                                                                        )}
+
+                                                                        {editingPhoneLeadId === lead.id ? (
+                                                                            <div className="space-y-2">
+                                                                                <input
+                                                                                    type="tel"
+                                                                                    value={draftPhone}
+                                                                                    onChange={(e) => setDraftPhone(e.target.value)}
+                                                                                    placeholder="+56 9 1234 5678"
+                                                                                    className="w-full p-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700"
+                                                                                />
+                                                                                <div className="grid grid-cols-2 gap-2">
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => handleSaveLeadPhone(lead.id)}
+                                                                                        disabled={savingPhoneLeadId === lead.id}
+                                                                                        className="p-2 rounded-lg bg-emerald-600 text-white text-[11px] font-black uppercase tracking-wide hover:bg-emerald-700"
+                                                                                    >
+                                                                                        {savingPhoneLeadId === lead.id ? 'Guardando...' : 'Guardar Celular'}
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => {
+                                                                                            setEditingPhoneLeadId(null);
+                                                                                            setDraftPhone('');
+                                                                                        }}
+                                                                                        className="p-2 rounded-lg bg-gray-100 text-gray-600 text-[11px] font-black uppercase tracking-wide hover:bg-gray-200"
+                                                                                    >
+                                                                                        Cancelar
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleStartPhoneEdit(lead)}
+                                                                                className="w-full p-2 rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-700 text-[11px] font-black uppercase tracking-wide flex items-center justify-center hover:bg-emerald-100"
+                                                                            >
+                                                                                <Phone size={12} className="mr-1.5" />
+                                                                                Completar Celular
                                                                             </button>
                                                                         )}
 
