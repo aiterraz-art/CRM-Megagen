@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { Target, Mail, UserCircle2 } from 'lucide-react';
+import { Target, Mail, UserCircle2, Pencil } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { sendGmailMessage } from '../utils/gmail';
@@ -36,6 +36,9 @@ const LeadPipeline = () => {
     const [profiles, setProfiles] = useState<Array<{ id: string; full_name: string | null; email: string | null }>>([]);
     const [sellerFilter, setSellerFilter] = useState<string>('all');
     const [sendingLeadId, setSendingLeadId] = useState<string | null>(null);
+    const [editingEmailLeadId, setEditingEmailLeadId] = useState<string | null>(null);
+    const [draftEmail, setDraftEmail] = useState('');
+    const [savingEmailLeadId, setSavingEmailLeadId] = useState<string | null>(null);
 
     const canViewAll = effectiveRole === 'admin' || effectiveRole === 'jefe';
 
@@ -147,6 +150,38 @@ const LeadPipeline = () => {
         }
     };
 
+    const handleStartEmailEdit = (lead: LeadClient) => {
+        setEditingEmailLeadId(lead.id);
+        setDraftEmail(lead.email || '');
+    };
+
+    const handleSaveLeadEmail = async (leadId: string) => {
+        const normalizedEmail = draftEmail.trim().toLowerCase();
+        const isValid = /\S+@\S+\.\S+/.test(normalizedEmail);
+        if (!isValid) {
+            alert('Ingresa un correo válido para habilitar el envío del kit.');
+            return;
+        }
+
+        try {
+            setSavingEmailLeadId(leadId);
+            const { error } = await supabase
+                .from('clients')
+                .update({ email: normalizedEmail })
+                .eq('id', leadId);
+            if (error) throw error;
+
+            setLeads((prev) => prev.map((item) => item.id === leadId ? { ...item, email: normalizedEmail } : item));
+            setEditingEmailLeadId(null);
+            setDraftEmail('');
+            alert('Correo del lead actualizado.');
+        } catch (error: any) {
+            alert(`No se pudo guardar el correo: ${error.message}`);
+        } finally {
+            setSavingEmailLeadId(null);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex justify-center items-center h-[50vh]">
@@ -216,6 +251,51 @@ const LeadPipeline = () => {
                                                                     </div>
                                                                 )}
                                                                 <div className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Score: {lead.lead_score || 'N/A'}</div>
+                                                                {!lead.email && (
+                                                                    <p className="text-[11px] font-black text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                                                                        Falta correo del cliente para enviar kit.
+                                                                    </p>
+                                                                )}
+                                                                {editingEmailLeadId === lead.id ? (
+                                                                    <div className="space-y-2">
+                                                                        <input
+                                                                            type="email"
+                                                                            value={draftEmail}
+                                                                            onChange={(e) => setDraftEmail(e.target.value)}
+                                                                            placeholder="cliente@clinica.cl"
+                                                                            className="w-full p-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700"
+                                                                        />
+                                                                        <div className="grid grid-cols-2 gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleSaveLeadEmail(lead.id)}
+                                                                                disabled={savingEmailLeadId === lead.id}
+                                                                                className="p-2 rounded-lg bg-indigo-600 text-white text-[11px] font-black uppercase tracking-wide hover:bg-indigo-700"
+                                                                            >
+                                                                                {savingEmailLeadId === lead.id ? 'Guardando...' : 'Guardar Correo'}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setEditingEmailLeadId(null);
+                                                                                    setDraftEmail('');
+                                                                                }}
+                                                                                className="p-2 rounded-lg bg-gray-100 text-gray-600 text-[11px] font-black uppercase tracking-wide hover:bg-gray-200"
+                                                                            >
+                                                                                Cancelar
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleStartEmailEdit(lead)}
+                                                                        className="w-full p-2 rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-700 text-[11px] font-black uppercase tracking-wide flex items-center justify-center hover:bg-indigo-100"
+                                                                    >
+                                                                        <Pencil size={12} className="mr-1.5" />
+                                                                        Completar Correo
+                                                                    </button>
+                                                                )}
                                                                 <button
                                                                     disabled={!lead.email || sendingLeadId === lead.id}
                                                                     onClick={() => handleSendKit(lead)}
