@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { MessageSquare, Plus, Save, Trash2, Upload, FileText, Link as LinkIcon } from 'lucide-react';
+import { MessageSquare, Plus, Save, Trash2, Upload, FileText, Link as LinkIcon, Eye, X } from 'lucide-react';
 import { TEMPLATE_TAGS, renderSubject, renderTemplate } from '../utils/messageTemplates';
 
 type Template = {
@@ -39,6 +39,7 @@ const LeadMessages = () => {
     const [uploading, setUploading] = useState(false);
     const subjectRef = useRef<HTMLInputElement | null>(null);
     const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+    const [previewFile, setPreviewFile] = useState<{ name: string; url: string; mimeType: string | null } | null>(null);
 
     const [draft, setDraft] = useState({
         name: '',
@@ -238,6 +239,19 @@ const LeadMessages = () => {
         return data.signedUrl;
     };
 
+    const handlePreviewAttachment = async (attachment: Attachment) => {
+        try {
+            const url = await getAttachmentUrl(attachment.file_path);
+            setPreviewFile({
+                name: attachment.file_name,
+                url,
+                mimeType: attachment.mime_type
+            });
+        } catch (error: any) {
+            alert(`No se pudo previsualizar adjunto: ${error.message}`);
+        }
+    };
+
     const insertTagInField = (field: 'subject' | 'body', tag: string) => {
         if (!canManage) return;
         const target = field === 'subject' ? subjectRef.current : bodyRef.current;
@@ -260,7 +274,8 @@ const LeadMessages = () => {
     };
 
     return (
-        <div className="space-y-6 max-w-7xl mx-auto">
+        <>
+            <div className="space-y-6 max-w-7xl mx-auto">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 flex items-center"><MessageSquare className="mr-3 text-indigo-600" />Mensajes Predefinidos</h1>
@@ -424,6 +439,13 @@ const LeadMessages = () => {
                                     </div>
                                     <div className="flex items-center gap-2 ml-2">
                                         <button
+                                            onClick={() => handlePreviewAttachment(attachment)}
+                                            className="p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:text-indigo-600"
+                                            title="Previsualizar"
+                                        >
+                                            <Eye size={12} />
+                                        </button>
+                                        <button
                                             onClick={async () => {
                                                 try {
                                                     const url = await getAttachmentUrl(attachment.file_path);
@@ -433,7 +455,7 @@ const LeadMessages = () => {
                                                 }
                                             }}
                                             className="p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:text-indigo-600"
-                                            title="Abrir"
+                                            title="Abrir en nueva pestaña"
                                         >
                                             <LinkIcon size={12} />
                                         </button>
@@ -456,7 +478,31 @@ const LeadMessages = () => {
                     </div>
                 </div>
             </div>
-        </div>
+            </div>
+            {previewFile && (
+                <div className="fixed inset-0 z-[1200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                            <p className="font-black text-gray-900 truncate pr-4">{previewFile.name}</p>
+                            <button
+                                type="button"
+                                onClick={() => setPreviewFile(null)}
+                                className="p-2 rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <div className="flex-1 bg-gray-50">
+                            {(previewFile.mimeType || '').includes('image') || /\.(jpg|jpeg|png)$/i.test(previewFile.name) ? (
+                                <img src={previewFile.url} alt={previewFile.name} className="w-full h-full object-contain" />
+                            ) : (
+                                <iframe title={previewFile.name} src={previewFile.url} className="w-full h-full border-0" />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
     );
 };
 
