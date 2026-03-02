@@ -236,9 +236,9 @@ const ClientsContent = () => {
                 const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
                 query = query.or(
                     `and(status.eq.prospect,last_visit_date.not.is.null,last_visit_date.lt.${cutoffDate}),` +
-                    `and(status.ilike.prospect_%,last_visit_date.not.is.null,last_visit_date.lt.${cutoffDate}),` +
+                    `and(status.ilike.prospect_*,last_visit_date.not.is.null,last_visit_date.lt.${cutoffDate}),` +
                     `and(status.eq.prospect,last_visit_date.is.null,created_at.lt.${cutoffDate}),` +
-                    `and(status.ilike.prospect_%,last_visit_date.is.null,created_at.lt.${cutoffDate})`
+                    `and(status.ilike.prospect_*,last_visit_date.is.null,created_at.lt.${cutoffDate})`
                 );
             } else if (isSellerRole && profile?.id) {
                 query = query.eq('created_by', profile.id);

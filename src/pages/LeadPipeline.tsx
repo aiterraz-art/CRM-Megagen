@@ -46,7 +46,7 @@ const LeadPipeline = () => {
             let query = supabase
                 .from('clients')
                 .select('id, name, email, purchase_contact, status, lead_score, created_by, created_at')
-                .or('status.eq.prospect,status.ilike.prospect_%')
+                .or('status.eq.prospect,status.ilike.prospect_*')
                 .order('created_at', { ascending: false });
 
             if (!canViewAll) {
