@@ -61,14 +61,6 @@ const deg2rad = (deg: number) => {
     return deg * (Math.PI / 180);
 };
 
-const isAbandonedProspect = (client: Client, thresholdDays = 30) => {
-    if (!isProspectStatus(client.status)) return false;
-    const now = Date.now();
-    const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
-    const lastContactDate = client.last_visit_date ? new Date(client.last_visit_date).getTime() : new Date(client.created_at).getTime();
-    return now - lastContactDate >= thresholdMs;
-};
-
 const ClientsContent = () => {
     const { profile, hasPermission, isSupervisor, effectiveRole } = useUser();
     const navigate = useNavigate();
@@ -241,7 +233,13 @@ const ClientsContent = () => {
             let query = supabase.from('clients').select('*').order('name');
 
             if (portfolioTab === 'pool') {
-                query = query.or('status.eq.prospect,status.ilike.prospect_%');
+                const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+                query = query.or(
+                    `and(status.eq.prospect,last_visit_date.not.is.null,last_visit_date.lt.${cutoffDate}),` +
+                    `and(status.ilike.prospect_%,last_visit_date.not.is.null,last_visit_date.lt.${cutoffDate}),` +
+                    `and(status.eq.prospect,last_visit_date.is.null,created_at.lt.${cutoffDate}),` +
+                    `and(status.ilike.prospect_%,last_visit_date.is.null,created_at.lt.${cutoffDate})`
+                );
             } else if (isSellerRole && profile?.id) {
                 query = query.eq('created_by', profile.id);
             } else if (!canViewAll && profile?.id) {
@@ -256,9 +254,7 @@ const ClientsContent = () => {
             }
 
             if (data) {
-                const visibleClients = portfolioTab === 'pool'
-                    ? data.filter((client) => isAbandonedProspect(client as Client))
-                    : data;
+                const visibleClients = data;
                 setClients(visibleClients);
                 setLastRefreshAt(new Date().toISOString());
 

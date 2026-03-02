@@ -11,6 +11,9 @@ interface VisitCheckoutModalProps {
     showLeadScore?: boolean;
     leadScore?: number | null;
     onLeadScoreChange?: (score: number) => void;
+    requireClientEmail?: boolean;
+    clientEmail?: string;
+    onClientEmailChange?: (email: string) => void;
 }
 
 const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
@@ -22,8 +25,18 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
     saving,
     showLeadScore = false,
     leadScore = null,
-    onLeadScoreChange
+    onLeadScoreChange,
+    requireClientEmail = false,
+    clientEmail = '',
+    onClientEmailChange
 }) => {
+    const requiresLeadScore = showLeadScore;
+    const emailIsValid = /\S+@\S+\.\S+/.test(clientEmail.trim());
+    const canConfirm = notes.trim()
+        && !saving
+        && (!requiresLeadScore || leadScore !== null)
+        && (!requireClientEmail || emailIsValid);
+
     return (
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl animate-in slide-in-from-bottom-10 duration-300">
@@ -66,6 +79,21 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
                             </div>
                         </div>
                     )}
+                    {requireClientEmail && (
+                        <div>
+                            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Correo del Cliente <span className="text-red-500">*</span></label>
+                            <input
+                                type="email"
+                                value={clientEmail}
+                                onChange={(e) => onClientEmailChange?.(e.target.value)}
+                                placeholder="cliente@clinica.cl"
+                                className="w-full p-4 bg-gray-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl font-bold text-gray-700 outline-none transition-all"
+                            />
+                            {!emailIsValid && clientEmail.trim().length > 0 && (
+                                <p className="text-[11px] mt-2 font-bold text-red-500">Ingresa un correo válido para finalizar la visita.</p>
+                            )}
+                        </div>
+                    )}
 
                     {onSchedule && (
                         <button
@@ -88,8 +116,8 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
                         </button>
                         <button
                             onClick={onSave}
-                            disabled={!notes.trim() || saving}
-                            className={`p-4 rounded-xl font-black text-white shadow-lg uppercase text-xs tracking-widest transition-all ${!notes.trim() ? 'bg-gray-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 active:scale-95 shadow-red-200'}`}
+                            disabled={!canConfirm}
+                            className={`p-4 rounded-xl font-black text-white shadow-lg uppercase text-xs tracking-widest transition-all ${!canConfirm ? 'bg-gray-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 active:scale-95 shadow-red-200'}`}
                         >
                             {saving ? 'Guardando...' : 'Confirmar Término'}
                         </button>

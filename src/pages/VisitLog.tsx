@@ -37,6 +37,7 @@ const VisitLog = () => {
     const [showNotesModal, setShowNotesModal] = useState(false);
     const [visitNotes, setVisitNotes] = useState('');
     const [leadScore, setLeadScore] = useState<number | null>(null);
+    const [checkoutClientEmail, setCheckoutClientEmail] = useState('');
     const [showScheduleModal, setShowScheduleModal] = useState(false);
 
     // Client Validation State
@@ -158,13 +159,26 @@ const VisitLog = () => {
         setFinishing(true);
 
         try {
-            if (client && isProspectStatus(client.status) && leadScore !== null) {
+            if (client && isProspectStatus(client.status)) {
+                const normalizedEmail = checkoutClientEmail.trim().toLowerCase();
+                const validEmail = /\S+@\S+\.\S+/.test(normalizedEmail);
+                if (!validEmail) {
+                    alert('Debes ingresar un correo válido del cliente para finalizar la visita en frío.');
+                    setFinishing(false);
+                    return;
+                }
+                if (leadScore === null) {
+                    alert('Debes calificar el nivel de interés del prospecto para finalizar.');
+                    setFinishing(false);
+                    return;
+                }
                 const { error: clientUpdateError } = await supabase
                     .from('clients')
-                    .update({ lead_score: leadScore })
+                    .update({ lead_score: leadScore, email: normalizedEmail })
                     .eq('id', client.id);
 
                 if (clientUpdateError) throw clientUpdateError;
+                setClient((prev) => prev ? { ...prev, email: normalizedEmail, lead_score: leadScore } : prev);
             }
             const closed = await endVisit({ notes: visitNotes });
             if (closed) {
@@ -218,10 +232,10 @@ const VisitLog = () => {
                         leadScore={leadScore}
                         onLeadScoreChange={setLeadScore}
                         showLeadScore={isProspectStatus(client?.status)}
-                        onSave={() => {
-                            setShowNotesModal(false);
-                            handleCheckOut();
-                        }}
+                        requireClientEmail={isProspectStatus(client?.status)}
+                        clientEmail={checkoutClientEmail}
+                        onClientEmailChange={setCheckoutClientEmail}
+                        onSave={handleCheckOut}
                         onClose={() => setShowNotesModal(false)}
                         onSchedule={() => setShowScheduleModal(true)}
                         saving={finishing}
@@ -344,6 +358,7 @@ const VisitLog = () => {
                         <button
                             onClick={() => {
                                 setLeadScore(client?.lead_score ?? null);
+                                setCheckoutClientEmail(client?.email || '');
                                 setShowNotesModal(true);
                             }}
                             disabled={finishing}

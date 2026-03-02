@@ -125,7 +125,7 @@ const SellerDashboard = () => {
                 })(),
                 supabase
                     .from('visits')
-                    .select('id, client_id, type, clients(status)')
+                    .select('id, client_id, check_in_time, type, clients(status)')
                     .eq('sales_rep_id', profile.id)
                     .eq('type', 'cold_visit')
                     .gte('check_in_time', rangeStart.toISOString())
@@ -172,14 +172,36 @@ const SellerDashboard = () => {
             setMonthGoal(Number((goalRow as any)?.target_amount) || 0);
             setDailyGoal(Number((goalRow as any)?.daily_visits_goal) || DEFAULT_DAILY_VISITS_GOAL);
 
-            const coldVisits = (coldRows || []) as Array<{ id: string; client_id: string | null; clients?: { status?: string | null } | null }>;
-            const convertedClientIds = new Set(
-                coldVisits
-                    .filter((row) => row.client_id && row.clients?.status === 'active')
-                    .map((row) => row.client_id as string)
-            );
+            const coldVisits = (coldRows || []) as Array<{ id: string; client_id: string | null; check_in_time?: string | null }>;
+            const firstColdVisitByClient = new Map<string, number>();
+            for (const row of coldVisits) {
+                if (!row.client_id || !row.check_in_time) continue;
+                const visitAt = new Date(row.check_in_time).getTime();
+                const previous = firstColdVisitByClient.get(row.client_id);
+                if (previous === undefined || visitAt < previous) {
+                    firstColdVisitByClient.set(row.client_id, visitAt);
+                }
+            }
+
+            const coldClientIds = Array.from(firstColdVisitByClient.keys());
+            let convertedCount = 0;
+            if (coldClientIds.length > 0) {
+                const { data: coldClients, error: coldClientsError } = await supabase
+                    .from('clients')
+                    .select('id, status, updated_at')
+                    .in('id', coldClientIds);
+                if (coldClientsError) throw coldClientsError;
+
+                convertedCount = (coldClients || []).filter((client) => {
+                    if (client.status !== 'active') return false;
+                    const convertedAt = client.updated_at ? new Date(client.updated_at).getTime() : 0;
+                    const firstVisitAt = firstColdVisitByClient.get(client.id) || 0;
+                    return convertedAt >= firstVisitAt;
+                }).length;
+            }
+
             setColdVisitsTotal(coldVisits.length);
-            setColdVisitsConverted(convertedClientIds.size);
+            setColdVisitsConverted(convertedCount);
         } catch (e) {
             console.error('SellerDashboard error:', e);
             alert(`Error cargando dashboard vendedor: ${(e as any)?.message || 'desconocido'}`);
