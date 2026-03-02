@@ -3,9 +3,36 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/png" href="/logo_megagen.png" />
+  <link rel="icon" type="image/png" href="%VITE_COMPANY_LOGO%" />
+  <link rel="apple-touch-icon" href="%VITE_COMPANY_LOGO%" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Megagen CRM</title>
+  <meta name="theme-color" content="#4f46e5" />
+  <title>%VITE_APP_TITLE%</title>
+  <script>
+    (function () {
+      const appName = "%VITE_APP_TITLE%" || "CRM";
+      const icon = "%VITE_COMPANY_LOGO%" || "/logo_megagen.png";
+      const manifest = {
+        name: appName,
+        short_name: appName,
+        start_url: "/",
+        display: "standalone",
+        background_color: "#ffffff",
+        theme_color: "#4f46e5",
+        icons: [
+          { src: icon, sizes: "192x192", type: "image/png", purpose: "any maskable" },
+          { src: icon, sizes: "512x512", type: "image/png", purpose: "any maskable" }
+        ]
+      };
+
+      const blob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
+      const manifestURL = URL.createObjectURL(blob);
+      const link = document.createElement("link");
+      link.rel = "manifest";
+      link.href = manifestURL;
+      document.head.appendChild(link);
+    })();
+  </script>
 </head>
 
 <body>
