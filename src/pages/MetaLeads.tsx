@@ -34,7 +34,11 @@ const getField = (row: Record<string, any>, aliases: string[]) => {
     const normalizedAliases = aliases.map(normalizeKey);
     const entries = Object.entries(row || {});
     for (const [key, raw] of entries) {
-        if (!normalizedAliases.includes(normalizeKey(key))) continue;
+        const normalizedKey = normalizeKey(key);
+        const match = normalizedAliases.some((alias) =>
+            normalizedKey === alias || normalizedKey.includes(alias) || alias.includes(normalizedKey)
+        );
+        if (!match) continue;
         const value = String(raw ?? '').trim();
         if (value) return value;
     }
@@ -180,10 +184,16 @@ const MetaLeads = () => {
                     const errors: string[] = [];
 
                     rows.forEach((row, index) => {
-                        const name = getField(row, ['full_name', 'nombre completo', 'nombre', 'name']);
-                        const email = getField(row, ['email', 'correo', 'correo electronico', 'mail']);
-                        const phoneRaw = getField(row, ['phone', 'telefono', 'teléfono', 'mobile_phone', 'celular', 'telefono contacto']);
+                        const firstName = getField(row, ['first_name', 'nombre', 'first name']);
+                        const lastName = getField(row, ['last_name', 'apellido', 'last name']);
+                        const combinedName = `${firstName} ${lastName}`.trim();
+                        const name = getField(row, ['full_name', 'nombre completo', 'nombre', 'name', 'contact_name', 'nombre y apellido']) || combinedName;
+                        const email = getField(row, ['email', 'correo', 'correo electronico', 'mail', 'email address']);
+                        const phoneRaw = getField(row, ['phone', 'telefono', 'teléfono', 'mobile_phone', 'phone number', 'phone_number', 'celular', 'telefono contacto', 'mobile']);
                         const campaign = getField(row, ['campaign_name', 'campaign', 'campana', 'campaña']);
+                        const adName = getField(row, ['ad_name', 'ad', 'anuncio', 'nombre anuncio']);
+                        const adset = getField(row, ['adset_name', 'adset', 'conjunto anuncios', 'ad set']);
+                        const formName = getField(row, ['form_name', 'formulario', 'instant_form', 'nombre formulario']);
                         const phone = normalizePhoneForStorage(phoneRaw);
 
                         if (!name) {
@@ -205,11 +215,13 @@ const MetaLeads = () => {
                         const extraTags = Object.entries(row || {})
                             .map(([k, v]) => ({ key: String(k), value: String(v ?? '').trim() }))
                             .filter((entry) => entry.value && !usedKeys.has(normalizeKey(entry.key)))
-                            .slice(0, 10)
                             .map((entry) => `${entry.key}: ${entry.value}`);
 
                         const noteParts = ['Generado desde Meta Ads'];
                         if (campaign) noteParts.push(`Campaña: ${campaign}`);
+                        if (adset) noteParts.push(`Adset: ${adset}`);
+                        if (adName) noteParts.push(`Anuncio: ${adName}`);
+                        if (formName) noteParts.push(`Formulario: ${formName}`);
                         noteParts.push(...extraTags);
 
                         payload.push({
