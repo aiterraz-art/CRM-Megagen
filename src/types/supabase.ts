@@ -21,6 +21,7 @@ export interface Database {
                     status: string | null
                     zone: string | null
                     created_by: string | null
+                    pending_seller_email: string | null
                     created_at: string
                     updated_at: string
                     rut: string | null
@@ -42,6 +43,7 @@ export interface Database {
                     purchase_contact?: string | null
                     status?: string | null
                     zone?: string | null
+                    pending_seller_email?: string | null
                     created_at?: string
                     updated_at?: string
                     rut?: string | null
@@ -63,6 +65,7 @@ export interface Database {
                     purchase_contact?: string | null
                     status?: string | null
                     zone?: string | null
+                    pending_seller_email?: string | null
                     created_at?: string
                     updated_at?: string
                     rut?: string | null

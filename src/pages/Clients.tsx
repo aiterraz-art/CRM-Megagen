@@ -641,18 +641,22 @@ const ClientsContent = () => {
                         continue;
                     }
 
-                    let assignedSellerId = profile?.id || null;
-                    if (sellerToken) {
-                        const foundProfile = normalizedSellerMap.get(sellerToken);
-                        if (!foundProfile?.id) {
-                            errorCount++;
-                            const reason = `Fila ${rowNumber}: vendedor no encontrado (${sellerRaw})`;
-                            errors.push(reason);
-                            rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
-                            continue;
-                        }
-                        assignedSellerId = foundProfile.id;
+                    if (!sellerToken) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber}: vendedor obligatorio (columna "Vendedor" vacía)`;
+                        errors.push(reason);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
                     }
+                    if (!sellerToken.includes('@')) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber}: vendedor debe ser correo válido (${sellerRaw})`;
+                        errors.push(reason);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
+                    }
+                    const foundProfile = normalizedSellerMap.get(sellerToken);
+                    const assignedSellerId = foundProfile?.id || null;
 
                     clientsToInsert.push({
                         payload: {
@@ -665,6 +669,7 @@ const ClientsContent = () => {
                             email: email,
                             purchase_contact: purchase_contact,
                             created_by: assignedSellerId,
+                            pending_seller_email: assignedSellerId ? null : sellerToken,
                             status: 'active',
                             zone: 'Santiago',
                             lat: SANTIAGO_CENTER.lat,
@@ -1063,7 +1068,7 @@ const ClientsContent = () => {
                                         {canViewAll && (
                                             <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
                                                 <UserCircle2 size={12} />
-                                                {ownersById[client.created_by || ''] || 'Sin asignar'}
+                                                {ownersById[client.created_by || ''] || client.pending_seller_email || 'Sin asignar'}
                                             </div>
                                         )}
                                     </div>
