@@ -586,6 +586,7 @@ const ClientsContent = () => {
                 let successCount = 0;
                 let errorCount = 0;
                 let errors: string[] = [];
+                const rejectedRows: Array<{ fila: number; motivo: string; vendedor: string; nombre: string; rut: string }> = [];
 
                 if (rows.length === 0) {
                     alert('El archivo está vacío.');
@@ -599,9 +600,27 @@ const ClientsContent = () => {
                     return;
                 }
 
-                const clientsToInsert: any[] = [];
+                const clientsToInsert: Array<{
+                    payload: any;
+                    meta: { fila: number; vendedor: string; nombre: string; rut: string };
+                }> = [];
+                const normalizedSellerMap = new globalThis.Map<string, any>();
+                profiles.forEach((p) => {
+                    const email = (p.email || '').toLowerCase().trim();
+                    const username = email.split('@')[0];
+                    const fullName = (p.full_name || '').toLowerCase().trim();
+                    if (email) normalizedSellerMap.set(email, p);
+                    if (username) normalizedSellerMap.set(username, p);
+                    if (fullName) normalizedSellerMap.set(fullName, p);
+                });
 
-                for (const row of rows) {
+                if (profiles.length <= 1 && canViewAll) {
+                    alert('Advertencia: el sistema solo cargó 1 perfil de vendedor. Verifica permisos de lectura de perfiles antes de importar para evitar asignaciones incorrectas.');
+                }
+
+                for (let idx = 0; idx < rows.length; idx++) {
+                    const row = rows[idx];
+                    const rowNumber = idx + 2; // +2 because row 1 is header in Excel
                     const name = row['Nombre']?.toString().trim();
                     const rut = row['Rut'] ? normalizeRut(row['Rut'].toString()) : null;
                     const giro = row['Giro']?.toString().trim();
@@ -611,73 +630,97 @@ const ClientsContent = () => {
                     const phone = row['Teléfono']?.toString().trim();
                     const email = row['Email']?.toString().trim();
                     const purchase_contact = row['Contacto']?.toString().trim();
-                    const sellerEmail = row['Vendedor']?.toString().trim();
+                    const sellerRaw = (row['Vendedor'] ?? row['Correo Vendedor'] ?? row['Vendedor Email'] ?? '').toString().trim();
+                    const sellerToken = sellerRaw.toLowerCase().trim();
 
                     if (!name) {
                         errorCount++;
-                        errors.push(`Fila sin nombre: ${JSON.stringify(row)}`);
+                        const reason = `Fila ${rowNumber} sin nombre`;
+                        errors.push(`${reason}: ${JSON.stringify(row)}`);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
                         continue;
                     }
 
-                    let assignedSellerId = profile?.id;
-                    if (sellerEmail) {
-                        const foundProfile = profiles.find(p => p.email?.toLowerCase() === sellerEmail.toLowerCase());
-                        if (foundProfile) {
-                            assignedSellerId = foundProfile.id;
-                        } else {
-                            const foundProfileByUsername = profiles.find(p => p.email?.split('@')[0].toLowerCase() === sellerEmail.toLowerCase());
-                            if (foundProfileByUsername) {
-                                assignedSellerId = foundProfileByUsername.id;
-                            } else {
-                                errors.push(`Vendedor no encontrado: ${sellerEmail} (Asignando a ti por defecto)`);
-                            }
+                    let assignedSellerId = profile?.id || null;
+                    if (sellerToken) {
+                        const foundProfile = normalizedSellerMap.get(sellerToken);
+                        if (!foundProfile?.id) {
+                            errorCount++;
+                            const reason = `Fila ${rowNumber}: vendedor no encontrado (${sellerRaw})`;
+                            errors.push(reason);
+                            rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                            continue;
                         }
+                        assignedSellerId = foundProfile.id;
                     }
 
                     clientsToInsert.push({
-                        id: crypto.randomUUID(),
-                        name: name,
-                        rut: rut,
-                        giro: giro,
-                        address: address || 'Dirección por actualizar',
-                        comuna: comuna,
-                        phone: phone,
-                        email: email,
-                        purchase_contact: purchase_contact,
-                        created_by: assignedSellerId,
-                        status: 'active',
-                        zone: 'Santiago',
-                        lat: SANTIAGO_CENTER.lat,
-                        lng: SANTIAGO_CENTER.lng,
-                        office: office,
-                        notes: 'Importado vía Excel'
+                        payload: {
+                            name: name,
+                            rut: rut,
+                            giro: giro,
+                            address: address || 'Dirección por actualizar',
+                            comuna: comuna,
+                            phone: phone,
+                            email: email,
+                            purchase_contact: purchase_contact,
+                            created_by: assignedSellerId,
+                            status: 'active',
+                            zone: 'Santiago',
+                            lat: SANTIAGO_CENTER.lat,
+                            lng: SANTIAGO_CENTER.lng,
+                            office: office,
+                            notes: 'Importado vía Excel'
+                        },
+                        meta: {
+                            fila: rowNumber,
+                            vendedor: sellerRaw,
+                            nombre: name || '',
+                            rut: rut || ''
+                        }
                     });
                 }
 
                 if (clientsToInsert.length > 0) {
-                    for (const client of clientsToInsert) {
+                    for (const entry of clientsToInsert) {
+                        const client = entry.payload;
                         try {
                             if (client.rut) {
-                                const { data: dup } = await supabase.from('clients').select('id').eq('rut', client.rut).maybeSingle();
-                                if (dup) {
-                                    errorCount++;
-                                    errors.push(`RUT duplicado: ${client.rut} (${client.name})`);
-                                    continue;
-                                }
+                                const payload = { ...client };
+                                const { error } = await supabase
+                                    .from('clients')
+                                    .upsert(payload, { onConflict: 'rut', ignoreDuplicates: false });
+                                if (error) throw error;
+                            } else {
+                                const { error } = await supabase.from('clients').insert(client);
+                                if (error) throw error;
                             }
-
-                            const { error } = await supabase.from('clients').insert(client);
-                            if (error) throw error;
                             successCount++;
                         } catch (err: any) {
                             errorCount++;
-                            errors.push(`Error al insertar ${client.name}: ${err.message}`);
+                            const reason = `Error al guardar ${client.name}: ${err.message}`;
+                            errors.push(reason);
+                            rejectedRows.push({
+                                fila: entry.meta.fila,
+                                motivo: reason,
+                                vendedor: entry.meta.vendedor,
+                                nombre: entry.meta.nombre,
+                                rut: entry.meta.rut
+                            });
                         }
                     }
                 }
 
                 alert(`Importación Finalizada.\n\n✅ Exitosos: ${successCount}\n❌ Errores: ${errorCount}\n\n${errorCount > 0 ? 'Revisa la consola para detalles de errores.' : ''}`);
                 if (errors.length > 0) console.error("Excel Import Errors:", errors);
+                if (rejectedRows.length > 0) {
+                    const rejectedWb = XLSX.utils.book_new();
+                    const rejectedWs = XLSX.utils.json_to_sheet(rejectedRows, {
+                        header: ['fila', 'motivo', 'vendedor', 'nombre', 'rut']
+                    });
+                    XLSX.utils.book_append_sheet(rejectedWb, rejectedWs, 'Rechazados');
+                    XLSX.writeFile(rejectedWb, 'clientes_importacion_rechazados.xlsx');
+                }
 
                 setImporting(false);
                 if (csvInputRef.current) csvInputRef.current.value = '';
