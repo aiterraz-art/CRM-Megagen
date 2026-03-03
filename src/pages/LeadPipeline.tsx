@@ -20,6 +20,7 @@ type LeadClient = {
     created_at: string;
     lat: number | null;
     lng: number | null;
+    notes: string | null;
 };
 
 type Stage = {
@@ -58,6 +59,20 @@ const buildTemplateContext = (lead: LeadClient, sellerName: string) => ({
     client_phone: lead.phone || '',
     client_email: lead.email || ''
 });
+
+const parseLeadNotesTags = (notes: string | null) => {
+    if (!notes) return [];
+    return notes
+        .split('|')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 4);
+};
+
+const isMetaLead = (notes: string | null) => {
+    const normalized = (notes || '').toLowerCase();
+    return normalized.includes('meta ads') || normalized.includes('facebook');
+};
 
 const LeadPipeline = () => {
     const { profile, effectiveRole } = useUser();
@@ -131,15 +146,17 @@ const LeadPipeline = () => {
         try {
             let query = supabase
                 .from('clients')
-                .select('id, name, email, phone, purchase_contact, status, lead_score, created_by, created_at, lat, lng')
+                .select('id, name, email, phone, purchase_contact, status, lead_score, created_by, created_at, lat, lng, notes')
                 .in('status', ['prospect', 'prospect_new', 'prospect_contacted', 'prospect_evaluating'])
                 .order('created_at', { ascending: false });
 
             if (!canViewAll) {
-                query = query.eq('created_by', profile.id);
+                query = query.or(`created_by.eq.${profile.id},created_by.is.null`);
             }
 
-            if (canViewAll && sellerFilter !== 'all') {
+            if (canViewAll && sellerFilter === 'unassigned') {
+                query = query.is('created_by', null);
+            } else if (canViewAll && sellerFilter !== 'all') {
                 query = query.eq('created_by', sellerFilter);
             }
 
@@ -280,6 +297,26 @@ const LeadPipeline = () => {
     const handleStartPhoneEdit = (lead: LeadClient) => {
         setEditingPhoneLeadId(lead.id);
         setDraftPhone(lead.phone || '');
+    };
+
+    const handleClaimLead = async (leadId: string) => {
+        if (!profile?.id) return;
+        const confirmed = window.confirm('Este lead quedará asignado a tu cartera. ¿Confirmas?');
+        if (!confirmed) return;
+
+        const { error } = await supabase
+            .from('clients')
+            .update({ created_by: profile.id })
+            .eq('id', leadId)
+            .is('created_by', null);
+
+        if (error) {
+            alert(`No se pudo reclamar el lead: ${error.message}`);
+            return;
+        }
+
+        setLeads((prev) => prev.map((lead) => lead.id === leadId ? { ...lead, created_by: profile.id } : lead));
+        alert('Lead reclamado correctamente.');
     };
 
     const handleSaveLeadPhone = async (leadId: string) => {
@@ -565,6 +602,7 @@ const LeadPipeline = () => {
                         className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-100 text-sm font-bold text-gray-700"
                     >
                         <option value="all">Todos</option>
+                        <option value="unassigned">Sin asignar</option>
                         {profiles.map((seller) => (
                             <option key={seller.id} value={seller.id}>{seller.full_name || seller.email}</option>
                         ))}
@@ -620,7 +658,30 @@ const LeadPipeline = () => {
                                                                                 {getSellerName(lead.created_by)}
                                                                             </div>
                                                                         )}
+                                                                        {isMetaLead(lead.notes) && (
+                                                                            <span className="inline-flex text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
+                                                                                Meta Ads
+                                                                            </span>
+                                                                        )}
                                                                         <div className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Score: {lead.lead_score || 'N/A'}</div>
+                                                                        {parseLeadNotesTags(lead.notes).length > 0 && (
+                                                                            <div className="flex flex-wrap gap-1">
+                                                                                {parseLeadNotesTags(lead.notes).map((tag, idx) => (
+                                                                                    <span key={`${lead.id}-tag-${idx}`} className="text-[10px] px-2 py-1 rounded-lg bg-gray-50 border border-gray-100 text-gray-600 font-bold">
+                                                                                        {tag}
+                                                                                    </span>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                        {!lead.created_by && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleClaimLead(lead.id)}
+                                                                                className="w-full p-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-[11px] font-black uppercase tracking-wide hover:bg-amber-100"
+                                                                            >
+                                                                                Reclamar Lead
+                                                                            </button>
+                                                                        )}
 
                                                                         {templates.length > 0 && (
                                                                             <div className="space-y-2">
