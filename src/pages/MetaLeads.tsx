@@ -38,6 +38,21 @@ const parseNotePairs = (notes: string | null) => {
         .filter(Boolean) as Array<{ key: string; value: string }>;
 };
 
+const EXCLUDED_META_COLUMNS = new Set([
+    'id',
+    'adid',
+    'adname',
+    'adset',
+    'adsetid',
+    'adsetname',
+    'anuncio',
+    'campaignid',
+    'campaingid',
+    'formid'
+]);
+
+const isExcludedMetaColumn = (columnName: string) => EXCLUDED_META_COLUMNS.has(normalizeKey(columnName));
+
 const canReceiveAssignedLeads = (role: string | null | undefined) => {
     const normalized = (role || '').trim().toLowerCase();
     return normalized === 'seller' || normalized === 'jefe' || normalized === 'manager';
@@ -185,7 +200,7 @@ const MetaLeads = () => {
         leads.forEach((lead) => {
             parseNotePairs(lead.notes).forEach(({ key }) => {
                 const normalized = normalizeKey(key);
-                if (!normalized || seen.has(normalized)) return;
+                if (!normalized || seen.has(normalized) || isExcludedMetaColumn(key)) return;
                 seen.add(normalized);
                 ordered.push(key);
             });
@@ -243,7 +258,7 @@ const MetaLeads = () => {
 
                         const csvPairs = Object.entries(row || {})
                             .map(([k, v]) => ({ key: String(k), value: String(v ?? '').trim() }))
-                            .filter((entry) => entry.value)
+                            .filter((entry) => entry.value && !isExcludedMetaColumn(entry.key))
                             .map((entry) => `${entry.key}: ${entry.value}`);
 
                         const noteParts = ['Generado desde Meta Ads'];
