@@ -312,9 +312,9 @@ const ClientsContent = () => {
         const { data } = await supabase.from('profiles').select('id, email, full_name, role');
         if (data) {
             setProfiles(data);
-            const firstSeller = data.find((p) => (p.role || '').toLowerCase() === 'seller');
-            if (firstSeller && !poolAssigneeId) {
-                setPoolAssigneeId(firstSeller.id);
+            const firstAssignable = data.find((p) => ['seller', 'jefe', 'manager'].includes((p.role || '').toLowerCase()));
+            if (firstAssignable && !poolAssigneeId) {
+                setPoolAssigneeId(firstAssignable.id);
             }
         }
     };
@@ -795,7 +795,7 @@ const ClientsContent = () => {
     }, [profiles]);
 
     const sellerOptions = useMemo(
-        () => profiles.filter((p) => (p.role || '').toLowerCase() === 'seller'),
+        () => profiles.filter((p) => ['seller', 'jefe', 'manager'].includes((p.role || '').toLowerCase())),
         [profiles]
     );
 

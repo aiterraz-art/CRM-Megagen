@@ -19,9 +19,19 @@ type MetaLead = {
 const parseNotes = (notes: string | null) => {
     if (!notes) return [];
     return notes
-        .split('|')
+        .split(/\||\n|;/g)
         .map((x) => x.trim())
         .filter(Boolean);
+};
+
+const canReceiveAssignedLeads = (role: string | null | undefined) => {
+    const normalized = (role || '').trim().toLowerCase();
+    return normalized === 'seller' || normalized === 'jefe' || normalized === 'manager';
+};
+
+const isEnabledUser = (status: string | null | undefined) => {
+    const normalized = (status || '').trim().toLowerCase();
+    return normalized === '' || normalized === 'active';
 };
 
 const normalizeKey = (value: string) => value
@@ -93,14 +103,13 @@ const MetaLeads = () => {
             const { data, error } = await supabase
                 .from('profiles')
                 .select('id, full_name, email, role, status')
-                .eq('role', 'seller')
-                .eq('status', 'active')
                 .order('full_name', { ascending: true });
             if (error) {
                 alert(`No se pudo cargar vendedores: ${error.message}`);
                 return;
             }
-            setSellers((data || []) as any);
+            const assignable = (data || []).filter((p: any) => canReceiveAssignedLeads(p.role) && isEnabledUser(p.status));
+            setSellers(assignable as any);
         };
         fetchSellers();
     }, []);
@@ -357,11 +366,17 @@ const MetaLeads = () => {
 
                                 {notes.length > 0 && (
                                     <div className="mt-4 flex flex-wrap gap-1.5">
-                                        {notes.slice(0, 8).map((item, idx) => (
+                                        {notes.slice(0, 14).map((item, idx) => (
                                             <span key={`${lead.id}-note-${idx}`} className="text-[11px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold">
                                                 {item}
                                             </span>
                                         ))}
+                                    </div>
+                                )}
+                                {lead.notes && (
+                                    <div className="mt-3 p-3 rounded-xl border border-gray-100 bg-gray-50">
+                                        <p className="text-[10px] font-black uppercase tracking-wider text-gray-500 mb-1">Respuestas del formulario</p>
+                                        <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{lead.notes}</p>
                                     </div>
                                 )}
 
@@ -372,7 +387,7 @@ const MetaLeads = () => {
                                             onChange={(e) => setSelectedSellerByLead((prev) => ({ ...prev, [lead.id]: e.target.value }))}
                                             className="w-full px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-700"
                                         >
-                                            <option value="" disabled>Seleccionar vendedor</option>
+                                            <option value="" disabled>Seleccionar asesor</option>
                                             {sellers.map((seller) => (
                                                 <option key={seller.id} value={seller.id}>
                                                     {seller.full_name || seller.email || seller.id}
