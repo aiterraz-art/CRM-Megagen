@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Megaphone, Mail, Phone, CalendarClock, CheckCircle2, Upload, FileSpreadsheet } from 'lucide-react';
+import { Megaphone, CheckCircle2, Upload, FileSpreadsheet } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import Papa from 'papaparse';
@@ -22,6 +22,12 @@ const parseNotes = (notes: string | null) => {
         .split(/\||\n|;/g)
         .map((x) => x.trim())
         .filter(Boolean);
+};
+
+const extractCampaignFromNotes = (notes: string | null) => {
+    const parts = parseNotes(notes);
+    const match = parts.find((part) => part.toLowerCase().startsWith('campaña:') || part.toLowerCase().startsWith('campana:'));
+    return match ? match.split(':').slice(1).join(':').trim() : '';
 };
 
 const canReceiveAssignedLeads = (role: string | null | undefined) => {
@@ -333,81 +339,70 @@ const MetaLeads = () => {
                     No hay Meta Leads sin asignar por ahora.
                 </div>
             ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {leads.map((lead) => {
-                        const notes = parseNotes(lead.notes);
-                        return (
-                            <div key={lead.id} className="premium-card p-5 border border-blue-100">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                        <p className="text-xl font-black text-gray-900">{lead.name}</p>
-                                        <p className="text-sm font-bold text-gray-500 mt-1">{lead.purchase_contact || 'Sin contacto'}</p>
-                                    </div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
-                                        Meta Ads
-                                    </span>
-                                </div>
-
-                                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    <div className="text-xs font-bold text-gray-600 bg-gray-50 rounded-xl px-3 py-2 inline-flex items-center">
-                                        <Mail size={13} className="mr-2 text-gray-400" />
-                                        {lead.email || 'Sin correo'}
-                                    </div>
-                                    <div className="text-xs font-bold text-gray-600 bg-gray-50 rounded-xl px-3 py-2 inline-flex items-center">
-                                        <Phone size={13} className="mr-2 text-gray-400" />
-                                        {lead.phone || 'Sin celular'}
-                                    </div>
-                                </div>
-
-                                <div className="mt-3 text-xs font-bold text-gray-500 inline-flex items-center">
-                                    <CalendarClock size={13} className="mr-1.5 text-gray-400" />
-                                    {new Date(lead.created_at).toLocaleString('es-CL')}
-                                </div>
-
-                                {notes.length > 0 && (
-                                    <div className="mt-4 flex flex-wrap gap-1.5">
-                                        {notes.slice(0, 14).map((item, idx) => (
-                                            <span key={`${lead.id}-note-${idx}`} className="text-[11px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold">
-                                                {item}
+                <div className="premium-card border border-gray-100 overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="min-w-[1400px] w-full text-sm">
+                            <thead className="bg-gray-50 border-b border-gray-100">
+                                <tr>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">#</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Fecha</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Nombre</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Contacto</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Email</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Teléfono</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Campaña</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Respuestas Formulario</th>
+                                    <th className="text-right px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Asignar Lead</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {leads.map((lead, idx) => (
+                                    <tr key={lead.id} className="border-b border-gray-100 last:border-b-0 align-top">
+                                        <td className="px-4 py-3 font-black text-gray-700">{idx + 1}</td>
+                                        <td className="px-4 py-3 font-bold text-gray-500 whitespace-nowrap">{new Date(lead.created_at).toLocaleString('es-CL')}</td>
+                                        <td className="px-4 py-3">
+                                            <p className="font-black text-gray-900">{lead.name}</p>
+                                            <span className="inline-flex mt-1 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
+                                                Meta Ads
                                             </span>
-                                        ))}
-                                    </div>
-                                )}
-                                {lead.notes && (
-                                    <div className="mt-3 p-3 rounded-xl border border-gray-100 bg-gray-50">
-                                        <p className="text-[10px] font-black uppercase tracking-wider text-gray-500 mb-1">Respuestas del formulario</p>
-                                        <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{lead.notes}</p>
-                                    </div>
-                                )}
-
-                                <div className="mt-5">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                        <select
-                                            value={selectedSellerByLead[lead.id] || ''}
-                                            onChange={(e) => setSelectedSellerByLead((prev) => ({ ...prev, [lead.id]: e.target.value }))}
-                                            className="w-full px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-700"
-                                        >
-                                            <option value="" disabled>Seleccionar asesor</option>
-                                            {sellers.map((seller) => (
-                                                <option key={seller.id} value={seller.id}>
-                                                    {seller.full_name || seller.email || seller.id}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleAssignLead(lead.id)}
-                                            disabled={assigningId === lead.id || !selectedSellerByLead[lead.id]}
-                                            className="w-full py-3 rounded-xl bg-indigo-600 text-white font-black text-xs uppercase tracking-wider hover:bg-indigo-700 disabled:bg-indigo-300 transition-all inline-flex items-center justify-center"
-                                        >
-                                            <CheckCircle2 size={14} className="mr-2" />
-                                            {assigningId === lead.id ? 'Asignando...' : 'Asignar'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
+                                        </td>
+                                        <td className="px-4 py-3 font-bold text-gray-700">{lead.purchase_contact || 'Sin contacto'}</td>
+                                        <td className="px-4 py-3 font-bold text-gray-700">{lead.email || 'Sin correo'}</td>
+                                        <td className="px-4 py-3 font-bold text-gray-700">{lead.phone || 'Sin celular'}</td>
+                                        <td className="px-4 py-3 font-bold text-gray-700">{extractCampaignFromNotes(lead.notes) || 'Sin campaña'}</td>
+                                        <td className="px-4 py-3 max-w-[450px]">
+                                            <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{lead.notes || 'Sin respuestas'}</p>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center justify-end gap-2 min-w-[360px]">
+                                                <select
+                                                    value={selectedSellerByLead[lead.id] || ''}
+                                                    onChange={(e) => setSelectedSellerByLead((prev) => ({ ...prev, [lead.id]: e.target.value }))}
+                                                    className="w-full max-w-[220px] px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-700"
+                                                >
+                                                    <option value="" disabled>Seleccionar asesor</option>
+                                                    {sellers.map((seller) => (
+                                                        <option key={seller.id} value={seller.id}>
+                                                            {seller.full_name || seller.email || seller.id}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleAssignLead(lead.id)}
+                                                    disabled={assigningId === lead.id || !selectedSellerByLead[lead.id]}
+                                                    className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-black text-xs uppercase tracking-wider hover:bg-indigo-700 disabled:bg-indigo-300 transition-all inline-flex items-center justify-center whitespace-nowrap"
+                                                >
+                                                    <CheckCircle2 size={14} className="mr-1.5" />
+                                                    {assigningId === lead.id ? 'Asignando...' : 'Asignar'}
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
         </div>
