@@ -46,7 +46,7 @@ const Quotations: React.FC = () => {
     const [discountApprovalRequested, setDiscountApprovalRequested] = useState(false);
 
     // Form State
-    const [formItems, setFormItems] = useState<any[]>([{ code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
+    const [formItems, setFormItems] = useState<any[]>([{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
     const [formComments, setFormComments] = useState('');
     const [paymentTerms, setPaymentTerms] = useState<{ type: 'Contado' | 'Crédito', days: number }>({ type: 'Contado', days: 0 });
 
@@ -241,7 +241,7 @@ const Quotations: React.FC = () => {
         setIsClientModalOpen(false);
         setIsItemModalOpen(true);
         // Reset form
-        setFormItems([{ code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
+        setFormItems([{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
         setFormComments('');
         setPaymentTerms({ type: 'Contado', days: 0 }); // Reset defaults
         setManualLocation(null);
@@ -257,6 +257,7 @@ const Quotations: React.FC = () => {
             const discountPct = Number(item.discount || 0);
             const netPrice = basePrice > 0 ? Math.round(basePrice * (1 - (discountPct / 100))) : Number(item.net_price || 0);
             return {
+                productId: item.product_id || null,
                 code: item.code || '',
                 detail: item.detail || '',
                 qty: Number(item.qty || 1),
@@ -265,7 +266,7 @@ const Quotations: React.FC = () => {
                 netPrice: Number(item.net_price ?? netPrice ?? basePrice)
             };
         });
-        setFormItems(loadedItems.length > 0 ? loadedItems : [{ code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
+        setFormItems(loadedItems.length > 0 ? loadedItems : [{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
         setFormComments(q.comments || '');
         let parsedPaymentTerms = { type: 'Contado' as const, days: 0 };
         if (q.payment_terms && typeof q.payment_terms === 'object') {
@@ -348,6 +349,23 @@ const Quotations: React.FC = () => {
 
     const handleCreateQuotation = async () => {
         if (!profile || !selectedClient) return;
+        const resolveInventoryProduct = (item: any) => {
+            if (item.productId) {
+                const byId = products.find((p: any) => p.id === item.productId);
+                if (byId) return byId;
+            }
+            const code = String(item.code || '').trim().toLowerCase();
+            if (code) {
+                const bySku = products.find((p: any) => (p.sku || '').toLowerCase() === code);
+                if (bySku) return bySku;
+            }
+            const detail = String(item.detail || '').trim().toLowerCase();
+            if (detail) {
+                const byName = products.find((p: any) => (p.name || '').toLowerCase() === detail);
+                if (byName) return byName;
+            }
+            return null;
+        };
         const normalizedItems = formItems
             .map(item => ({
                 ...item,
@@ -366,6 +384,10 @@ const Quotations: React.FC = () => {
         const invalidItem = normalizedItems.find(item => !item.detail || item.qty <= 0 || item.price < 0);
         if (invalidItem) {
             setCreateError('Cada ítem debe tener descripción, cantidad mayor a 0 y precio válido.');
+            return;
+        }
+        if (normalizedItems.some((item) => !resolveInventoryProduct(item))) {
+            setCreateError('Solo se permiten productos del inventario. Selecciona cada ítem desde las sugerencias.');
             return;
         }
         if (paymentTerms.type === 'Crédito' && paymentTerms.days <= 0) {
@@ -404,12 +426,14 @@ const Quotations: React.FC = () => {
 
             // ... calculations ...
             const calculatedItems = normalizedItems.map(item => {
+                const inventoryProduct = resolveInventoryProduct(item);
                 const qty = parseInt(item.qty) || 1;
                 const price = parseFloat(item.price) || 0;
                 const netPrice = price > 0 ? Number(item.netPrice || price) : 0;
                 const discount = price > 0 ? Number(item.discountPct || 0) : 0;
                 return {
                     ...item,
+                    product_id: inventoryProduct?.id || item.productId || null,
                     qty,
                     price,
                     net_price: netPrice,
@@ -513,7 +537,7 @@ const Quotations: React.FC = () => {
 
             // Reset and refresh
             setIsItemModalOpen(false);
-            setFormItems([{ code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
+            setFormItems([{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
             setFormComments('');
             setPaymentTerms({ type: 'Contado', days: 0 });
             setSelectedClient(null);
@@ -1053,6 +1077,7 @@ const Quotations: React.FC = () => {
                                                         const val = e.target.value;
                                                         const newItems = [...formItems];
                                                         newItems[index].code = val;
+                                                        newItems[index].productId = null;
                                                         setFormItems(newItems);
 
                                                         if (val.length > 1) {
@@ -1076,6 +1101,7 @@ const Quotations: React.FC = () => {
                                                                     const newItems = [...formItems];
                                                                     newItems[index] = {
                                                                         ...newItems[index],
+                                                                        productId: p.id || null,
                                                                         code: p.sku || '',
                                                                         detail: p.name,
                                                                         price: p.price || 0,
@@ -1106,6 +1132,7 @@ const Quotations: React.FC = () => {
                                                         const val = e.target.value;
                                                         const newItems = [...formItems];
                                                         newItems[index].detail = val;
+                                                        newItems[index].productId = null;
                                                         setFormItems(newItems);
 
                                                         if (val.length > 2) {
@@ -1129,6 +1156,7 @@ const Quotations: React.FC = () => {
                                                                     const newItems = [...formItems];
                                                                     newItems[index] = {
                                                                         ...newItems[index],
+                                                                        productId: p.id || null,
                                                                         code: p.sku || '',
                                                                         detail: p.name,
                                                                         price: p.price || 0,
@@ -1234,7 +1262,7 @@ const Quotations: React.FC = () => {
                                     ))}
 
                                     <button
-                                        onClick={() => setFormItems([...formItems, { code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }])}
+                                        onClick={() => setFormItems([...formItems, { productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }])}
                                         className="w-full py-3 border-2 border-dashed border-indigo-200 rounded-xl text-indigo-500 font-bold hover:bg-indigo-50 transition-all flex items-center justify-center"
                                     >
                                         <Plus size={18} className="mr-2" /> Agregar otro ítem
