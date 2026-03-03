@@ -20,6 +20,22 @@ const FILTER_OPTIONS: Array<{ label: string; value: QuoteFilter }> = [
 const formatMoney = (value: number) => `$${Number(value || 0).toLocaleString('es-CL')}`;
 const SELLER_MAX_DISCOUNT_PCT = 5;
 
+const notifyApprovalPush = async (approvalId: string) => {
+    try {
+        const { error } = await supabase.functions.invoke('send-approval-push', {
+            body: {
+                approval_id: approvalId,
+                icon: import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png'
+            }
+        });
+        if (error) {
+            console.warn('No se pudo disparar push de aprobación:', error.message);
+        }
+    } catch (error: any) {
+        console.warn('Error inesperado enviando push de aprobación:', error?.message || error);
+    }
+};
+
 const Quotations: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
@@ -459,22 +475,29 @@ const Quotations: React.FC = () => {
 
                 if (updateError) throw updateError;
                 if (shouldCreateApprovalRequest) {
-                    const { error: approvalError } = await supabase.from('approval_requests').insert({
-                        module: 'sales',
-                        entity_id: editingQuotation.id,
-                        requester_id: profile.id,
-                        approval_type: 'extra_discount',
-                        payload: {
-                            quotation_id: editingQuotation.id,
-                            folio: editingQuotation.folio || null,
-                            client_name: selectedClient?.name || null,
-                            max_discount_pct: Number(maxDiscountPct.toFixed(2)),
-                            limit_pct: SELLER_MAX_DISCOUNT_PCT,
-                            total_amount: grandTotal
-                        },
-                        status: 'pending'
-                    } as any);
+                    const { data: approvalRow, error: approvalError } = await supabase
+                        .from('approval_requests')
+                        .insert({
+                            module: 'sales',
+                            entity_id: editingQuotation.id,
+                            requester_id: profile.id,
+                            approval_type: 'extra_discount',
+                            payload: {
+                                quotation_id: editingQuotation.id,
+                                folio: editingQuotation.folio || null,
+                                client_name: selectedClient?.name || null,
+                                max_discount_pct: Number(maxDiscountPct.toFixed(2)),
+                                limit_pct: SELLER_MAX_DISCOUNT_PCT,
+                                total_amount: grandTotal
+                            },
+                            status: 'pending'
+                        } as any)
+                        .select('id')
+                        .single();
                     if (approvalError) throw approvalError;
+                    if (approvalRow?.id) {
+                        void notifyApprovalPush(approvalRow.id);
+                    }
                 }
                 alert('Cotización actualizada correctamente');
             } else {
@@ -497,22 +520,29 @@ const Quotations: React.FC = () => {
 
                 if (insertError) throw insertError;
                 if (shouldCreateApprovalRequest && insertData) {
-                    const { error: approvalError } = await supabase.from('approval_requests').insert({
-                        module: 'sales',
-                        entity_id: insertData.id,
-                        requester_id: profile.id,
-                        approval_type: 'extra_discount',
-                        payload: {
-                            quotation_id: insertData.id,
-                            folio: insertData.folio || null,
-                            client_name: selectedClient?.name || null,
-                            max_discount_pct: Number(maxDiscountPct.toFixed(2)),
-                            limit_pct: SELLER_MAX_DISCOUNT_PCT,
-                            total_amount: grandTotal
-                        },
-                        status: 'pending'
-                    } as any);
+                    const { data: approvalRow, error: approvalError } = await supabase
+                        .from('approval_requests')
+                        .insert({
+                            module: 'sales',
+                            entity_id: insertData.id,
+                            requester_id: profile.id,
+                            approval_type: 'extra_discount',
+                            payload: {
+                                quotation_id: insertData.id,
+                                folio: insertData.folio || null,
+                                client_name: selectedClient?.name || null,
+                                max_discount_pct: Number(maxDiscountPct.toFixed(2)),
+                                limit_pct: SELLER_MAX_DISCOUNT_PCT,
+                                total_amount: grandTotal
+                            },
+                            status: 'pending'
+                        } as any)
+                        .select('id')
+                        .single();
                     if (approvalError) throw approvalError;
+                    if (approvalRow?.id) {
+                        void notifyApprovalPush(approvalRow.id);
+                    }
                 }
 
                 let locationNotice = '';

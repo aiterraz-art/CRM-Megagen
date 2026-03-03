@@ -4,6 +4,8 @@ import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Sett
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
+import ApprovalRealtimeNotifier from './ApprovalRealtimeNotifier';
+import PushSubscriptionManager from './PushSubscriptionManager';
 
 interface LayoutProps {
     children?: React.ReactNode;
@@ -211,6 +213,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                     </div>
                 </div>
             </main>
+            <ApprovalRealtimeNotifier />
+            <PushSubscriptionManager />
             <GlobalVisitTimer />
         </div>
     );

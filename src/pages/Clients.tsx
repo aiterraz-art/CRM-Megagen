@@ -44,6 +44,35 @@ const normalizeRut = (rut: string): string => {
     return `${body}-${dv}`;
 };
 
+const isMissingRutRpcError = (error: any) => {
+    const msg = `${error?.message || ''}`.toLowerCase();
+    const code = `${error?.code || ''}`.toUpperCase();
+    return code === 'PGRST202' || msg.includes('check_rut_exists') || msg.includes('schema cache');
+};
+
+const fallbackRutLookup = async (normalizedRut: string, profileId?: string | null) => {
+    if (!normalizedRut) return { exists: false, owner_name: null as string | null };
+
+    // Fallback scope when RPC is missing: avoids blocking creation with hard error.
+    let query = supabase
+        .from('clients')
+        .select('id, name, created_by')
+        .eq('rut', normalizedRut)
+        .limit(1);
+
+    if (profileId) {
+        query = query.or(`created_by.eq.${profileId},created_by.is.null`);
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error) throw error;
+
+    return {
+        exists: Boolean(data?.id),
+        owner_name: data?.name || null
+    };
+};
+
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; // Radius of the earth in km
     const dLat = deg2rad(lat2 - lat1);
@@ -466,13 +495,16 @@ const ClientsContent = () => {
 
             } else {
                 // VERIFICACIÓN DE SEGURIDAD (RUT ÚNICO GLOBAL)
-                const { data: rutCheck, error: rpcError } = await supabase
-                    .rpc('check_rut_exists', { queried_rut: normalizedRut });
+                const { data: rutCheck, error: rpcError } = await supabase.rpc('check_rut_exists', { queried_rut: normalizedRut });
+                let result = rutCheck as any;
 
-                if (rpcError) throw rpcError;
-
-                // El RPC retorna un objeto JSON: { exists: boolean, owner_name: string, ... }
-                const result = rutCheck as any;
+                if (rpcError) {
+                    if (isMissingRutRpcError(rpcError)) {
+                        result = await fallbackRutLookup(normalizedRut, profile?.id || null);
+                    } else {
+                        throw rpcError;
+                    }
+                }
 
                 if (result && result.exists) {
                     alert(`⚠️ DETENIDO: Este cliente ya existe en el sistema.\n\nEstá asignado al vendedor: ${result.owner_name || 'Desconocido'}\n\nPor políticas de la empresa, no puedes duplicar clientes de otros vendedores.`);
