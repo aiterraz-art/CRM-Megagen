@@ -82,6 +82,84 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
 
     if (!isOpen) return null;
 
+    const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 8000) => {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(input, { ...init, signal: controller.signal });
+        } finally {
+            window.clearTimeout(timeoutId);
+        }
+    };
+
+    const syncToGoogleCalendar = async (
+        targetRepId: string,
+        isoStart: string,
+        isoEnd: string,
+        title: string,
+        notes: string,
+        selected: Client,
+        visitId: string,
+        schedulerEmail: string | null | undefined
+    ) => {
+        const showReauthAlert = () => {
+            alert("⚠️ Google Calendar no pudo sincronizarse.\n\nDebes cerrar sesión y volver a ingresar con Google para renovar permisos.");
+        };
+
+        try {
+            const validToken = await googleService.ensureSession().catch(() => null);
+            if (!validToken) return;
+
+            const attendees: Array<{ email: string }> = [];
+            if (targetRepId !== (await supabase.auth.getSession()).data.session?.user?.id) {
+                const { data: assigneeProfile } = await supabase
+                    .from('profiles')
+                    .select('email')
+                    .eq('id', targetRepId)
+                    .single();
+                if (assigneeProfile?.email) attendees.push({ email: assigneeProfile.email });
+            }
+
+            const gCalEvent: any = {
+                summary: title,
+                description: `Cliente: ${selected.name}\nDirección: ${selected.address}\nNotas: ${notes}\n\nAgendado por: ${schedulerEmail || 'usuario CRM'}`,
+                location: selected.address,
+                start: { dateTime: isoStart },
+                end: { dateTime: isoEnd },
+                attendees
+            };
+
+            const response = await fetchWithTimeout('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${validToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(gCalEvent)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.warn('Google Calendar sync failed', errorText);
+                if (response.status === 401 || response.status === 403) {
+                    showReauthAlert();
+                }
+                return;
+            }
+
+            const gData = await response.json();
+            if (gData?.id) {
+                await supabase.from('visits').update({ google_event_id: gData.id }).eq('id', visitId);
+            }
+        } catch (gError) {
+            console.error('Google Calendar Error:', gError);
+            const message = `${(gError as any)?.message || gError || ''}`.toLowerCase();
+            if (message.includes('token') || message.includes('auth') || message.includes('permission')) {
+                showReauthAlert();
+            }
+        }
+    };
+
     const handleSave = async () => {
         if (!selectedClient) {
             alert("Debes seleccionar un cliente para agendar la visita.");
@@ -107,7 +185,7 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
             const targetRepId = assigneeId || session.user.id;
 
             // 3. Save to Supabase (Visits Table with 'scheduled' status)
-            const { error: dbError } = await supabase
+            const { data: insertedVisit, error: dbError } = await supabase
                 .from('visits')
                 .insert({
                     client_id: selectedClient.id,
@@ -117,71 +195,29 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                     status: 'scheduled',
                     title: formData.title,
                     notes: formData.notes
-                });
+                })
+                .select('id')
+                .single();
 
             if (dbError) throw dbError;
-
-            // 4. Sync to Google Calendar
-            // FIX: We now sync ALWAYS if we have a token, effectively behaving as the "Organizer".
-            // If assigning to another rep, we add them as an 'attendee' so it injects into their calendar.
-            const validToken = await googleService.ensureSession().catch(() => null);
-            if (session.provider_token && validToken) {
-                try {
-                    // Determine attendees
-                    const attendees = [];
-                    // If target is NOT self, fetch their email and add as attendee
-                    if (targetRepId !== session.user.id) {
-                        const { data: assigneeProfile } = await supabase
-                            .from('profiles')
-                            .select('email')
-                            .eq('id', targetRepId)
-                            .single();
-
-                        if (assigneeProfile?.email) {
-                            attendees.push({ email: assigneeProfile.email });
-                        }
-                    }
-
-                    const gCalEvent: any = {
-                        summary: formData.title,
-                        description: `Cliente: ${selectedClient.name}\nDirección: ${selectedClient.address}\nNotas: ${formData.notes}\n\nAgendado por: ${session.user.email}`,
-                        location: selectedClient.address,
-                        start: { dateTime: isoStart },
-                        end: { dateTime: isoEnd },
-                        attendees: attendees
-                    };
-
-                    const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${validToken}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(gCalEvent)
-                    });
-
-                    if (response.ok) {
-                        const gData = await response.json();
-                        // 5. Update Visit with Google Event ID
-                        if (gData.id) {
-                            await supabase.from('visits')
-                                .update({ google_event_id: gData.id })
-                                .eq('client_id', selectedClient.id)
-                                .eq('sales_rep_id', targetRepId)
-                                .eq('check_in_time', isoStart)
-                                .eq('status', 'scheduled');
-                        }
-                    } else {
-                        console.warn("Google Calendar sync failed", await response.text());
-                    }
-                } catch (gError) {
-                    console.error("Google Calendar Error:", gError);
-                }
-            }
 
             onSaved();
             onClose();
             alert("Visita agendada correctamente.");
+
+            // Sync Google in background so UI never stays blocked.
+            if (session.provider_token && insertedVisit?.id) {
+                void syncToGoogleCalendar(
+                    targetRepId,
+                    isoStart,
+                    isoEnd,
+                    formData.title,
+                    formData.notes,
+                    selectedClient,
+                    insertedVisit.id,
+                    session.user.email
+                );
+            }
 
         } catch (error: any) {
             console.error("Error scheduling visit:", error);
