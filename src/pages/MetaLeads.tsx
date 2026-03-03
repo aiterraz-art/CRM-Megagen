@@ -24,10 +24,18 @@ const parseNotes = (notes: string | null) => {
         .filter(Boolean);
 };
 
-const extractCampaignFromNotes = (notes: string | null) => {
+const parseNotePairs = (notes: string | null) => {
     const parts = parseNotes(notes);
-    const match = parts.find((part) => part.toLowerCase().startsWith('campaña:') || part.toLowerCase().startsWith('campana:'));
-    return match ? match.split(':').slice(1).join(':').trim() : '';
+    return parts
+        .map((part) => {
+            const idx = part.indexOf(':');
+            if (idx <= 0) return null;
+            const key = part.slice(0, idx).trim();
+            const value = part.slice(idx + 1).trim();
+            if (!key || !value) return null;
+            return { key, value };
+        })
+        .filter(Boolean) as Array<{ key: string; value: string }>;
 };
 
 const canReceiveAssignedLeads = (role: string | null | undefined) => {
@@ -171,6 +179,19 @@ const MetaLeads = () => {
     };
 
     const count = useMemo(() => leads.length, [leads]);
+    const csvColumns = useMemo(() => {
+        const ordered: string[] = [];
+        const seen = new Set<string>();
+        leads.forEach((lead) => {
+            parseNotePairs(lead.notes).forEach(({ key }) => {
+                const normalized = normalizeKey(key);
+                if (!normalized || seen.has(normalized)) return;
+                seen.add(normalized);
+                ordered.push(key);
+            });
+        });
+        return ordered;
+    }, [leads]);
 
     const handleCsvPicked = (file?: File | null) => {
         if (!file || importing) return;
@@ -220,16 +241,9 @@ const MetaLeads = () => {
                             return;
                         }
 
-                        const usedKeys = new Set<string>([
-                            'full_name', 'nombre completo', 'nombre', 'name',
-                            'email', 'correo', 'correo electronico', 'mail',
-                            'phone', 'telefono', 'teléfono', 'mobile_phone', 'celular', 'telefono contacto',
-                            'campaign_name', 'campaign', 'campana', 'campaña'
-                        ].map(normalizeKey));
-
-                        const extraTags = Object.entries(row || {})
+                        const csvPairs = Object.entries(row || {})
                             .map(([k, v]) => ({ key: String(k), value: String(v ?? '').trim() }))
-                            .filter((entry) => entry.value && !usedKeys.has(normalizeKey(entry.key)))
+                            .filter((entry) => entry.value)
                             .map((entry) => `${entry.key}: ${entry.value}`);
 
                         const noteParts = ['Generado desde Meta Ads'];
@@ -237,7 +251,7 @@ const MetaLeads = () => {
                         if (adset) noteParts.push(`Adset: ${adset}`);
                         if (adName) noteParts.push(`Anuncio: ${adName}`);
                         if (formName) noteParts.push(`Formulario: ${formName}`);
-                        noteParts.push(...extraTags);
+                        noteParts.push(...csvPairs);
 
                         payload.push({
                             id: crypto.randomUUID(),
@@ -341,38 +355,51 @@ const MetaLeads = () => {
             ) : (
                 <div className="premium-card border border-gray-100 overflow-hidden">
                     <div className="overflow-x-auto">
-                        <table className="min-w-[1400px] w-full text-sm">
+                        <table className="min-w-[1200px] w-full text-sm">
                             <thead className="bg-gray-50 border-b border-gray-100">
                                 <tr>
                                     <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">#</th>
-                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Fecha</th>
-                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Nombre</th>
-                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Contacto</th>
-                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Email</th>
-                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Teléfono</th>
-                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Campaña</th>
-                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Respuestas Formulario</th>
+                                    {csvColumns.length > 0 ? (
+                                        csvColumns.map((column) => (
+                                            <th key={`col-${column}`} className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500 whitespace-nowrap">
+                                                {column}
+                                            </th>
+                                        ))
+                                    ) : (
+                                        <>
+                                            <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Fecha</th>
+                                            <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Nombre</th>
+                                            <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Email</th>
+                                            <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Teléfono</th>
+                                            <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Notas</th>
+                                        </>
+                                    )}
                                     <th className="text-right px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Asignar Lead</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {leads.map((lead, idx) => (
-                                    <tr key={lead.id} className="border-b border-gray-100 last:border-b-0 align-top">
-                                        <td className="px-4 py-3 font-black text-gray-700">{idx + 1}</td>
-                                        <td className="px-4 py-3 font-bold text-gray-500 whitespace-nowrap">{new Date(lead.created_at).toLocaleString('es-CL')}</td>
-                                        <td className="px-4 py-3">
-                                            <p className="font-black text-gray-900">{lead.name}</p>
-                                            <span className="inline-flex mt-1 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
-                                                Meta Ads
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 font-bold text-gray-700">{lead.purchase_contact || 'Sin contacto'}</td>
-                                        <td className="px-4 py-3 font-bold text-gray-700">{lead.email || 'Sin correo'}</td>
-                                        <td className="px-4 py-3 font-bold text-gray-700">{lead.phone || 'Sin celular'}</td>
-                                        <td className="px-4 py-3 font-bold text-gray-700">{extractCampaignFromNotes(lead.notes) || 'Sin campaña'}</td>
-                                        <td className="px-4 py-3 max-w-[450px]">
-                                            <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">{lead.notes || 'Sin respuestas'}</p>
-                                        </td>
+                                {leads.map((lead, idx) => {
+                                    const pairMap = new Map(
+                                        parseNotePairs(lead.notes).map(({ key, value }) => [normalizeKey(key), value] as const)
+                                    );
+                                    return (
+                                        <tr key={lead.id} className="border-b border-gray-100 last:border-b-0 align-top">
+                                            <td className="px-4 py-3 font-black text-gray-700">{idx + 1}</td>
+                                            {csvColumns.length > 0 ? (
+                                                csvColumns.map((column) => (
+                                                    <td key={`${lead.id}-${column}`} className="px-4 py-3 text-xs font-bold text-gray-700 whitespace-pre-wrap break-words max-w-[280px]">
+                                                        {pairMap.get(normalizeKey(column)) || '-'}
+                                                    </td>
+                                                ))
+                                            ) : (
+                                                <>
+                                                    <td className="px-4 py-3 font-bold text-gray-500 whitespace-nowrap">{new Date(lead.created_at).toLocaleString('es-CL')}</td>
+                                                    <td className="px-4 py-3 font-bold text-gray-900">{lead.name}</td>
+                                                    <td className="px-4 py-3 font-bold text-gray-700">{lead.email || 'Sin correo'}</td>
+                                                    <td className="px-4 py-3 font-bold text-gray-700">{lead.phone || 'Sin celular'}</td>
+                                                    <td className="px-4 py-3 text-xs text-gray-700 whitespace-pre-wrap break-words max-w-[320px]">{lead.notes || '-'}</td>
+                                                </>
+                                            )}
                                         <td className="px-4 py-3">
                                             <div className="flex items-center justify-end gap-2 min-w-[360px]">
                                                 <select
@@ -399,7 +426,8 @@ const MetaLeads = () => {
                                             </div>
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
