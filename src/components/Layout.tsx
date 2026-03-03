@@ -35,7 +35,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         menuItems.push({ icon: <CircleDollarSign size={20} />, label: 'Cobranzas', path: '/collections' });
         menuItems.push({ icon: <LayoutDashboard size={20} className="rotate-90" />, label: 'Embudo', path: '/pipeline' });
         menuItems.push({ icon: <Target size={20} />, label: 'Leads', path: '/lead-pipeline' });
-        menuItems.push({ icon: <Megaphone size={20} />, label: 'Meta Leads', path: '/meta-leads' });
+        if (effectiveRole === 'admin' || effectiveRole === 'seller') {
+            menuItems.push({ icon: <Megaphone size={20} />, label: 'Meta Leads', path: '/meta-leads' });
+        }
         menuItems.push({ icon: <MessageSquare size={20} />, label: 'Mensajes', path: '/lead-messages' });
     }
 

@@ -72,6 +72,15 @@ const LeadModuleGuard = ({ children }: { children: JSX.Element }) => {
     return children;
 };
 
+const MetaLeadsGuard = ({ children }: { children: JSX.Element }) => {
+    const { effectiveRole, loading } = useUser();
+    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
+    if (!(effectiveRole === 'admin' || effectiveRole === 'seller')) {
+        return <Navigate to="/" replace />;
+    }
+    return children;
+};
+
 function App() {
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
@@ -184,7 +193,7 @@ function App() {
                                 <Route path="team" element={<NonAdministrativeGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonAdministrativeGuard>} />
                                 <Route path="pipeline" element={<NonAdministrativeGuard><Pipeline /></NonAdministrativeGuard>} />
                                 <Route path="lead-pipeline" element={<LeadModuleGuard><LeadPipeline /></LeadModuleGuard>} />
-                                <Route path="meta-leads" element={<LeadModuleGuard><MetaLeads /></LeadModuleGuard>} />
+                                <Route path="meta-leads" element={<MetaLeadsGuard><MetaLeads /></MetaLeadsGuard>} />
                                 <Route path="lead-messages" element={<LeadModuleGuard><LeadMessages /></LeadModuleGuard>} />
                                 <Route path="dispatch" element={<Dispatch />} />
                                 <Route path="delivery" element={<DeliveryRoute />} />
