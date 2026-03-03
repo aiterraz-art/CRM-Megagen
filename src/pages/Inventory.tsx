@@ -3,7 +3,6 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { Search, Filter, Package, Plus, AlertTriangle, TrendingUp, History, ChevronRight, FileSpreadsheet, MoreVertical, Download } from 'lucide-react';
 import { Database } from '../types/supabase';
-import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 type InventoryItem = Database['public']['Tables']['inventory']['Row'] & { sku?: string | null };
@@ -115,86 +114,86 @@ const Inventory = () => {
 
         setIsImporting(true);
 
-        Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: async (results) => {
-                const csvData = results.data as any[];
-
-                try {
-                    const getValue = (row: any, keywords: string[]) => {
-                        const keys = Object.keys(row);
-                        const foundKey = keys.find(k =>
-                            keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase()))
-                        );
-                        return foundKey ? row[foundKey] : null;
-                    };
-
-                    if (importType === 'inventory') {
-                        const parsedItems = csvData.map(row => ({
-                            sku: (getValue(row, ['digo', 'SKU']) || '').toString().trim(),
-                            name: (getValue(row, ['descrip', 'Nombre', 'Name', 'Detail']) || '').toString().trim(),
-                            stock_qty: parseInt(getValue(row, ['Saldo', 'Stock', 'Cantidad']) || '0') || 0,
-                            category: (getValue(row, ['Categoria', 'Categoría', 'Category']) || 'General').toString().trim(),
-                            price: parseFloat(getValue(row, ['Precio', 'Price', 'Neto', 'Valor', 'P.Unit']) || '0')
-                        })).filter(item => item.name && item.sku);
-
-                        // Replace-by-file semantics: if the CSV repeats SKUs, keep the last row.
-                        const dedupedBySku = new Map<string, typeof parsedItems[number]>();
-                        parsedItems.forEach((item) => {
-                            dedupedBySku.set(item.sku, item);
-                        });
-                        const newItems = Array.from(dedupedBySku.values());
-
-                        if (newItems.length === 0) {
-                            throw new Error('No se encontraron columnas de SKU y Nombre. Asegúrese de que el archivo tenga las columnas correspondientes (Código, Descripción, Saldo).');
-                        }
-
-                        // Always remove previous inventory before inserting the new file.
-                        const { error: deleteError } = await (supabase.from('inventory') as any).delete().not('id', 'is', null);
-                        if (deleteError) throw deleteError;
-
-                        const { error: insertError } = await (supabase.from('inventory') as any).insert(newItems);
-                        if (insertError) throw insertError;
-
-                        alert(`¡Inventario actualizado! ${newItems.length} productos cargados.`);
-                    } else if (importType === 'pricing') {
-                        const priceUpdates = csvData.map(row => ({
-                            sku: (getValue(row, ['digo', 'SKU']) || '').toString().trim(),
-                            price: parseFloat(getValue(row, ['Precio neto', 'Precio Neto', 'Neto', 'PRECIO NETO', 'Price']) || '0')
-                        })).filter(p => p.sku && p.price > 0);
-
-                        if (priceUpdates.length === 0) {
-                            throw new Error('No se encontraron datos de precios válidos. Asegúrese de que el archivo tenga columnas de SKU y Precio Neto.');
-                        }
-
-                        let successCount = 0;
-                        for (const update of priceUpdates) {
-                            const { error } = await (supabase.from('inventory') as any)
-                                .update({ price: update.price })
-                                .eq('sku', update.sku);
-                            if (!error) successCount++;
-                        }
-
-                        alert(`¡Lista de precios actualizada! Se actualizaron ${successCount} de ${priceUpdates.length} productos.`);
-                    }
-
-                    fetchInventory();
-                } catch (error: any) {
-                    console.error('Import Error:', error);
-                    alert(`Error al importar: ${error.message}`);
-                } finally {
-                    setIsImporting(false);
-                    setImportType(null);
-                    if (fileInputRef.current) fileInputRef.current.value = '';
-                }
-            },
-            error: (error) => {
-                console.error('CSV Parsing Error:', error);
-                alert('Error al leer el archivo CSV.');
-                setIsImporting(false);
+        try {
+            const extension = (file.name.split('.').pop() || '').toLowerCase();
+            if (!['csv', 'xlsx', 'xls'].includes(extension)) {
+                throw new Error('Formato no soportado. Usa .csv, .xlsx o .xls');
             }
-        });
+
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(buffer, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+
+            if (rows.length === 0) {
+                throw new Error('El archivo no contiene filas para importar.');
+            }
+
+            const getValue = (row: any, keywords: string[]) => {
+                const keys = Object.keys(row);
+                const foundKey = keys.find(k =>
+                    keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase()))
+                );
+                return foundKey ? row[foundKey] : null;
+            };
+
+            if (importType === 'inventory') {
+                const parsedItems = rows.map(row => ({
+                    sku: (getValue(row, ['digo', 'SKU']) || '').toString().trim(),
+                    name: (getValue(row, ['descrip', 'Nombre', 'Name', 'Detail']) || '').toString().trim(),
+                    stock_qty: parseInt(getValue(row, ['Saldo', 'Stock', 'Cantidad']) || '0') || 0,
+                    category: (getValue(row, ['Categoria', 'Categoría', 'Category']) || 'General').toString().trim(),
+                    price: parseFloat(getValue(row, ['Precio', 'Price', 'Neto', 'Valor', 'P.Unit']) || '0')
+                })).filter(item => item.name && item.sku);
+
+                const dedupedBySku = new Map<string, typeof parsedItems[number]>();
+                parsedItems.forEach((item) => {
+                    dedupedBySku.set(item.sku, item);
+                });
+                const newItems = Array.from(dedupedBySku.values());
+
+                if (newItems.length === 0) {
+                    throw new Error('No se encontraron columnas de SKU y Nombre. Asegúrese de que el archivo tenga las columnas correspondientes (Código, Descripción, Saldo).');
+                }
+
+                const { error: deleteError } = await (supabase.from('inventory') as any).delete().not('id', 'is', null);
+                if (deleteError) throw deleteError;
+
+                const { error: insertError } = await (supabase.from('inventory') as any).insert(newItems);
+                if (insertError) throw insertError;
+
+                alert(`¡Inventario actualizado! ${newItems.length} productos cargados.`);
+            } else if (importType === 'pricing') {
+                const priceUpdates = rows.map(row => ({
+                    sku: (getValue(row, ['digo', 'SKU']) || '').toString().trim(),
+                    price: parseFloat(getValue(row, ['Precio neto', 'Precio Neto', 'Neto', 'PRECIO NETO', 'Price']) || '0')
+                })).filter(p => p.sku && p.price > 0);
+
+                if (priceUpdates.length === 0) {
+                    throw new Error('No se encontraron datos de precios válidos. Asegúrese de que el archivo tenga columnas de SKU y Precio Neto.');
+                }
+
+                let successCount = 0;
+                for (const update of priceUpdates) {
+                    const { error } = await (supabase.from('inventory') as any)
+                        .update({ price: update.price })
+                        .eq('sku', update.sku);
+                    if (!error) successCount++;
+                }
+
+                alert(`¡Lista de precios actualizada! Se actualizaron ${successCount} de ${priceUpdates.length} productos.`);
+            }
+
+            fetchInventory();
+        } catch (error: any) {
+            console.error('Import Error:', error);
+            alert(`Error al importar: ${error.message}`);
+        } finally {
+            setIsImporting(false);
+            setImportType(null);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
     };
 
     const handleCreateProduct = async (e: React.FormEvent) => {
@@ -248,7 +247,7 @@ const Inventory = () => {
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept=".csv"
+                accept=".csv,.xlsx,.xls"
                 className="hidden"
             />
 
