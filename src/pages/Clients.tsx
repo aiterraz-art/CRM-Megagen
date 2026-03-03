@@ -518,8 +518,27 @@ const ClientsContent = () => {
     const handleDelete = async (id: string, name: string) => {
         if (!confirm(`¿Estás seguro de eliminar a ${name}?\n\nEsta acción es irreversible y borrará todo su historial.`)) return;
         try {
-            const { error } = await supabase.from('clients').delete().eq('id', id);
+            const { data: deletedRows, error } = await supabase
+                .from('clients')
+                .delete()
+                .eq('id', id)
+                .select('id');
             if (error) throw error;
+
+            if (!deletedRows || deletedRows.length === 0) {
+                alert('No se pudo eliminar el cliente. Puede que no tengas permisos o el registro ya no exista.');
+                await fetchClients();
+                return;
+            }
+
+            // Keep UI consistent immediately after successful delete.
+            setClients((prev) => prev.filter((client) => client.id !== id));
+            setSelectedClient((prev) => (prev?.id === id ? null : prev));
+            setNeglectedData((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+            });
             fetchClients();
         } catch (error: any) {
             alert(`Error al eliminar: ${error.message} `);

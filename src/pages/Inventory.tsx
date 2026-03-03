@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { Search, Filter, Package, Plus, AlertTriangle, TrendingUp, History, ChevronRight, FileSpreadsheet, MoreVertical } from 'lucide-react';
+import { Search, Filter, Package, Plus, AlertTriangle, TrendingUp, History, ChevronRight, FileSpreadsheet, MoreVertical, Download } from 'lucide-react';
 import { Database } from '../types/supabase';
 import Papa from 'papaparse';
 
@@ -83,6 +83,19 @@ const Inventory = () => {
         }
         setImportType(type);
         fileInputRef.current?.click();
+    };
+
+    const downloadInventoryTemplate = () => {
+        const headers = ['SKU', 'Nombre', 'Stock', 'Categoria', 'Precio Neto'];
+        const exampleRow = ['SKU-001', 'Implante Demo', '25', 'Insumos', '15990'];
+        const csv = [headers.join(','), exampleRow.join(',')].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'plantilla_importacion_inventario.csv';
+        link.click();
+        URL.revokeObjectURL(url);
     };
 
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -292,6 +305,14 @@ const Inventory = () => {
                                 <FileSpreadsheet size={18} className="mr-2" />
                             )}
                             Importar Inventario
+                        </button>
+                        <button
+                            onClick={downloadInventoryTemplate}
+                            disabled={isImporting}
+                            className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-slate-700 font-bold hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
+                        >
+                            <Download size={18} className="mr-2" />
+                            Descargar Plantilla
                         </button>
                         <button
                             onClick={() => handleImportClick('pricing')}
