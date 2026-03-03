@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Megaphone, UserCircle2, Mail, Phone, CalendarClock, CheckCircle2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Megaphone, Mail, Phone, CalendarClock, CheckCircle2, Upload, FileSpreadsheet } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import Papa from 'papaparse';
 
 type MetaLead = {
     id: string;
@@ -23,13 +24,42 @@ const parseNotes = (notes: string | null) => {
         .filter(Boolean);
 };
 
+const normalizeKey = (value: string) => value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+const getField = (row: Record<string, any>, aliases: string[]) => {
+    const normalizedAliases = aliases.map(normalizeKey);
+    const entries = Object.entries(row || {});
+    for (const [key, raw] of entries) {
+        if (!normalizedAliases.includes(normalizeKey(key))) continue;
+        const value = String(raw ?? '').trim();
+        if (value) return value;
+    }
+    return '';
+};
+
+const normalizePhoneForStorage = (value: string) => {
+    const digits = value.replace(/\D/g, '');
+    if (!digits) return null;
+    if (digits.startsWith('56')) return digits;
+    if (digits.startsWith('9') && digits.length === 9) return `56${digits}`;
+    return digits;
+};
+
 const MetaLeads = () => {
-    const { profile } = useUser();
+    const { profile, effectiveRole, hasPermission } = useUser();
     const [loading, setLoading] = useState(true);
     const [assigningId, setAssigningId] = useState<string | null>(null);
+    const [importing, setImporting] = useState(false);
     const [leads, setLeads] = useState<MetaLead[]>([]);
     const [sellers, setSellers] = useState<Array<{ id: string; full_name: string | null; email: string | null }>>([]);
     const [selectedSellerByLead, setSelectedSellerByLead] = useState<Record<string, string>>({});
+    const csvInputRef = useRef<HTMLInputElement>(null);
+
+    const canImport = effectiveRole === 'admin' || effectiveRole === 'jefe' || hasPermission('IMPORT_CLIENTS');
 
     const fetchMetaLeads = async () => {
         setLoading(true);
@@ -123,6 +153,109 @@ const MetaLeads = () => {
 
     const count = useMemo(() => leads.length, [leads]);
 
+    const handleCsvPicked = (file?: File | null) => {
+        if (!file || importing) return;
+        if (!canImport) {
+            alert('No tienes permisos para importar Meta Leads.');
+            return;
+        }
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+            alert('Solo se permiten archivos CSV.');
+            return;
+        }
+
+        setImporting(true);
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: async (result) => {
+                try {
+                    const rows = (result.data || []) as Record<string, any>[];
+                    if (!rows.length) {
+                        alert('El archivo CSV está vacío o no tiene filas válidas.');
+                        return;
+                    }
+
+                    const payload: any[] = [];
+                    const errors: string[] = [];
+
+                    rows.forEach((row, index) => {
+                        const name = getField(row, ['full_name', 'nombre completo', 'nombre', 'name']);
+                        const email = getField(row, ['email', 'correo', 'correo electronico', 'mail']);
+                        const phoneRaw = getField(row, ['phone', 'telefono', 'teléfono', 'mobile_phone', 'celular', 'telefono contacto']);
+                        const campaign = getField(row, ['campaign_name', 'campaign', 'campana', 'campaña']);
+                        const phone = normalizePhoneForStorage(phoneRaw);
+
+                        if (!name) {
+                            errors.push(`Fila ${index + 2}: falta nombre`);
+                            return;
+                        }
+                        if (!email && !phone) {
+                            errors.push(`Fila ${index + 2}: falta email y teléfono`);
+                            return;
+                        }
+
+                        const usedKeys = new Set<string>([
+                            'full_name', 'nombre completo', 'nombre', 'name',
+                            'email', 'correo', 'correo electronico', 'mail',
+                            'phone', 'telefono', 'teléfono', 'mobile_phone', 'celular', 'telefono contacto',
+                            'campaign_name', 'campaign', 'campana', 'campaña'
+                        ].map(normalizeKey));
+
+                        const extraTags = Object.entries(row || {})
+                            .map(([k, v]) => ({ key: String(k), value: String(v ?? '').trim() }))
+                            .filter((entry) => entry.value && !usedKeys.has(normalizeKey(entry.key)))
+                            .slice(0, 10)
+                            .map((entry) => `${entry.key}: ${entry.value}`);
+
+                        const noteParts = ['Generado desde Meta Ads'];
+                        if (campaign) noteParts.push(`Campaña: ${campaign}`);
+                        noteParts.push(...extraTags);
+
+                        payload.push({
+                            id: crypto.randomUUID(),
+                            name,
+                            email: email || null,
+                            phone: phone || null,
+                            purchase_contact: name,
+                            notes: noteParts.join(' | '),
+                            status: 'prospect_new',
+                            created_by: null
+                        });
+                    });
+
+                    if (!payload.length) {
+                        alert(`No se pudo importar ninguna fila.\n\nErrores: ${errors.slice(0, 8).join('\n')}`);
+                        return;
+                    }
+
+                    let inserted = 0;
+                    const chunkSize = 100;
+                    for (let i = 0; i < payload.length; i += chunkSize) {
+                        const chunk = payload.slice(i, i + chunkSize);
+                        const { error } = await supabase.from('clients').insert(chunk);
+                        if (error) throw error;
+                        inserted += chunk.length;
+                    }
+
+                    await fetchMetaLeads();
+                    const rejected = rows.length - inserted;
+                    alert(`Importación Meta completada.\n\n✅ Importados: ${inserted}\n❌ Omitidos: ${rejected}\n${errors.length ? `\nDetalle (primeros):\n${errors.slice(0, 8).join('\n')}` : ''}`);
+                } catch (error: any) {
+                    alert(`Error importando Meta Leads: ${error.message || 'desconocido'}`);
+                } finally {
+                    setImporting(false);
+                    if (csvInputRef.current) csvInputRef.current.value = '';
+                }
+            },
+            error: (error) => {
+                setImporting(false);
+                if (csvInputRef.current) csvInputRef.current.value = '';
+                alert(`No se pudo leer CSV: ${error.message}`);
+            }
+        });
+    };
+
     if (loading) {
         return (
             <div className="min-h-[50vh] flex items-center justify-center">
@@ -141,9 +274,37 @@ const MetaLeads = () => {
                     </h1>
                     <p className="text-gray-500 font-medium mt-1">Leads entrantes desde campañas Meta Ads, sin asignar.</p>
                 </div>
-                <div className="inline-flex items-center px-4 py-2 rounded-xl bg-white border border-gray-100 text-sm font-black text-gray-700">
-                    Disponibles: <span className="ml-2 text-indigo-600">{count}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex items-center px-4 py-2 rounded-xl bg-white border border-gray-100 text-sm font-black text-gray-700">
+                        Disponibles: <span className="ml-2 text-indigo-600">{count}</span>
+                    </div>
+                    <input
+                        ref={csvInputRef}
+                        type="file"
+                        accept=".csv,text/csv"
+                        className="hidden"
+                        onChange={(e) => handleCsvPicked(e.target.files?.[0])}
+                    />
+                    <button
+                        type="button"
+                        disabled={!canImport || importing}
+                        onClick={() => csvInputRef.current?.click()}
+                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider inline-flex items-center ${!canImport || importing ? 'bg-gray-100 text-gray-400' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                    >
+                        <Upload size={14} className="mr-1.5" />
+                        {importing ? 'Importando...' : 'Importar CSV Meta'}
+                    </button>
                 </div>
+            </div>
+
+            <div className="premium-card p-4 border border-gray-100 bg-gray-50/70">
+                <p className="text-[11px] font-black uppercase tracking-wider text-gray-600 inline-flex items-center">
+                    <FileSpreadsheet size={13} className="mr-1.5" />
+                    Carga histórica desde Meta
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                    Sube el CSV descargado de Meta Lead Ads. Se crearán como <span className="font-black">prospect_new</span> y <span className="font-black">sin asignar</span>.
+                </p>
             </div>
 
             {leads.length === 0 ? (
