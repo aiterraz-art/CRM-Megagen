@@ -4,6 +4,7 @@ import { useUser } from '../contexts/UserContext';
 import { Search, Filter, Package, Plus, AlertTriangle, TrendingUp, History, ChevronRight, FileSpreadsheet, MoreVertical, Download } from 'lucide-react';
 import { Database } from '../types/supabase';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 
 type InventoryItem = Database['public']['Tables']['inventory']['Row'] & { sku?: string | null };
 
@@ -86,16 +87,22 @@ const Inventory = () => {
     };
 
     const downloadInventoryTemplate = () => {
-        const headers = ['SKU', 'Nombre', 'Stock', 'Categoria', 'Precio Neto'];
-        const exampleRow = ['SKU-001', 'Implante Demo', '25', 'Insumos', '15990'];
-        const csv = [headers.join(','), exampleRow.join(',')].join('\n');
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'plantilla_importacion_inventario.csv';
-        link.click();
-        URL.revokeObjectURL(url);
+        const rows = [
+            {
+                SKU: 'SKU-001',
+                Nombre: 'Implante Demo',
+                Stock: 25,
+                Categoria: 'Insumos',
+                'Precio Neto': 15990
+            }
+        ];
+
+        const worksheet = XLSX.utils.json_to_sheet(rows, {
+            header: ['SKU', 'Nombre', 'Stock', 'Categoria', 'Precio Neto']
+        });
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario');
+        XLSX.writeFile(workbook, 'plantilla_importacion_inventario.xlsx');
     };
 
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
