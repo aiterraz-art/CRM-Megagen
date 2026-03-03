@@ -31,9 +31,12 @@ const Inventory = () => {
     const fetchInventory = async () => {
         setLoading(true);
         // Explicit projection: avoid leaking internal cost/margin columns to client UI.
-        const { data } = await (supabase.from('inventory') as any)
-            .select('id, sku, name, price, stock_qty, category, created_at, updated_at')
+        const { data, error } = await (supabase.from('inventory') as any)
+            .select('id, sku, name, price, stock_qty, category, created_at')
             .order('name');
+        if (error) {
+            console.error('Error fetching inventory:', error);
+        }
         if (data) setItems(data as any as InventoryItem[]);
         setLoading(false);
     };
