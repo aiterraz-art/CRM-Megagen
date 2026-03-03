@@ -26,8 +26,10 @@ const parseNotes = (notes: string | null) => {
 const MetaLeads = () => {
     const { profile } = useUser();
     const [loading, setLoading] = useState(true);
-    const [claimingId, setClaimingId] = useState<string | null>(null);
+    const [assigningId, setAssigningId] = useState<string | null>(null);
     const [leads, setLeads] = useState<MetaLead[]>([]);
+    const [sellers, setSellers] = useState<Array<{ id: string; full_name: string | null; email: string | null }>>([]);
+    const [selectedSellerByLead, setSelectedSellerByLead] = useState<Record<string, string>>({});
 
     const fetchMetaLeads = async () => {
         setLoading(true);
@@ -52,16 +54,52 @@ const MetaLeads = () => {
         fetchMetaLeads();
     }, []);
 
-    const handleClaimLead = async (leadId: string) => {
+    useEffect(() => {
+        const fetchSellers = async () => {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id, full_name, email, role, status')
+                .eq('role', 'seller')
+                .eq('status', 'active')
+                .order('full_name', { ascending: true });
+            if (error) {
+                alert(`No se pudo cargar vendedores: ${error.message}`);
+                return;
+            }
+            setSellers((data || []) as any);
+        };
+        fetchSellers();
+    }, []);
+
+    useEffect(() => {
+        if (sellers.length === 0) return;
+        const defaultSellerId = sellers[0].id;
+        setSelectedSellerByLead((prev) => {
+            const next = { ...prev };
+            leads.forEach((lead) => {
+                if (!next[lead.id]) next[lead.id] = defaultSellerId;
+            });
+            return next;
+        });
+    }, [leads, sellers]);
+
+    const handleAssignLead = async (leadId: string) => {
         if (!profile?.id) return;
-        const confirmed = window.confirm('Este lead quedará asignado a tu cartera. ¿Confirmas?');
+        const selectedSellerId = selectedSellerByLead[leadId];
+        if (!selectedSellerId) {
+            alert('Selecciona un vendedor para asignar este lead.');
+            return;
+        }
+
+        const sellerName = sellers.find((s) => s.id === selectedSellerId)?.full_name || 'vendedor';
+        const confirmed = window.confirm(`Este lead quedará asignado a ${sellerName}. ¿Confirmas?`);
         if (!confirmed) return;
 
-        setClaimingId(leadId);
+        setAssigningId(leadId);
         try {
             const { data, error } = await supabase
                 .from('clients')
-                .update({ created_by: profile.id })
+                .update({ created_by: selectedSellerId })
                 .eq('id', leadId)
                 .is('created_by', null)
                 .select('id')
@@ -75,11 +113,11 @@ const MetaLeads = () => {
             }
 
             setLeads((prev) => prev.filter((lead) => lead.id !== leadId));
-            alert('Lead reclamado correctamente.');
+            alert('Lead asignado correctamente.');
         } catch (error: any) {
-            alert(`No se pudo reclamar lead: ${error.message || 'desconocido'}`);
+            alert(`No se pudo asignar lead: ${error.message || 'desconocido'}`);
         } finally {
-            setClaimingId(null);
+            setAssigningId(null);
         }
     };
 
@@ -155,15 +193,29 @@ const MetaLeads = () => {
                                 )}
 
                                 <div className="mt-5">
-                                    <button
-                                        type="button"
-                                        onClick={() => handleClaimLead(lead.id)}
-                                        disabled={claimingId === lead.id}
-                                        className="w-full py-3 rounded-xl bg-indigo-600 text-white font-black text-xs uppercase tracking-wider hover:bg-indigo-700 disabled:bg-indigo-300 transition-all inline-flex items-center justify-center"
-                                    >
-                                        <CheckCircle2 size={14} className="mr-2" />
-                                        {claimingId === lead.id ? 'Reclamando...' : 'Reclamar Lead'}
-                                    </button>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <select
+                                            value={selectedSellerByLead[lead.id] || ''}
+                                            onChange={(e) => setSelectedSellerByLead((prev) => ({ ...prev, [lead.id]: e.target.value }))}
+                                            className="w-full px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-700"
+                                        >
+                                            <option value="" disabled>Seleccionar vendedor</option>
+                                            {sellers.map((seller) => (
+                                                <option key={seller.id} value={seller.id}>
+                                                    {seller.full_name || seller.email || seller.id}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAssignLead(lead.id)}
+                                            disabled={assigningId === lead.id || !selectedSellerByLead[lead.id]}
+                                            className="w-full py-3 rounded-xl bg-indigo-600 text-white font-black text-xs uppercase tracking-wider hover:bg-indigo-700 disabled:bg-indigo-300 transition-all inline-flex items-center justify-center"
+                                        >
+                                            <CheckCircle2 size={14} className="mr-2" />
+                                            {assigningId === lead.id ? 'Asignando...' : 'Asignar'}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         );
