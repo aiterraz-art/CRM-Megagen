@@ -19,6 +19,16 @@ const FILTER_OPTIONS: Array<{ label: string; value: QuoteFilter }> = [
 ];
 const formatMoney = (value: number) => `$${Number(value || 0).toLocaleString('es-CL')}`;
 const SELLER_MAX_DISCOUNT_PCT = 5;
+const DISPATCH_SERVICE_NAME = 'SERVICIO DE DESPACHO';
+const DISPATCH_SERVICE_SKU = 'SERV-DESPACHO';
+const normalizeProductKey = (value: string) =>
+    value
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z0-9]/g, '');
+const DISPATCH_SERVICE_NAME_KEY = normalizeProductKey(DISPATCH_SERVICE_NAME);
+const DISPATCH_SERVICE_SKU_KEY = normalizeProductKey(DISPATCH_SERVICE_SKU);
 
 const notifyApprovalPush = async (approvalId: string) => {
     try {
@@ -322,6 +332,34 @@ const Quotations: React.FC = () => {
         });
     };
 
+    const resolveInventoryProduct = useCallback((item: any) => {
+        if (item?.productId) {
+            const byId = products.find((p: any) => p.id === item.productId);
+            if (byId) return byId;
+        }
+
+        const code = String(item?.code || '').trim().toLowerCase();
+        if (code) {
+            const bySku = products.find((p: any) => (p.sku || '').toLowerCase() === code);
+            if (bySku) return bySku;
+        }
+
+        const detail = String(item?.detail || '').trim().toLowerCase();
+        if (detail) {
+            const byName = products.find((p: any) => (p.name || '').toLowerCase() === detail);
+            if (byName) return byName;
+        }
+
+        return null;
+    }, [products]);
+
+    const isDispatchServiceProduct = useCallback((product: any | null) => {
+        if (!product) return false;
+        const skuKey = normalizeProductKey(String(product.sku || ''));
+        const nameKey = normalizeProductKey(String(product.name || ''));
+        return skuKey === DISPATCH_SERVICE_SKU_KEY || nameKey === DISPATCH_SERVICE_NAME_KEY;
+    }, []);
+
     const handleDeleteQuotation = async (id: string) => {
         if (!confirm('¿Está seguro de que desea eliminar esta cotización?')) return;
 
@@ -365,23 +403,6 @@ const Quotations: React.FC = () => {
 
     const handleCreateQuotation = async () => {
         if (!profile || !selectedClient) return;
-        const resolveInventoryProduct = (item: any) => {
-            if (item.productId) {
-                const byId = products.find((p: any) => p.id === item.productId);
-                if (byId) return byId;
-            }
-            const code = String(item.code || '').trim().toLowerCase();
-            if (code) {
-                const bySku = products.find((p: any) => (p.sku || '').toLowerCase() === code);
-                if (bySku) return bySku;
-            }
-            const detail = String(item.detail || '').trim().toLowerCase();
-            if (detail) {
-                const byName = products.find((p: any) => (p.name || '').toLowerCase() === detail);
-                if (byName) return byName;
-            }
-            return null;
-        };
         const normalizedItems = formItems
             .map(item => ({
                 ...item,
@@ -1089,6 +1110,9 @@ const Quotations: React.FC = () => {
                                 {isSellerRole && (
                                     <div className="mb-4 p-3 rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-800 text-xs font-bold">
                                         Vista comercial: costos y márgenes internos no se muestran en esta pantalla.
+                                        <div className="mt-1 font-semibold">
+                                            Precio manual habilitado solo para {DISPATCH_SERVICE_NAME}.
+                                        </div>
                                     </div>
                                 )}
                                 <h4 className="font-bold text-gray-700 mb-4 flex items-center"><ShoppingBag size={18} className="mr-2 text-indigo-500" /> Ítems</h4>
@@ -1096,6 +1120,11 @@ const Quotations: React.FC = () => {
                                 <div className="space-y-4">
                                     {formItems.map((item, index) => (
                                         <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100 relative group">
+                                            {(() => {
+                                                const resolvedProduct = resolveInventoryProduct(item);
+                                                const allowManualPrice = !isSellerRole || isDispatchServiceProduct(resolvedProduct);
+                                                return (
+                                                    <>
                                             <div className="col-span-1 md:col-span-3 relative">
                                                 <label className="text-[10px] uppercase font-bold text-gray-400">Código (SKU)</label>
                                                 <input
@@ -1230,10 +1259,15 @@ const Quotations: React.FC = () => {
                                                 <input
                                                     type="number"
                                                     min="0"
-                                                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    disabled={!allowManualPrice}
+                                                    className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none ${allowManualPrice
+                                                        ? 'bg-white border-gray-200 focus:ring-2 focus:ring-indigo-500'
+                                                        : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                                                        }`}
                                                     placeholder="$ 0"
                                                     value={item.price}
                                                     onChange={(e) => {
+                                                        if (!allowManualPrice) return;
                                                         const price = parseFloat(e.target.value) || 0;
                                                         applyItemPricing(index, (current) => ({ ...current, price, netPrice: price }));
                                                     }}
@@ -1262,9 +1296,14 @@ const Quotations: React.FC = () => {
                                                 <input
                                                     type="number"
                                                     min="0"
-                                                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                    disabled={!allowManualPrice}
+                                                    className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none ${allowManualPrice
+                                                        ? 'bg-white border-gray-200 focus:ring-2 focus:ring-indigo-500'
+                                                        : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                                                        }`}
                                                     value={item.netPrice ?? item.price ?? 0}
                                                     onChange={(e) => {
+                                                        if (!allowManualPrice) return;
                                                         const netPrice = Math.max(0, parseFloat(e.target.value) || 0);
                                                         applyItemPricing(index, (current) => ({ ...current, netPrice }));
                                                     }}
@@ -1276,6 +1315,9 @@ const Quotations: React.FC = () => {
                                                 </p>
                                                 <p className="font-black text-lg text-gray-700">$ {((item.qty || 0) * ((item.netPrice || item.price) || 0)).toLocaleString()}</p>
                                             </div>
+                                                    </>
+                                                );
+                                            })()}
 
                                             {formItems.length > 1 && (
                                                 <button
