@@ -51,6 +51,14 @@ const normalizeSellerToken = (value: string): string => value
     .replace(/\s+/g, ' ')
     .trim();
 
+const looksLikeRutValue = (value: string): boolean => {
+    const clean = (value || '').replace(/[^0-9kK]/g, '').toUpperCase();
+    if (clean.length < 2) return false;
+    const body = clean.slice(0, -1);
+    const dv = clean.slice(-1);
+    return /^[0-9]+$/.test(body) && /^[0-9K]$/.test(dv);
+};
+
 const isMissingRutRpcError = (error: any) => {
     const msg = `${error?.message || ''}`.toLowerCase();
     const code = `${error?.code || ''}`.toUpperCase();
@@ -632,6 +640,7 @@ const ClientsContent = () => {
                 let errorCount = 0;
                 let errors: string[] = [];
                 const rejectedRows: Array<{ fila: number; motivo: string; vendedor: string; nombre: string; rut: string }> = [];
+                let swappedRutNameRows = 0;
 
                 if (rows.length === 0) {
                     alert('El archivo está vacío.');
@@ -667,8 +676,19 @@ const ClientsContent = () => {
                 for (let idx = 0; idx < rows.length; idx++) {
                     const row = rows[idx];
                     const rowNumber = idx + 2; // +2 because row 1 is header in Excel
-                    const name = row['Nombre']?.toString().trim();
-                    const rut = row['Rut'] ? normalizeRut(row['Rut'].toString()).toUpperCase() : null;
+                    const nombreCell = row['Nombre']?.toString().trim() || '';
+                    const rutCell = row['Rut']?.toString().trim() || '';
+                    let name = nombreCell;
+                    let rutSource = rutCell;
+
+                    // Some legacy files are exported with Nombre/Rut columns swapped.
+                    if (looksLikeRutValue(nombreCell) && !looksLikeRutValue(rutCell)) {
+                        name = rutCell;
+                        rutSource = nombreCell;
+                        swappedRutNameRows++;
+                    }
+
+                    const rut = looksLikeRutValue(rutSource) ? normalizeRut(rutSource).toUpperCase() : null;
                     const giro = row['Giro']?.toString().trim();
                     const address = row['Dirección']?.toString().trim();
                     const office = row['Oficina']?.toString().trim() || row['Depto']?.toString().trim();
@@ -810,6 +830,9 @@ const ClientsContent = () => {
                 }
 
                 alert(`Importación Finalizada.\n\n✅ Exitosos: ${successCount}\n❌ Errores: ${errorCount}\n\n${errorCount > 0 ? 'Revisa la consola para detalles de errores.' : ''}`);
+                if (swappedRutNameRows > 0) {
+                    alert(`Aviso: se detectaron ${swappedRutNameRows} filas con columnas Nombre/Rut invertidas y se corrigieron automáticamente.`);
+                }
                 if (errors.length > 0) console.error("Excel Import Errors:", errors);
                 if (rejectedRows.length > 0) {
                     const rejectedWb = XLSX.utils.book_new();
