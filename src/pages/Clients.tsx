@@ -44,10 +44,23 @@ const normalizeRut = (rut: string): string => {
     return `${body}-${dv}`;
 };
 
+const normalizeSellerToken = (value: string): string => value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 const isMissingRutRpcError = (error: any) => {
     const msg = `${error?.message || ''}`.toLowerCase();
     const code = `${error?.code || ''}`.toUpperCase();
     return code === 'PGRST202' || msg.includes('check_rut_exists') || msg.includes('schema cache');
+};
+
+const isRutUniqueViolation = (error: any) => {
+    const msg = `${error?.message || ''}`.toLowerCase();
+    const code = `${error?.code || ''}`.toUpperCase();
+    return code === '23505' || msg.includes('clients_rut_key') || msg.includes('duplicate key value');
 };
 
 const fallbackRutLookup = async (normalizedRut: string, profileId?: string | null) => {
@@ -636,11 +649,12 @@ const ClientsContent = () => {
                     payload: any;
                     meta: { fila: number; vendedor: string; nombre: string; rut: string };
                 }> = [];
+                const seenRuts = new Set<string>();
                 const normalizedSellerMap = new globalThis.Map<string, any>();
                 profiles.forEach((p) => {
-                    const email = (p.email || '').toLowerCase().trim();
+                    const email = normalizeSellerToken(p.email || '');
                     const username = email.split('@')[0];
-                    const fullName = (p.full_name || '').toLowerCase().trim();
+                    const fullName = normalizeSellerToken(p.full_name || '');
                     if (email) normalizedSellerMap.set(email, p);
                     if (username) normalizedSellerMap.set(username, p);
                     if (fullName) normalizedSellerMap.set(fullName, p);
@@ -654,7 +668,7 @@ const ClientsContent = () => {
                     const row = rows[idx];
                     const rowNumber = idx + 2; // +2 because row 1 is header in Excel
                     const name = row['Nombre']?.toString().trim();
-                    const rut = row['Rut'] ? normalizeRut(row['Rut'].toString()) : null;
+                    const rut = row['Rut'] ? normalizeRut(row['Rut'].toString()).toUpperCase() : null;
                     const giro = row['Giro']?.toString().trim();
                     const address = row['Dirección']?.toString().trim();
                     const office = row['Oficina']?.toString().trim() || row['Depto']?.toString().trim();
@@ -663,7 +677,7 @@ const ClientsContent = () => {
                     const email = row['Email']?.toString().trim();
                     const purchase_contact = row['Contacto']?.toString().trim();
                     const sellerRaw = (row['Vendedor'] ?? row['Correo Vendedor'] ?? row['Vendedor Email'] ?? '').toString().trim();
-                    const sellerToken = sellerRaw.toLowerCase().trim();
+                    const sellerToken = normalizeSellerToken(sellerRaw);
 
                     if (!name) {
                         errorCount++;
@@ -673,6 +687,17 @@ const ClientsContent = () => {
                         continue;
                     }
 
+                    if (rut) {
+                        if (seenRuts.has(rut)) {
+                            errorCount++;
+                            const reason = `Fila ${rowNumber}: RUT duplicado dentro del archivo (${rut})`;
+                            errors.push(reason);
+                            rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                            continue;
+                        }
+                        seenRuts.add(rut);
+                    }
+
                     if (!sellerToken) {
                         errorCount++;
                         const reason = `Fila ${rowNumber}: vendedor obligatorio (columna "Vendedor" vacía)`;
@@ -680,14 +705,15 @@ const ClientsContent = () => {
                         rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
                         continue;
                     }
-                    if (!sellerToken.includes('@')) {
+                    const foundProfile = normalizedSellerMap.get(sellerToken);
+                    const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sellerToken);
+                    if (!foundProfile && !looksLikeEmail) {
                         errorCount++;
-                        const reason = `Fila ${rowNumber}: vendedor debe ser correo válido (${sellerRaw})`;
+                        const reason = `Fila ${rowNumber}: vendedor no encontrado (${sellerRaw}). Usa correo corporativo o nombre exacto del perfil.`;
                         errors.push(reason);
                         rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
                         continue;
                     }
-                    const foundProfile = normalizedSellerMap.get(sellerToken);
                     const assignedSellerId = foundProfile?.id || null;
 
                     clientsToInsert.push({
@@ -724,10 +750,45 @@ const ClientsContent = () => {
                         try {
                             if (client.rut) {
                                 const payload = { ...client };
-                                const { error } = await supabase
+                                const { data: existingByRut, error: existingByRutError } = await supabase
                                     .from('clients')
-                                    .upsert(payload, { onConflict: 'rut', ignoreDuplicates: false });
-                                if (error) throw error;
+                                    .select('id')
+                                    .eq('rut', client.rut)
+                                    .maybeSingle();
+                                if (existingByRutError && existingByRutError.code !== 'PGRST116') {
+                                    throw existingByRutError;
+                                }
+
+                                if (existingByRut?.id) {
+                                    const { error: updateError } = await supabase
+                                        .from('clients')
+                                        .update(payload)
+                                        .eq('id', existingByRut.id);
+                                    if (updateError) throw updateError;
+                                } else {
+                                    const { error: insertError } = await supabase
+                                        .from('clients')
+                                        .insert(payload);
+                                    if (insertError) {
+                                        if (!isRutUniqueViolation(insertError)) throw insertError;
+
+                                        // Concurrent insert fallback: row appeared between lookup and insert.
+                                        const { data: retryByRut, error: retryByRutError } = await supabase
+                                            .from('clients')
+                                            .select('id')
+                                            .eq('rut', client.rut)
+                                            .maybeSingle();
+                                        if (retryByRutError || !retryByRut?.id) {
+                                            throw insertError;
+                                        }
+
+                                        const { error: retryUpdateError } = await supabase
+                                            .from('clients')
+                                            .update(payload)
+                                            .eq('id', retryByRut.id);
+                                        if (retryUpdateError) throw retryUpdateError;
+                                    }
+                                }
                             } else {
                                 const { error } = await supabase.from('clients').insert(client);
                                 if (error) throw error;
