@@ -27,11 +27,29 @@ interface Props {
 
 const DeliveryNoteTemplate: React.FC<Props> = ({ data, onClose }) => {
     const contentRef = useRef<HTMLDivElement>(null);
-    const companyName = import.meta.env.VITE_COMPANY_NAME || 'Mi Empresa';
+    const normalizeCompanyValue = (value?: string | null) => {
+        const cleaned = (value || '').trim();
+        if (!cleaned) return '';
+        const lower = cleaned.toLowerCase();
+        if (
+            lower === '---'
+            || lower === '-'
+            || lower === 'n/a'
+            || lower === 'na'
+            || lower === 'null'
+            || lower === 'undefined'
+            || lower.includes('por configurar')
+        ) {
+            return '';
+        }
+        return cleaned;
+    };
+
+    const companyName = normalizeCompanyValue(import.meta.env.VITE_COMPANY_NAME) || 'Mi Empresa';
     const companyLogo = import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png';
     const is3DentalCompany = companyName.toLowerCase().includes('3dental');
-    const companyRut = import.meta.env.VITE_COMPANY_RUT || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
-    const companyAddress = import.meta.env.VITE_COMPANY_ADDRESS || (is3DentalCompany ? 'Americo Vespucion 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
+    const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
+    const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || (is3DentalCompany ? 'Americo Vespucion 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
 
     const handlePrint = () => {
         window.print();

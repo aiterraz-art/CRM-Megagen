@@ -45,14 +45,32 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
     const [previewScale, setPreviewScale] = React.useState(1);
     const [previewHeight, setPreviewHeight] = React.useState(1400);
     const [zoomMultiplier, setZoomMultiplier] = React.useState(1);
-    const companyName = import.meta.env.VITE_COMPANY_NAME || 'MEGAGEN IMPLANT';
+    const normalizeCompanyValue = (value?: string | null) => {
+        const cleaned = (value || '').trim();
+        if (!cleaned) return '';
+        const lower = cleaned.toLowerCase();
+        if (
+            lower === '---'
+            || lower === '-'
+            || lower === 'n/a'
+            || lower === 'na'
+            || lower === 'null'
+            || lower === 'undefined'
+            || lower.includes('por configurar')
+        ) {
+            return '';
+        }
+        return cleaned;
+    };
+
+    const companyName = normalizeCompanyValue(import.meta.env.VITE_COMPANY_NAME) || 'MEGAGEN IMPLANT';
     const companyLogo = import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png';
     const is3DentalCompany = companyName.toLowerCase().includes('3dental');
-    const companyGiro = import.meta.env.VITE_COMPANY_GIRO || 'Venta insumos dentales';
-    const companyAddress = import.meta.env.VITE_COMPANY_ADDRESS || (is3DentalCompany ? 'Americo Vespucion 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
-    const companyPhone = import.meta.env.VITE_COMPANY_PHONE || '961183899';
-    const companyEmail = import.meta.env.VITE_COMPANY_EMAIL || import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
-    const companyRut = import.meta.env.VITE_COMPANY_RUT || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
+    const companyGiro = normalizeCompanyValue(import.meta.env.VITE_COMPANY_GIRO) || 'Venta insumos dentales';
+    const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || (is3DentalCompany ? 'Americo Vespucion 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
+    const companyPhone = normalizeCompanyValue(import.meta.env.VITE_COMPANY_PHONE) || '961183899';
+    const companyEmail = normalizeCompanyValue(import.meta.env.VITE_COMPANY_EMAIL) || normalizeCompanyValue(import.meta.env.VITE_OWNER_EMAIL) || 'aterraza@imegagen.cl';
+    const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
 
     // Robust parsing: items could be a string (JSON) or an object
     let items: QuotationItem[] = [];
