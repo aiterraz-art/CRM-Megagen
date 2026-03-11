@@ -544,6 +544,11 @@ const Quotations: React.FC = () => {
             const netAmount = calculatedItems.reduce((sum, item) => sum + item.total, 0);
             const tax = Math.round(netAmount * 0.19);
             const grandTotal = netAmount + tax;
+            const shouldStartAsSent =
+                !shouldCreateApprovalRequest
+                && (selectedInteractionType === 'WhatsApp' || selectedInteractionType === 'Teléfono');
+            const initialQuotationStatus = shouldStartAsSent ? 'sent' : 'draft';
+            const initialSentAt = shouldStartAsSent ? new Date().toISOString() : null;
 
             // 3. Direct Insert (Bypassing RPC to ensure items are saved)
             if (editingQuotation) {
@@ -593,7 +598,8 @@ const Quotations: React.FC = () => {
                         items: calculatedItems,
                         total_amount: grandTotal,
                         payment_terms: paymentTerms,
-                        status: 'draft',
+                        status: initialQuotationStatus,
+                        sent_at: initialSentAt,
                         comments: formComments,
                         interaction_type: selectedInteractionType,
                         created_at: new Date().toISOString()
@@ -602,6 +608,9 @@ const Quotations: React.FC = () => {
                     .single();
 
                 if (insertError) throw insertError;
+                if (shouldStartAsSent && insertData?.id) {
+                    await markQuotationAsSent(insertData.id);
+                }
                 if (shouldCreateApprovalRequest && insertData) {
                     const { data: approvalRow, error: approvalError } = await supabase
                         .from('approval_requests')
