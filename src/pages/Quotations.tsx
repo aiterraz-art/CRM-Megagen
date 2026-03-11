@@ -891,12 +891,14 @@ const Quotations: React.FC = () => {
                                             {q.stage && (
                                                 <span className={`px-1.5 py-0.5 rounded-md text-[7px] font-black uppercase tracking-wide border ${q.stage === 'won' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
                                                     q.stage === 'lost' ? 'bg-red-100 text-red-700 border-red-200' :
+                                                        q.stage === 'sent' ? 'bg-blue-100 text-blue-700 border-blue-200' :
                                                         q.stage === 'negotiation' ? 'bg-amber-100 text-amber-700 border-amber-200' :
                                                             q.stage === 'contacted' ? 'bg-blue-100 text-blue-700 border-blue-200' :
                                                                 'bg-gray-100 text-gray-600 border-gray-200'
                                                     }`}>
                                                     {q.stage === 'won' ? 'Ganada' :
                                                         q.stage === 'lost' ? 'Perdida' :
+                                                            q.stage === 'sent' ? 'Enviada' :
                                                             q.stage === 'negotiation' ? 'Negociación' :
                                                         q.stage === 'contacted' ? 'Contactado' : 'Nueva'}
                                                 </span>
@@ -945,6 +947,17 @@ const Quotations: React.FC = () => {
                                         {q.client_contact || 'Sin contacto'} | {q.client_phone || 'Sin teléfono'}
                                     </p>
                                 </div>
+
+                                {q.sent_at && (
+                                    <div className="px-3 py-2 bg-blue-50 rounded-xl border border-blue-100">
+                                        <p className="text-[9px] font-black text-blue-700 uppercase tracking-wider">
+                                            Enviada a cliente
+                                        </p>
+                                        <p className="text-[10px] font-bold text-blue-600">
+                                            {new Date(q.sent_at).toLocaleDateString('es-CL')} {new Date(q.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="pt-3 flex items-center gap-2 mt-auto">
