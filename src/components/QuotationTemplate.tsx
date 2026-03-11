@@ -1,5 +1,5 @@
 import React from 'react';
-import { Printer, Download, X, Share2, Loader2 } from 'lucide-react';
+import { Printer, Download, X, Share2, Loader2, MessageSquare, Mail } from 'lucide-react';
 
 interface QuotationItem {
     code: string;
@@ -169,6 +169,59 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
         }
     };
 
+    const normalizePhoneForWhatsapp = (raw: string): string | null => {
+        const digits = raw.replace(/\D/g, '');
+        if (!digits) return null;
+        if (digits.startsWith('569') && digits.length >= 11) return digits;
+        if (digits.startsWith('56') && digits.length >= 10) return digits;
+        if (digits.startsWith('9') && digits.length === 9) return `56${digits}`;
+        return null;
+    };
+
+    const buildQuoteMessage = () =>
+        `Hola, te comparto la cotización Folio Nº ${data.folio} de ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}.\n\nTotal: $${total.toLocaleString('es-CL')}\nVendedor: ${data.sellerName}\nCliente: ${data.clientName}`;
+
+    const markAsSentSafely = async (action: 'share' | 'download') => {
+        if (!onMarkedAsSent) return;
+        try {
+            await onMarkedAsSent(action);
+        } catch (markError) {
+            console.warn('No se pudo marcar la cotización como enviada:', markError);
+        }
+    };
+
+    const handleSendWhatsApp = async () => {
+        if (!canShareAndDownload) {
+            alert('Esta cotización debe estar aprobada para poder enviarse.');
+            return;
+        }
+        const normalizedPhone = normalizePhoneForWhatsapp(data.clientPhone || '');
+        if (!normalizedPhone) {
+            alert('El cliente no tiene un celular válido para WhatsApp.');
+            return;
+        }
+        const url = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(buildQuoteMessage())}`;
+        window.open(url, '_blank', 'noopener,noreferrer');
+        await markAsSentSafely('share');
+    };
+
+    const handleSendEmail = async () => {
+        if (!canShareAndDownload) {
+            alert('Esta cotización debe estar aprobada para poder enviarse.');
+            return;
+        }
+        const recipient = String(data.clientEmail || '').trim();
+        if (!recipient) {
+            alert('El cliente no tiene email registrado.');
+            return;
+        }
+        const subject = `Cotización Folio Nº ${data.folio} - ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}`;
+        const body = `${buildQuoteMessage()}\n\nAdjunta el PDF de la cotización para enviar el documento formal.`;
+        const mailto = `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.open(mailto, '_blank', 'noopener,noreferrer');
+        await markAsSentSafely('share');
+    };
+
     const handleShare = async () => {
         if (!canShareAndDownload) {
             alert('Esta cotización debe estar aprobada para poder enviarse.');
@@ -197,13 +250,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                 shared = true;
             }
 
-            if (shared && onMarkedAsSent) {
-                try {
-                    await onMarkedAsSent('share');
-                } catch (markError) {
-                    console.warn('No se pudo marcar la cotización como enviada tras compartir:', markError);
-                }
-            }
+            if (shared) await markAsSentSafely('share');
         } catch (err) {
             console.error('Error sharing:', err);
         } finally {
@@ -229,13 +276,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
 
-                if (onMarkedAsSent) {
-                    try {
-                        await onMarkedAsSent('download');
-                    } catch (markError) {
-                        console.warn('No se pudo marcar la cotización como enviada tras descargar:', markError);
-                    }
-                }
+                await markAsSentSafely('download');
             }
         } catch (error) {
             console.error("Error downloading PDF:", error);
@@ -322,6 +363,22 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                                 100%
                             </button>
                         </div>
+                        <button
+                            onClick={handleSendWhatsApp}
+                            disabled={!canShareAndDownload || generatingPdf || !normalizePhoneForWhatsapp(data.clientPhone || '')}
+                            className="flex items-center px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={normalizePhoneForWhatsapp(data.clientPhone || '') ? 'Enviar por WhatsApp' : 'Cliente sin celular válido'}
+                        >
+                            <MessageSquare size={16} className="mr-2" /> WhatsApp
+                        </button>
+                        <button
+                            onClick={handleSendEmail}
+                            disabled={!canShareAndDownload || generatingPdf || !String(data.clientEmail || '').trim()}
+                            className="flex items-center px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-bold hover:bg-sky-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={String(data.clientEmail || '').trim() ? 'Enviar por correo' : 'Cliente sin correo'}
+                        >
+                            <Mail size={16} className="mr-2" /> Correo
+                        </button>
                         <button
                             onClick={handleShare}
                             disabled={!canShareAndDownload || generatingPdf}
