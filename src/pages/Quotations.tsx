@@ -1025,6 +1025,7 @@ const Quotations: React.FC = () => {
                                         ? `Crédito ${selectedForTemplate.payment_terms.days} Días`
                                         : 'Contado'),
                                 sellerName: selectedForTemplate.seller_name,
+                                sellerEmail: selectedForTemplate.seller_email,
                                 items: selectedForTemplate.items || [],
                                 comments: selectedForTemplate.comments
                             }}

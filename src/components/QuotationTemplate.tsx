@@ -27,6 +27,7 @@ interface QuotationData {
     clientContact?: string;
     paymentTerms: string;
     sellerName: string;
+    sellerEmail?: string;
     items: QuotationItem[];
     comments?: string;
 }
@@ -67,10 +68,11 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
     const companyLogo = import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png';
     const is3DentalCompany = companyName.toLowerCase().includes('3dental');
     const companyGiro = normalizeCompanyValue(import.meta.env.VITE_COMPANY_GIRO) || 'Venta insumos dentales';
-    const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || (is3DentalCompany ? 'Americo Vespucion 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
+    const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || (is3DentalCompany ? 'Americo Vespucio 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
     const companyPhone = normalizeCompanyValue(import.meta.env.VITE_COMPANY_PHONE) || '961183899';
     const companyEmail = normalizeCompanyValue(import.meta.env.VITE_COMPANY_EMAIL) || normalizeCompanyValue(import.meta.env.VITE_OWNER_EMAIL) || 'aterraza@imegagen.cl';
     const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
+    const sellerEmail = normalizeCompanyValue(data.sellerEmail) || companyEmail;
 
     // Robust parsing: items could be a string (JSON) or an object
     let items: QuotationItem[] = [];
@@ -369,7 +371,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                                 <p>{companyGiro}</p>
                                 <p>{companyAddress}</p>
                                 <p>Telefono: {companyPhone}</p>
-                                <p>Email: <span className="text-blue-600 underline">{companyEmail}</span></p>
+                                <p>Email: <span className="text-blue-600 underline">{sellerEmail}</span></p>
                             </div>
 
                             <div className="w-64 border-2 border-orange-400 p-4 text-center rounded-lg space-y-2">
