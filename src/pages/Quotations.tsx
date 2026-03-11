@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone } from 'lucide-react';
+import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone, Mail } from 'lucide-react';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
@@ -132,6 +132,52 @@ const Quotations: React.FC = () => {
                 : prev
         ));
     }, []);
+
+    const normalizePhoneForWhatsapp = useCallback((raw: string | null | undefined): string | null => {
+        const digits = String(raw || '').replace(/\D/g, '');
+        if (!digits) return null;
+        if (digits.startsWith('569') && digits.length >= 11) return digits;
+        if (digits.startsWith('56') && digits.length >= 10) return digits;
+        if (digits.startsWith('9') && digits.length === 9) return `56${digits}`;
+        return null;
+    }, []);
+
+    const openQuoteViaWhatsApp = useCallback(async (quote: any) => {
+        if (quote?.discount_approval?.status === 'pending' || quote?.discount_approval?.status === 'rejected') {
+            alert('Esta cotización no se puede enviar hasta resolver la aprobación de descuento.');
+            return;
+        }
+
+        const normalizedPhone = normalizePhoneForWhatsapp(quote?.client_phone || quote?.client?.phone);
+        if (!normalizedPhone) {
+            alert('El cliente no tiene un celular válido para WhatsApp.');
+            return;
+        }
+
+        const message = `Hola, te comparto la cotización Folio Nº ${quote?.folio || ''} de ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}.\n\nTotal: ${formatMoney(Number(quote?.total_amount || 0))}\nVendedor: ${quote?.seller_name || 'Vendedor'}`;
+        const url = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`;
+        window.open(url, '_blank', 'noopener,noreferrer');
+        await markQuotationAsSent(quote.id);
+    }, [markQuotationAsSent, normalizePhoneForWhatsapp]);
+
+    const openQuoteViaEmail = useCallback(async (quote: any) => {
+        if (quote?.discount_approval?.status === 'pending' || quote?.discount_approval?.status === 'rejected') {
+            alert('Esta cotización no se puede enviar hasta resolver la aprobación de descuento.');
+            return;
+        }
+
+        const recipient = String(quote?.client_email || quote?.client?.email || '').trim();
+        if (!recipient) {
+            alert('El cliente no tiene correo registrado.');
+            return;
+        }
+
+        const subject = `Cotización Folio Nº ${quote?.folio || ''} - ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}`;
+        const body = `Hola ${quote?.client_contact || 'cliente'},\n\nTe comparto la cotización Folio Nº ${quote?.folio || ''}.\nTotal: ${formatMoney(Number(quote?.total_amount || 0))}\nVendedor: ${quote?.seller_name || 'Vendedor'}\n\nAdjunta el PDF formal desde el CRM para completar el envío.`;
+        const mailto = `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.open(mailto, '_blank', 'noopener,noreferrer');
+        await markQuotationAsSent(quote.id);
+    }, [markQuotationAsSent]);
 
     const fetchQuotations = useCallback(async () => {
         setLoading(true);
@@ -878,7 +924,12 @@ const Quotations: React.FC = () => {
                         <p className="text-sm text-gray-500 mt-2">Ajusta búsqueda o estado para ver resultados.</p>
                     </div>
                 ) : (
-                    filteredQuotations.map((q) => (
+                    filteredQuotations.map((q) => {
+                        const hasPendingDiscountBlock = q.discount_approval?.status === 'pending' || q.discount_approval?.status === 'rejected';
+                        const hasWhatsappTarget = Boolean(normalizePhoneForWhatsapp(q.client_phone || q.client?.phone));
+                        const hasEmailTarget = Boolean(String(q.client_email || q.client?.email || '').trim());
+
+                        return (
                         <div key={q.id} className="premium-card p-4 flex flex-col justify-between group">
                             <div className="space-y-3">
                                 <div className="flex justify-between items-start">
@@ -969,10 +1020,48 @@ const Quotations: React.FC = () => {
                                     Ver Documento
                                 </button>
 
+                                <button
+                                    onClick={() => openQuoteViaWhatsApp(q)}
+                                    disabled={!hasWhatsappTarget || hasPendingDiscountBlock}
+                                    className={`px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasWhatsappTarget || hasPendingDiscountBlock
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                            : 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-600 hover:text-white'
+                                        }`}
+                                    title={
+                                        hasPendingDiscountBlock
+                                            ? 'Cotización bloqueada por aprobación de descuento'
+                                            : hasWhatsappTarget
+                                                ? 'Enviar por WhatsApp'
+                                                : 'Cliente sin celular válido'
+                                    }
+                                >
+                                    <MessageSquare size={12} className="mr-1" />
+                                    WSP
+                                </button>
+
+                                <button
+                                    onClick={() => openQuoteViaEmail(q)}
+                                    disabled={!hasEmailTarget || hasPendingDiscountBlock}
+                                    className={`px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasEmailTarget || hasPendingDiscountBlock
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                            : 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-600 hover:text-white'
+                                        }`}
+                                    title={
+                                        hasPendingDiscountBlock
+                                            ? 'Cotización bloqueada por aprobación de descuento'
+                                            : hasEmailTarget
+                                                ? 'Enviar por Correo'
+                                                : 'Cliente sin correo'
+                                    }
+                                >
+                                    <Mail size={12} className="mr-1" />
+                                    Correo
+                                </button>
+
                                 {q.status !== 'approved' && (
                                     <button
                                         onClick={() => handleConvertToOrder(q)}
-                                        disabled={submitting || q.status === 'rejected' || q.discount_approval?.status === 'pending' || q.discount_approval?.status === 'rejected'}
+                                        disabled={submitting || q.status === 'rejected' || hasPendingDiscountBlock}
                                         className="bg-green-50 text-green-600 px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border border-green-100 active:scale-95 transition-all flex items-center justify-center hover:bg-green-600 hover:text-white"
                                         title="Convertir en Venta Real"
                                     >
@@ -1022,7 +1111,7 @@ const Quotations: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-                    ))
+                    )})
                 )}
             </div>
 
