@@ -17,6 +17,7 @@ type Client = Database['public']['Tables']['clients']['Row'];
 // Google Maps Setup
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 const SANTIAGO_CENTER = { lat: -33.4489, lng: -70.6693 };
+const ASSIGNABLE_ROLES = ['seller', 'jefe', 'manager', 'admin'];
 
 // Helper to auto-pan map when location changes
 const MapHandler = ({ place }: { place: { lat: number; lng: number } | null }) => {
@@ -157,6 +158,7 @@ const ClientsContent = () => {
     const [poolAssigneeId, setPoolAssigneeId] = useState<string>('');
     const isSellerRole = effectiveRole === 'seller';
     const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canAssignClientOwner = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
@@ -174,7 +176,8 @@ const ClientsContent = () => {
         notes: '',
         giro: '',
         comuna: '',
-        office: ''
+        office: '',
+        assignedSellerId: ''
     });
 
     // Maps State for Modal
@@ -333,7 +336,7 @@ const ClientsContent = () => {
         const { data } = await supabase.from('profiles').select('id, email, full_name, role');
         if (data) {
             setProfiles(data);
-            const firstAssignable = data.find((p) => ['seller', 'jefe', 'manager'].includes((p.role || '').toLowerCase()));
+            const firstAssignable = data.find((p) => ASSIGNABLE_ROLES.includes((p.role || '').toLowerCase()));
             if (firstAssignable && !poolAssigneeId) {
                 setPoolAssigneeId(firstAssignable.id);
             }
@@ -361,7 +364,8 @@ const ClientsContent = () => {
                 notes: clientToEdit.notes || '',
                 giro: clientToEdit.giro || '',
                 comuna: clientToEdit.comuna || '',
-                office: clientToEdit.office || ''
+                office: clientToEdit.office || '',
+                assignedSellerId: clientToEdit.created_by || ''
             });
             if (clientToEdit.lat && clientToEdit.lng) {
                 setManualLocation({ lat: clientToEdit.lat, lng: clientToEdit.lng });
@@ -381,7 +385,8 @@ const ClientsContent = () => {
                 notes: '',
                 giro: '',
                 comuna: '',
-                office: ''
+                office: '',
+                assignedSellerId: profile?.id || ''
             });
             setManualLocation(null);
         }
@@ -452,6 +457,11 @@ const ClientsContent = () => {
             setSubmitting(false);
             return;
         }
+        if (canAssignClientOwner && !clientForm.assignedSellerId) {
+            alert('Selecciona el vendedor asignado para este cliente.');
+            setSubmitting(false);
+            return;
+        }
 
         // --- GEOCODING FALLBACK (DOBLE VERIFICACIÓN) ---
         // Si las coordenadas son las de Stgo Centro (default) o nulas, PERO tenemos dirección escrita...
@@ -507,7 +517,8 @@ const ClientsContent = () => {
                         notes: clientForm.notes,
                         giro: clientForm.giro,
                         comuna: finalComuna,
-                        office: clientForm.office
+                        office: clientForm.office,
+                        ...(canAssignClientOwner ? { created_by: clientForm.assignedSellerId, pending_seller_email: null } : {})
                     })
                     .eq('id', isEditing);
 
@@ -545,7 +556,8 @@ const ClientsContent = () => {
                         lat: finalLat,
                         lng: finalLng,
                         notes: clientForm.notes,
-                        created_by: profile?.id,
+                        created_by: canAssignClientOwner ? clientForm.assignedSellerId : profile?.id,
+                        pending_seller_email: null,
                         status: 'active',
                         zone: 'Santiago',
                         giro: clientForm.giro,
@@ -879,7 +891,7 @@ const ClientsContent = () => {
     }, [profiles]);
 
     const sellerOptions = useMemo(
-        () => profiles.filter((p) => ['seller', 'jefe', 'manager'].includes((p.role || '').toLowerCase())),
+        () => profiles.filter((p) => ASSIGNABLE_ROLES.includes((p.role || '').toLowerCase())),
         [profiles]
     );
 
@@ -1575,6 +1587,30 @@ const ClientsContent = () => {
                                                 />
                                             </div>
                                         </div>
+
+                                        {canAssignClientOwner && (
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Vendedor Asignado <span className="text-red-500">*</span></label>
+                                                <select
+                                                    required
+                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                    value={clientForm.assignedSellerId}
+                                                    onChange={e => setClientForm({ ...clientForm, assignedSellerId: e.target.value })}
+                                                >
+                                                    <option value="">Selecciona vendedor</option>
+                                                    {sellerOptions.map((seller) => (
+                                                        <option key={seller.id} value={seller.id}>
+                                                            {seller.full_name || seller.email}
+                                                        </option>
+                                                    ))}
+                                                    {clientForm.assignedSellerId && !sellerOptions.some((s) => s.id === clientForm.assignedSellerId) && (
+                                                        <option value={clientForm.assignedSellerId}>
+                                                            {ownersById[clientForm.assignedSellerId] || 'Vendedor actual'}
+                                                        </option>
+                                                    )}
+                                                </select>
+                                            </div>
+                                        )}
 
                                         <div className="space-y-2">
                                             <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Notas Internas <span className="text-gray-300 font-normal lowercase tracking-normal">(opcional)</span></label>
