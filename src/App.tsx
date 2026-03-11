@@ -17,6 +17,7 @@ const Clients = lazy(() => import('./pages/Clients'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const TeamStats = lazy(() => import('./pages/TeamStats'));
 const Quotations = lazy(() => import('./pages/Quotations'));
+const Orders = lazy(() => import('./pages/Orders'));
 const SellerRoutes = lazy(() => import('./pages/SellerRoutes'));
 const Pipeline = lazy(() => import('./pages/Pipeline'));
 const LeadPipeline = lazy(() => import('./pages/LeadPipeline'));
@@ -187,6 +188,7 @@ function App() {
                                 <Route path="schedule" element={<Schedule />} />
                                 <Route path="clients" element={<Clients />} />
                                 <Route path="quotations" element={<Quotations />} />
+                                <Route path="orders" element={<Orders />} />
                                 <Route path="conversions" element={<ConversionsRanking />} />
                                 <Route path="routes" element={<NonAdministrativeGuard><SellerRoutes /></NonAdministrativeGuard>} />
                                 <Route path="inventory" element={<Inventory />} />

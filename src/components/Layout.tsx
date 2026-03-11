@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone } from 'lucide-react';
+import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -29,6 +29,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     menuItems.push({ icon: <Users size={20} />, label: 'Clientes', path: '/clients' });
     menuItems.push({ icon: <ShoppingBag size={20} />, label: 'Cotizaciones', path: '/quotations' });
+    menuItems.push({ icon: <ShoppingCart size={20} />, label: 'Pedidos', path: '/orders' });
     menuItems.push({ icon: <Trophy size={20} />, label: 'Conversiones', path: '/conversions' });
 
     if (effectiveRole !== 'administrativo') {
@@ -51,6 +52,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     if (effectiveRole === 'driver') {
         menuItems.length = 0;
         menuItems.push({ icon: <LayoutDashboard size={20} />, label: 'Mi Panel', path: '/' });
+        menuItems.push({ icon: <ShoppingCart size={20} />, label: 'Pedidos', path: '/orders' });
         menuItems.push({ icon: <Truck size={20} />, label: 'Ruta', path: '/delivery' });
         menuItems.push({ icon: <Trophy size={20} />, label: 'Conversiones', path: '/conversions' });
     } else if (isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'administrativo') {
