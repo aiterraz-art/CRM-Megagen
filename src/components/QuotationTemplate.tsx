@@ -45,6 +45,14 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
     const [previewScale, setPreviewScale] = React.useState(1);
     const [previewHeight, setPreviewHeight] = React.useState(1400);
     const [zoomMultiplier, setZoomMultiplier] = React.useState(1);
+    const companyName = import.meta.env.VITE_COMPANY_NAME || 'MEGAGEN IMPLANT';
+    const companyLogo = import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png';
+    const is3DentalCompany = companyName.toLowerCase().includes('3dental');
+    const companyGiro = import.meta.env.VITE_COMPANY_GIRO || 'Venta insumos dentales';
+    const companyAddress = import.meta.env.VITE_COMPANY_ADDRESS || (is3DentalCompany ? 'Americo Vespucion 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
+    const companyPhone = import.meta.env.VITE_COMPANY_PHONE || '961183899';
+    const companyEmail = import.meta.env.VITE_COMPANY_EMAIL || import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
+    const companyRut = import.meta.env.VITE_COMPANY_RUT || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
 
     // Robust parsing: items could be a string (JSON) or an object
     let items: QuotationItem[] = [];
@@ -337,17 +345,17 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                         <div className="flex justify-between items-start mb-10">
                             <div className="space-y-1">
                                 <div className="flex items-center space-x-2 mb-4">
-                                    <img src={import.meta.env.VITE_COMPANY_LOGO || "/logo_megagen.png"} alt={import.meta.env.VITE_COMPANY_NAME || "Megagen"} className="h-16 w-auto" />
+                                    <img src={companyLogo} alt={companyName} className="h-16 w-auto" />
                                 </div>
-                                <p className="font-bold text-xs uppercase">{import.meta.env.VITE_COMPANY_NAME || 'MEGAGEN IMPLANT'}</p>
-                                <p>{import.meta.env.VITE_COMPANY_GIRO || 'Venta insumos dentales'}</p>
-                                <p>{import.meta.env.VITE_COMPANY_ADDRESS || 'Avenida Americo Vespucio 2880 of 1403, CONCHALI'}</p>
-                                <p>Teléfono: {import.meta.env.VITE_COMPANY_PHONE || '961183899'}</p>
-                                <p>Email: <span className="text-blue-600 underline">{import.meta.env.VITE_COMPANY_EMAIL || 'aterraza@imegagen.cl'}</span></p>
+                                <p className="font-bold text-xs uppercase">{companyName}</p>
+                                <p>{companyGiro}</p>
+                                <p>{companyAddress}</p>
+                                <p>Telefono: {companyPhone}</p>
+                                <p>Email: <span className="text-blue-600 underline">{companyEmail}</span></p>
                             </div>
 
                             <div className="w-64 border-2 border-orange-400 p-4 text-center rounded-lg space-y-2">
-                                <p className="text-orange-500 font-extrabold text-sm tracking-widest">R.U.T: {import.meta.env.VITE_COMPANY_RUT || '76.921.029-6'}</p>
+                                <p className="text-orange-500 font-extrabold text-sm tracking-widest">R.U.T: {companyRut}</p>
                                 <p className="text-orange-500 font-black text-lg uppercase tracking-wider">Cotización</p>
                                 <p className="text-orange-500 font-extrabold text-sm uppercase">Folio N° {data.folio}</p>
                             </div>

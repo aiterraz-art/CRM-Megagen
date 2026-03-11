@@ -29,6 +29,9 @@ const DeliveryNoteTemplate: React.FC<Props> = ({ data, onClose }) => {
     const contentRef = useRef<HTMLDivElement>(null);
     const companyName = import.meta.env.VITE_COMPANY_NAME || 'Mi Empresa';
     const companyLogo = import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png';
+    const is3DentalCompany = companyName.toLowerCase().includes('3dental');
+    const companyRut = import.meta.env.VITE_COMPANY_RUT || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
+    const companyAddress = import.meta.env.VITE_COMPANY_ADDRESS || (is3DentalCompany ? 'Americo Vespucion 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
 
     const handlePrint = () => {
         window.print();
@@ -68,6 +71,8 @@ const DeliveryNoteTemplate: React.FC<Props> = ({ data, onClose }) => {
                             <div>
                                 <p className="font-black text-xl uppercase tracking-tighter">{companyName}</p>
                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Guía de Despacho</p>
+                                <p className="text-[11px] font-bold text-gray-600 mt-1">RUT: {companyRut}</p>
+                                <p className="text-[11px] text-gray-500">{companyAddress}</p>
                             </div>
                         </div>
 
