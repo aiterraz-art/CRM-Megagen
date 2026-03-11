@@ -309,6 +309,7 @@ export interface Database {
                     total_amount: number | null
                     payment_terms: Json | null
                     status: string | null
+                    sent_at: string | null
                     folio: number | null
                     comments: string | null
                     interaction_type: string | null
@@ -322,6 +323,7 @@ export interface Database {
                     total_amount?: number | null
                     payment_terms?: Json | null
                     status?: string | null
+                    sent_at?: string | null
                     folio?: number | null
                     comments?: string | null
                     interaction_type?: string | null
@@ -335,6 +337,7 @@ export interface Database {
                     total_amount?: number | null
                     payment_terms?: Json | null
                     status?: string | null
+                    sent_at?: string | null
                     folio?: number | null
                     comments?: string | null
                     interaction_type?: string | null

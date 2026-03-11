@@ -25,10 +25,15 @@ interface Quotation {
     total_amount: number;
     stage: string;
     status?: string | null;
+    sent_at?: string | null;
+    comments?: string | null;
+    autoLostByNoResponse?: boolean;
     created_at: string;
     clients: any; // Supabase can return object or array depending on relationship setup
     folio: number;
 }
+
+const AUTO_LOST_MESSAGE = '3 dias sin respuesta negociacion perdida';
 
 const normalizeStage = (stage: string | null | undefined): string => {
     const value = (stage || '').toLowerCase().trim();
@@ -55,6 +60,11 @@ const statusFromStage = (stage: string): string => {
     return 'draft';
 };
 
+const hasAutoLostNoResponse = (comments: string | null | undefined): boolean => {
+    const normalized = String(comments || '').toLowerCase();
+    return normalized.includes(AUTO_LOST_MESSAGE);
+};
+
 const Pipeline = () => {
     const { profile, effectiveRole } = useUser();
     const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -76,6 +86,11 @@ const Pipeline = () => {
         try {
             setLoading(true);
             setFetchError(null);
+            try {
+                await supabase.rpc('expire_stale_sent_quotations', { p_days: 3 });
+            } catch (expireError) {
+                console.warn('No se pudo ejecutar expiración automática de cotizaciones enviadas:', expireError);
+            }
             let queryWithStage = supabase
                 .from('quotations')
                 .select(`
@@ -85,6 +100,8 @@ const Pipeline = () => {
                     total_amount, 
                     stage, 
                     status,
+                    sent_at,
+                    comments,
                     created_at, 
                     folio,
                     clients (name)
@@ -109,6 +126,8 @@ const Pipeline = () => {
                         seller_id,
                         total_amount,
                         status,
+                        sent_at,
+                        comments,
                         created_at,
                         folio,
                         clients (name)
@@ -140,7 +159,8 @@ const Pipeline = () => {
             const normalizedQuotes = ((data || []) as any[]).map((q) => ({
                 ...q,
                 stage: usingStage ? normalizeStage(q.stage) : stageFromStatus(q.status),
-                seller_name: q.seller_id ? sellersById[q.seller_id] || 'Vendedor' : 'Sin vendedor'
+                seller_name: q.seller_id ? sellersById[q.seller_id] || 'Vendedor' : 'Sin vendedor',
+                autoLostByNoResponse: stageFromStatus(q.status) === 'lost' && hasAutoLostNoResponse(q.comments)
             }));
             setQuotations(normalizedQuotes as Quotation[]);
 
@@ -170,9 +190,19 @@ const Pipeline = () => {
         setQuotations(updatedQuotations);
 
         // API Call
+        const updatePayload: any = supportsStageColumn
+            ? { stage: newStage, status: statusFromStage(newStage) }
+            : { status: statusFromStage(newStage) };
+        if (newStage === 'sent') {
+            updatePayload.sent_at = new Date().toISOString();
+        }
+        if (newStage === 'new') {
+            updatePayload.sent_at = null;
+        }
+
         const { error } = await supabase
             .from('quotations')
-            .update(supportsStageColumn ? ({ stage: newStage } as any) : ({ status: statusFromStage(newStage) } as any))
+            .update(updatePayload)
             .eq('id', draggableId);
 
         if (error) {
@@ -377,6 +407,11 @@ const Pipeline = () => {
                                                                     {formatCurrency(quote.total_amount || 0)}
                                                                 </span>
                                                             </div>
+                                                            {normalizeStage(quote.stage) === 'lost' && quote.autoLostByNoResponse && (
+                                                                <p className="mt-1 text-[9px] font-black text-red-600 leading-tight">
+                                                                    ({AUTO_LOST_MESSAGE})
+                                                                </p>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </Draggable>

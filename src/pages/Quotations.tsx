@@ -90,11 +90,60 @@ const Quotations: React.FC = () => {
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
     );
 
+    const markQuotationAsSent = useCallback(async (quotationId: string) => {
+        if (!quotationId) return;
+
+        const nowIso = new Date().toISOString();
+        const basePayload: any = { status: 'sent', sent_at: nowIso };
+
+        let updateError: any = null;
+        try {
+            const withStagePayload: any = { ...basePayload, stage: 'sent' };
+            const withStageRes = await supabase
+                .from('quotations')
+                .update(withStagePayload)
+                .eq('id', quotationId);
+            updateError = withStageRes.error;
+
+            if (updateError && String(updateError.message || '').toLowerCase().includes('column') && String(updateError.message || '').toLowerCase().includes('stage')) {
+                const fallbackRes = await supabase
+                    .from('quotations')
+                    .update(basePayload)
+                    .eq('id', quotationId);
+                updateError = fallbackRes.error;
+            }
+        } catch (error: any) {
+            updateError = error;
+        }
+
+        if (updateError) {
+            console.warn('No se pudo marcar cotización como enviada:', updateError?.message || updateError);
+            return;
+        }
+
+        setQuotations((prev) => prev.map((quote) => (
+            quote.id === quotationId
+                ? { ...quote, status: 'sent', sent_at: nowIso, stage: 'sent' }
+                : quote
+        )));
+        setSelectedForTemplate((prev: any) => (
+            prev?.id === quotationId
+                ? { ...prev, status: 'sent', sent_at: nowIso, stage: 'sent' }
+                : prev
+        ));
+    }, []);
+
     const fetchQuotations = useCallback(async () => {
         setLoading(true);
         setFetchError(null);
 
         try {
+            try {
+                await supabase.rpc('expire_stale_sent_quotations', { p_days: 3 });
+            } catch (expireError) {
+                console.warn('No se pudo ejecutar expiración automática de cotizaciones enviadas:', expireError);
+            }
+
             let query = supabase
                 .from('quotations')
                 .select(`
@@ -1028,6 +1077,9 @@ const Quotations: React.FC = () => {
                                 sellerEmail: selectedForTemplate.seller_email,
                                 items: selectedForTemplate.items || [],
                                 comments: selectedForTemplate.comments
+                            }}
+                            onMarkedAsSent={async () => {
+                                await markQuotationAsSent(selectedForTemplate.id);
                             }}
                             canShareAndDownload={!blockedByDiscountApproval}
                             shareBlockReason={shareBlockReason}

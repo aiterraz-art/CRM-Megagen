@@ -37,9 +37,10 @@ interface Props {
     onClose: () => void;
     canShareAndDownload?: boolean;
     shareBlockReason?: string;
+    onMarkedAsSent?: (action: 'share' | 'download') => Promise<void> | void;
 }
 
-const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload = true, shareBlockReason }) => {
+const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload = true, shareBlockReason, onMarkedAsSent }) => {
     const contentRef = React.useRef<HTMLDivElement>(null);
     const viewportRef = React.useRef<HTMLDivElement>(null);
     const [generatingPdf, setGeneratingPdf] = React.useState(false);
@@ -175,6 +176,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
         }
         setGeneratingPdf(true);
         try {
+            let shared = false;
             const pdfBlob = await generatePdfBlob();
             if (!pdfBlob) return;
 
@@ -186,11 +188,21 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                     title: `Cotización ${data.folio}`,
                     text: `Adjunto cotización formal Folio Nº ${data.folio} de ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}.`,
                 });
+                shared = true;
             } else {
                 // Fallback to text share if files are not supported
                 const shareText = `Estimado(a) ${data.clientName},\n\nLe adjunto la cotización Folio Nº ${data.folio} de ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}.\n\nTotal: $${total.toLocaleString()}\nVendedor: ${data.sellerName}\n\nGracias por su confianza.`;
                 const waUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
                 window.open(waUrl, '_blank');
+                shared = true;
+            }
+
+            if (shared && onMarkedAsSent) {
+                try {
+                    await onMarkedAsSent('share');
+                } catch (markError) {
+                    console.warn('No se pudo marcar la cotización como enviada tras compartir:', markError);
+                }
             }
         } catch (err) {
             console.error('Error sharing:', err);
@@ -216,6 +228,14 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                 link.click();
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
+
+                if (onMarkedAsSent) {
+                    try {
+                        await onMarkedAsSent('download');
+                    } catch (markError) {
+                        console.warn('No se pudo marcar la cotización como enviada tras descargar:', markError);
+                    }
+                }
             }
         } catch (error) {
             console.error("Error downloading PDF:", error);
