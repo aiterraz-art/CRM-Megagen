@@ -110,6 +110,7 @@ const SellerDashboard = () => {
                         .from('orders')
                         .select('total_amount, status, created_at')
                         .eq('user_id', profile.id)
+                        .not('quotation_id', 'is', null)
                         .gte('created_at', monthStart.toISOString())
                         .lte('created_at', monthEnd.toISOString());
                 })(),

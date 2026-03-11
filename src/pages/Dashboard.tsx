@@ -154,6 +154,7 @@ const Dashboard = () => {
                     .from('orders')
                     .select('total_amount, status, created_at')
                     .eq('user_id', profile.id)
+                    .not('quotation_id', 'is', null)
                     .gte('created_at', firstDayOfMonth)
                     .lte('created_at', lastDayOfMonth);
 
@@ -212,6 +213,7 @@ const Dashboard = () => {
                     .from('orders')
                     .select('created_at')
                     .eq('user_id', profile.id)
+                    .not('quotation_id', 'is', null)
                     .gte('created_at', sevenDaysAgo.toISOString());
 
                 const activityMap = new Map<string, { name: string; visits: number; orders: number }>();
@@ -357,7 +359,7 @@ const Dashboard = () => {
                     // 1. Visits
                     const { data: vData } = await supabase.from('visits').select('client_id, check_in_time, check_out_time').eq('sales_rep_id', seller.id).gte('check_in_time', isoStart).lte('check_in_time', isoEnd);
                     // 2. Orders
-                    const { data: oData } = await supabase.from('orders').select('id, client_id, total_amount, visit_id').eq('user_id', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
+                    const { data: oData } = await supabase.from('orders').select('id, client_id, total_amount, visit_id').eq('user_id', seller.id).not('quotation_id', 'is', null).gte('created_at', isoStart).lte('created_at', isoEnd);
                     // 3. Calls
                     const { data: lData } = await supabase.from('call_logs').select('client_id').eq('user_id', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
                     // 4. Quotations
@@ -370,7 +372,7 @@ const Dashboard = () => {
                     const firstDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)).toISOString();
                     const lastDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
                     const { data: sellerGoal } = await supabase.from('goals').select('target_amount').eq('user_id', seller.id).eq('month', currentMonth).eq('year', currentYear).maybeSingle();
-                    const { data: mOrders } = await supabase.from('orders').select('total_amount').eq('user_id', seller.id).gte('created_at', firstDayOfMonth).lte('created_at', lastDayOfMonth);
+                    const { data: mOrders } = await supabase.from('orders').select('total_amount').eq('user_id', seller.id).not('quotation_id', 'is', null).gte('created_at', firstDayOfMonth).lte('created_at', lastDayOfMonth);
 
                     let sellerMonthSales = 0;
                     mOrders?.forEach(o => sellerMonthSales += o.total_amount || 0);
@@ -430,7 +432,7 @@ const Dashboard = () => {
             } else if (profile && !hasPermission('VIEW_TEAM_STATS')) {
                 // Seller Stats
                 const { data: visits } = await supabase.from('visits').select('*, clients(name, zone)').eq('sales_rep_id', profile.id).gte('check_in_time', isoStart).lte('check_in_time', isoEnd).order('check_in_time', { ascending: false });
-                const { data: orders } = await supabase.from('orders').select('*, clients(name, zone)').eq('user_id', profile.id).gte('created_at', isoStart).lte('created_at', isoEnd);
+                const { data: orders } = await supabase.from('orders').select('*, clients(name, zone)').eq('user_id', profile.id).not('quotation_id', 'is', null).gte('created_at', isoStart).lte('created_at', isoEnd);
                 const { data: logs } = await supabase.from('call_logs').select('*, clients(name, zone)').eq('user_id', profile.id).gte('created_at', isoStart).lte('created_at', isoEnd);
                 const { data: quotations } = await supabase.from('quotations').select('*, clients(name, zone)').eq('seller_id', profile.id).gte('created_at', isoStart).lte('created_at', isoEnd);
 

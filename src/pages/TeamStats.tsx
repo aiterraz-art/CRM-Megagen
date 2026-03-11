@@ -204,6 +204,7 @@ const TeamStats = () => {
             .from('orders')
             .select('id, user_id, status, total_amount, created_at')
             .in('user_id', subordinatesIds)
+            .not('quotation_id', 'is', null)
             .gte('created_at', monthStart.toISOString())
             .lte('created_at', monthEnd.toISOString());
 
