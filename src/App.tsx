@@ -1,40 +1,45 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './services/supabase';
 import { Session } from '@supabase/supabase-js';
 import { UserProvider } from './contexts/UserContext';
 import { useUser } from './contexts/UserContext';
 import { VisitProvider } from './contexts/VisitContext';
 import { startLocationQueueWorker } from './services/locationQueue';
+import { lazyRetry } from './utils/lazyRetry';
 
-const MapView = lazy(() => import('./pages/MapView'));
-const VisitLog = lazy(() => import('./pages/VisitLog'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Login = lazy(() => import('./pages/Login'));
-const Schedule = lazy(() => import('./pages/Schedule'));
-const Clients = lazy(() => import('./pages/Clients'));
-const Inventory = lazy(() => import('./pages/Inventory'));
-const TeamStats = lazy(() => import('./pages/TeamStats'));
-const Quotations = lazy(() => import('./pages/Quotations'));
-const Orders = lazy(() => import('./pages/Orders'));
-const SellerRoutes = lazy(() => import('./pages/SellerRoutes'));
-const Pipeline = lazy(() => import('./pages/Pipeline'));
-const LeadPipeline = lazy(() => import('./pages/LeadPipeline'));
-const LeadMessages = lazy(() => import('./pages/LeadMessages'));
-const MetaLeads = lazy(() => import('./pages/MetaLeads'));
-const ColdVisit = lazy(() => import('./pages/ColdVisit'));
-const Dispatch = lazy(() => import('./pages/Dispatch'));
-const DeliveryRoute = lazy(() => import('./pages/DeliveryRoute'));
-const DriverDashboard = lazy(() => import('./pages/DriverDashboard'));
-const SellerDashboard = lazy(() => import('./pages/SellerDashboard'));
-const AdministrativeDashboard = lazy(() => import('./pages/AdministrativeDashboard'));
-const Settings = lazy(() => import('./pages/Settings'));
-const VisitHistory = lazy(() => import('./pages/VisitHistory'));
-const OperationsCenter = lazy(() => import('./pages/OperationsCenter'));
-const Collections = lazy(() => import('./pages/Collections'));
-const MyDeliveries = lazy(() => import('./pages/MyDeliveries'));
-const ConversionsRanking = lazy(() => import('./pages/ConversionsRanking'));
+const loadable = <T extends React.ComponentType<any>>(importer: () => Promise<{ default: T }>) =>
+    lazy(() => lazyRetry(importer));
+
+const MapView = loadable(() => import('./pages/MapView'));
+const VisitLog = loadable(() => import('./pages/VisitLog'));
+const Dashboard = loadable(() => import('./pages/Dashboard'));
+const Login = loadable(() => import('./pages/Login'));
+const Schedule = loadable(() => import('./pages/Schedule'));
+const Clients = loadable(() => import('./pages/Clients'));
+const Inventory = loadable(() => import('./pages/Inventory'));
+const TeamStats = loadable(() => import('./pages/TeamStats'));
+const Quotations = loadable(() => import('./pages/Quotations'));
+const Orders = loadable(() => import('./pages/Orders'));
+const SellerRoutes = loadable(() => import('./pages/SellerRoutes'));
+const Pipeline = loadable(() => import('./pages/Pipeline'));
+const LeadPipeline = loadable(() => import('./pages/LeadPipeline'));
+const LeadMessages = loadable(() => import('./pages/LeadMessages'));
+const MetaLeads = loadable(() => import('./pages/MetaLeads'));
+const ColdVisit = loadable(() => import('./pages/ColdVisit'));
+const Dispatch = loadable(() => import('./pages/Dispatch'));
+const DeliveryRoute = loadable(() => import('./pages/DeliveryRoute'));
+const DriverDashboard = loadable(() => import('./pages/DriverDashboard'));
+const SellerDashboard = loadable(() => import('./pages/SellerDashboard'));
+const AdministrativeDashboard = loadable(() => import('./pages/AdministrativeDashboard'));
+const Settings = loadable(() => import('./pages/Settings'));
+const VisitHistory = loadable(() => import('./pages/VisitHistory'));
+const OperationsCenter = loadable(() => import('./pages/OperationsCenter'));
+const Collections = loadable(() => import('./pages/Collections'));
+const MyDeliveries = loadable(() => import('./pages/MyDeliveries'));
+const ConversionsRanking = loadable(() => import('./pages/ConversionsRanking'));
 
 const ScreenLoader = () => (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -167,47 +172,57 @@ function App() {
         return children;
     };
 
+    const AppRoutesWithRecovery = () => {
+        const location = useLocation();
+
+        return (
+            <ErrorBoundary resetKey={location.pathname} fullScreen>
+                <Suspense fallback={<ScreenLoader />}>
+                    <Routes>
+                        <Route path="/login" element={!session ? <Login /> : <Navigate to="/" />} />
+
+                        <Route path="/" element={session ? (
+                            <AuthGuard>
+                                <Layout />
+                            </AuthGuard>
+                        ) : <Navigate to="/login" />}>
+                            <Route index element={<RoleBasedDashboard />} />
+                            <Route path="cold-visit" element={<NonAdministrativeGuard><ColdVisit /></NonAdministrativeGuard>} />
+                            <Route path="map" element={<NonAdministrativeGuard><MapView /></NonAdministrativeGuard>} />
+                            <Route path="visit/:clientId" element={<VisitLog />} />
+                            <Route path="visits" element={<NonAdministrativeGuard><NonSellerGuard><VisitHistory /></NonSellerGuard></NonAdministrativeGuard>} />
+                            <Route path="schedule" element={<Schedule />} />
+                            <Route path="clients" element={<Clients />} />
+                            <Route path="quotations" element={<Quotations />} />
+                            <Route path="orders" element={<Orders />} />
+                            <Route path="conversions" element={<ConversionsRanking />} />
+                            <Route path="routes" element={<NonAdministrativeGuard><SellerRoutes /></NonAdministrativeGuard>} />
+                            <Route path="inventory" element={<Inventory />} />
+                            <Route path="team" element={<NonAdministrativeGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonAdministrativeGuard>} />
+                            <Route path="pipeline" element={<NonAdministrativeGuard><Pipeline /></NonAdministrativeGuard>} />
+                            <Route path="lead-pipeline" element={<LeadModuleGuard><LeadPipeline /></LeadModuleGuard>} />
+                            <Route path="meta-leads" element={<MetaLeadsGuard><MetaLeads /></MetaLeadsGuard>} />
+                            <Route path="lead-messages" element={<LeadModuleGuard><LeadMessages /></LeadModuleGuard>} />
+                            <Route path="dispatch" element={<Dispatch />} />
+                            <Route path="delivery" element={<DeliveryRoute />} />
+                            <Route path="my-deliveries" element={<MyDeliveries />} />
+                            <Route path="operations" element={<OperationsCenter />} />
+                            <Route path="collections" element={<NonAdministrativeGuard><Collections /></NonAdministrativeGuard>} />
+                            <Route path="settings" element={<Settings />} />
+                        </Route>
+
+                        <Route path="*" element={<Navigate to="/" />} />
+                    </Routes>
+                </Suspense>
+            </ErrorBoundary>
+        );
+    };
+
     return (
         <UserProvider>
             <VisitProvider>
                 <Router>
-                    <Suspense fallback={<ScreenLoader />}>
-                        <Routes>
-                            <Route path="/login" element={!session ? <Login /> : <Navigate to="/" />} />
-
-                            <Route path="/" element={session ? (
-                                <AuthGuard>
-                                    <Layout />
-                                </AuthGuard>
-                            ) : <Navigate to="/login" />}>
-                                <Route index element={<RoleBasedDashboard />} />
-                                <Route path="cold-visit" element={<NonAdministrativeGuard><ColdVisit /></NonAdministrativeGuard>} />
-                                <Route path="map" element={<NonAdministrativeGuard><MapView /></NonAdministrativeGuard>} />
-                                <Route path="visit/:clientId" element={<VisitLog />} />
-                                <Route path="visits" element={<NonAdministrativeGuard><NonSellerGuard><VisitHistory /></NonSellerGuard></NonAdministrativeGuard>} />
-                                <Route path="schedule" element={<Schedule />} />
-                                <Route path="clients" element={<Clients />} />
-                                <Route path="quotations" element={<Quotations />} />
-                                <Route path="orders" element={<Orders />} />
-                                <Route path="conversions" element={<ConversionsRanking />} />
-                                <Route path="routes" element={<NonAdministrativeGuard><SellerRoutes /></NonAdministrativeGuard>} />
-                                <Route path="inventory" element={<Inventory />} />
-                                <Route path="team" element={<NonAdministrativeGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonAdministrativeGuard>} />
-                                <Route path="pipeline" element={<NonAdministrativeGuard><Pipeline /></NonAdministrativeGuard>} />
-                                <Route path="lead-pipeline" element={<LeadModuleGuard><LeadPipeline /></LeadModuleGuard>} />
-                                <Route path="meta-leads" element={<MetaLeadsGuard><MetaLeads /></MetaLeadsGuard>} />
-                                <Route path="lead-messages" element={<LeadModuleGuard><LeadMessages /></LeadModuleGuard>} />
-                                <Route path="dispatch" element={<Dispatch />} />
-                                <Route path="delivery" element={<DeliveryRoute />} />
-                                <Route path="my-deliveries" element={<MyDeliveries />} />
-                                <Route path="operations" element={<OperationsCenter />} />
-                                <Route path="collections" element={<NonAdministrativeGuard><Collections /></NonAdministrativeGuard>} />
-                                <Route path="settings" element={<Settings />} />
-                            </Route>
-
-                            <Route path="*" element={<Navigate to="/" />} />
-                        </Routes>
-                    </Suspense>
+                    <AppRoutesWithRecovery />
                 </Router>
             </VisitProvider>
         </UserProvider>

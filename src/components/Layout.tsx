@@ -83,7 +83,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const closeMenu = () => setIsMobileMenuOpen(false);
 
     return (
-        <div className="flex h-full bg-premium-bg overflow-hidden font-outfit">
+        <div className="flex h-full max-w-full bg-premium-bg overflow-hidden font-outfit">
             {/* Backdrop for mobile */}
             {isMobileMenuOpen && (
                 <div
@@ -178,7 +178,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+            <main className="flex-1 flex flex-col h-full max-w-full overflow-hidden relative">
                 {realRole === 'admin' && simulatedRole && (
                     <div className="h-12 bg-amber-500 text-white flex items-center justify-center gap-3 px-4 shrink-0 border-b border-amber-400">
                         <span className="text-[11px] font-black uppercase tracking-wider">
@@ -208,7 +208,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                     </button>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 lg:p-12">
                     {children || <Outlet />}
 
                     <div className="mt-12 py-6 border-t border-gray-100/50 text-center">
