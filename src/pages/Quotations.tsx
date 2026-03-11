@@ -353,6 +353,19 @@ const Quotations: React.FC = () => {
         return null;
     }, [products]);
 
+    const getEffectiveDiscountPct = useCallback((item: any) => {
+        const inventoryProduct = resolveInventoryProduct(item);
+        const catalogPrice = Number(inventoryProduct?.price || 0);
+        const fallbackPrice = Number(item?.price || 0);
+        const referencePrice = catalogPrice > 0 ? catalogPrice : fallbackPrice;
+        const netPrice = Math.max(0, Number(item?.netPrice ?? item?.price ?? 0));
+
+        if (referencePrice <= 0) return Math.max(0, Number(item?.discountPct || 0));
+
+        const discount = ((referencePrice - netPrice) / referencePrice) * 100;
+        return Math.max(0, Number(discount.toFixed(2)));
+    }, [resolveInventoryProduct]);
+
     const isDispatchServiceProduct = useCallback((product: any | null) => {
         if (!product) return false;
         const skuKey = normalizeProductKey(String(product.sku || ''));
@@ -431,7 +444,7 @@ const Quotations: React.FC = () => {
             setCreateError('Para pago a crédito debes indicar días mayores a 0.');
             return;
         }
-        const maxDiscountPct = normalizedItems.reduce((max, item) => Math.max(max, Number(item.discountPct || 0)), 0);
+        const maxDiscountPct = normalizedItems.reduce((max, item) => Math.max(max, getEffectiveDiscountPct(item)), 0);
         const requiresApproval = isSellerRole && maxDiscountPct > SELLER_MAX_DISCOUNT_PCT;
         const hasPendingApproval = editingQuotation?.discount_approval?.status === 'pending';
         const shouldCreateApprovalRequest = requiresApproval && !hasPendingApproval;
@@ -467,7 +480,7 @@ const Quotations: React.FC = () => {
                 const qty = parseInt(item.qty) || 1;
                 const price = parseFloat(item.price) || 0;
                 const netPrice = price > 0 ? Number(item.netPrice || price) : 0;
-                const discount = price > 0 ? Number(item.discountPct || 0) : 0;
+                const discount = price > 0 ? getEffectiveDiscountPct(item) : 0;
                 return {
                     ...item,
                     product_id: inventoryProduct?.id || item.productId || null,
@@ -703,8 +716,8 @@ const Quotations: React.FC = () => {
         return filteredQuotations.filter((q) => q.discount_approval?.status === 'pending' && q.seller_id === profile?.id).length;
     }, [filteredQuotations, effectiveRole, profile?.id]);
     const formMaxDiscountPct = useMemo(() => {
-        return formItems.reduce((max, item) => Math.max(max, Number(item.discountPct || 0)), 0);
-    }, [formItems]);
+        return formItems.reduce((max, item) => Math.max(max, getEffectiveDiscountPct(item)), 0);
+    }, [formItems, getEffectiveDiscountPct]);
     const formSubtotal = useMemo(() => {
         return formItems.reduce((sum, item) => {
             const qty = Number(item.qty || 0);
@@ -1311,7 +1324,7 @@ const Quotations: React.FC = () => {
                                             </div>
                                             <div className="col-span-1 md:col-span-12 flex items-end justify-between md:justify-end gap-3">
                                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                                                    Desc. aplicado: {Number(item.discountPct || 0).toFixed(2)}%
+                                                    Desc. aplicado: {getEffectiveDiscountPct(item).toFixed(2)}%
                                                 </p>
                                                 <p className="font-black text-lg text-gray-700">$ {((item.qty || 0) * ((item.netPrice || item.price) || 0)).toLocaleString()}</p>
                                             </div>
