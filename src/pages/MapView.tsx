@@ -315,10 +315,11 @@ const MapContent = () => {
 
             <div className="flex-1 flex gap-4 overflow-hidden relative">
                 {/* Main Map */}
-                <div className="flex-1 premium-card overflow-hidden relative z-0 rounded-3xl">
+                <div className="flex-1 premium-card overflow-hidden relative z-0 rounded-3xl" style={{ minHeight: '500px', height: '100%' }}>
                     <Map
                         defaultCenter={{ lat: -33.4489, lng: -70.6693 }}
                         defaultZoom={13}
+                        style={{ width: '100%', height: '100%' }}
                         className="w-full h-full"
                         disableDefaultUI={true}
                     >
@@ -411,7 +412,7 @@ const MapContent = () => {
                                     </button>
                                     <button
                                         onClick={() => navigate('/quotations')}
-                                        className="w-full bg-white border border-gray-200 text-dental-600 py-2 rounded-xl text-[10px] font-extrabold uppercase tracking-widest hover:bg-dental-50 transition-all font-bold"
+                                        className="w-full bg-white border border-gray-200 text-dental-600 py-2 rounded-xl text-[10px] uppercase tracking-widest hover:bg-dental-50 transition-all font-bold"
                                     >
                                         New Quotation
                                     </button>
