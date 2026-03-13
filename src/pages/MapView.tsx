@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { APIProvider, Map, Marker, InfoWindow, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
+import { APIProvider, APILoadingStatus, Map, Marker, InfoWindow, useApiLoadingStatus, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { clientService } from '../services/clientService';
 import { Database } from '../types/supabase';
 import { MapPin, Search, Crosshair, Navigation, Plus, UserPlus, History, X, Calendar, Clock } from 'lucide-react';
@@ -53,6 +53,7 @@ const Circle = ({ center, radius, map }: { center: google.maps.LatLngLiteral, ra
 const MapContent = () => {
     const navigate = useNavigate();
     const map = useMap();
+    const loadingStatus = useApiLoadingStatus();
     const placesLib = useMapsLibrary('places');
 
     const [clients, setClients] = useState<Client[]>([]);
@@ -64,6 +65,7 @@ const MapContent = () => {
     const [selectedLead, setSelectedLead] = useState<google.maps.places.PlaceResult | null>(null);
     const [placesService, setPlacesService] = useState<google.maps.places.PlacesService | null>(null);
     const [isSearchingLeads, setIsSearchingLeads] = useState(false);
+    const [mapTilesReady, setMapTilesReady] = useState(false);
 
 
 
@@ -311,13 +313,13 @@ const MapContent = () => {
 
             <div className="flex-1 flex gap-4 overflow-hidden relative">
                 {/* Main Map */}
-                <div className="flex-1 premium-card overflow-hidden relative z-0 rounded-3xl" style={{ minHeight: '500px', height: '100%' }}>
+                <div className="flex-1 premium-card overflow-hidden relative z-0 rounded-3xl h-[70vh] min-h-[500px]">
                     <Map
                         defaultCenter={{ lat: -33.4489, lng: -70.6693 }}
                         defaultZoom={13}
-                        style={{ width: '100%', height: '100%' }}
                         className="w-full h-full"
                         disableDefaultUI={true}
+                        onTilesLoaded={() => setMapTilesReady(true)}
                     >
                         {userLocation && (
                             <>
@@ -441,6 +443,21 @@ const MapContent = () => {
                             </InfoWindow>
                         )}
                     </Map>
+
+                    {loadingStatus === APILoadingStatus.LOADING && !mapTilesReady && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-[40]">
+                            <p className="text-sm font-bold text-gray-600">Cargando Google Maps...</p>
+                        </div>
+                    )}
+
+                    {(loadingStatus === APILoadingStatus.AUTH_FAILURE || loadingStatus === APILoadingStatus.FAILED) && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-white z-[45] p-6 text-center">
+                            <div>
+                                <p className="font-black text-red-600 mb-2">No se pudo cargar Google Maps</p>
+                                <p className="text-sm text-gray-600 font-medium">Revisa API key, referrers autorizados y facturación en Google Cloud.</p>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Floating Search Leads Button */}
                     <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[50]">
