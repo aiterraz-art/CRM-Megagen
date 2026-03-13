@@ -551,7 +551,7 @@ const MapView = () => {
 
     return (
         <ErrorBoundary>
-            <APIProvider apiKey={apiKey} libraries={['places']}>
+            <APIProvider apiKey={apiKey}>
                 <MapContent />
             </APIProvider>
         </ErrorBoundary>
