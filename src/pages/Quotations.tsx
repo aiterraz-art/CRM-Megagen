@@ -731,18 +731,31 @@ const Quotations: React.FC = () => {
     }, [isClientModalOpen]);
     const handleConvertToOrder = async (quotation: any) => {
         if (!confirm('¿Confirmar que el cliente aceptó esta cotización? Se generará una Venta y se actualizarán las metas.')) return;
+        if (!profile?.id) {
+            alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
+            return;
+        }
+        if (quotation?.discount_approval?.status === 'pending' || quotation?.discount_approval?.status === 'rejected') {
+            alert('Esta cotización no se puede vender hasta resolver la aprobación de descuento.');
+            return;
+        }
 
         setSubmitting(true);
         try {
             // CALL THE NEW ATOMIC RPC FUNCTION
             const { data, error } = await supabase.rpc('convert_quotation_to_order', {
                 p_quotation_id: quotation.id,
-                p_user_id: quotation.seller_id
+                p_user_id: profile.id
             });
 
             if (error) throw error;
 
-            alert('¡Venta generada exitosamente! Stock actualizado y meta ajustada.');
+            const alreadyExists = Boolean((data as any)?.already_exists);
+            if (alreadyExists) {
+                alert('Esta cotización ya tenía una venta asociada. Se abrió el registro existente sin duplicar.');
+            } else {
+                alert('¡Venta generada exitosamente! Stock actualizado y meta ajustada.');
+            }
             fetchQuotations();
 
         } catch (error: any) {
