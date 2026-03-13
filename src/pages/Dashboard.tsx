@@ -14,6 +14,43 @@ import ActivityChart from '../components/charts/ActivityChart';
 import ZoneDistributionChart from '../components/charts/ZoneDistributionChart';
 import KPICard from '../components/KPICard';
 
+const gpsComunaCache = new Map<string, string>();
+
+const isValidGpsNumber = (value: unknown) => {
+    const n = Number(value);
+    return Number.isFinite(n) && !(n === 0);
+};
+
+const resolveComunaFromGps = async (lat: number, lng: number): Promise<string | null> => {
+    const roundedLat = lat.toFixed(5);
+    const roundedLng = lng.toFixed(5);
+    const key = `${roundedLat},${roundedLng}`;
+    const cached = gpsComunaCache.get(key);
+    if (cached) return cached;
+
+    try {
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${roundedLat}&lon=${roundedLng}&format=jsonv2&accept-language=es`;
+        const response = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        const address = payload?.address || {};
+        const comuna =
+            address?.city_district ||
+            address?.suburb ||
+            address?.town ||
+            address?.city ||
+            address?.municipality ||
+            address?.county ||
+            null;
+        const comunaLabel = typeof comuna === 'string' ? comuna.trim() : '';
+        if (!comunaLabel) return null;
+        gpsComunaCache.set(key, comunaLabel);
+        return comunaLabel;
+    } catch {
+        return null;
+    }
+};
+
 const ActiveVisitTimer = ({ startTime }: { startTime: string }) => {
     const [elapsed, setElapsed] = useState(0);
 
@@ -342,7 +379,26 @@ const Dashboard = () => {
                     }
                     return true;
                 });
-                setDailyVisits(filteredVisits);
+                const enrichedVisits = await Promise.all(
+                    filteredVisits.map(async (visit: any) => {
+                        const baseComuna = (visit.clients as any)?.comuna || (visit.clients as any)?.zone;
+                        if (baseComuna) {
+                            return { ...visit, dashboardComuna: baseComuna };
+                        }
+
+                        const latCandidate = visit.check_out_lat ?? visit.lat;
+                        const lngCandidate = visit.check_out_lng ?? visit.lng;
+
+                        if (!isValidGpsNumber(latCandidate) || !isValidGpsNumber(lngCandidate)) {
+                            return { ...visit, dashboardComuna: 'Sin Zona' };
+                        }
+
+                        const resolvedComuna = await resolveComunaFromGps(Number(latCandidate), Number(lngCandidate));
+                        return { ...visit, dashboardComuna: resolvedComuna || 'Sin Zona' };
+                    })
+                );
+
+                setDailyVisits(enrichedVisits);
             } else if (visitsError) {
                 console.error("Error fetching detail visits:", visitsError);
             }
@@ -545,7 +601,7 @@ const Dashboard = () => {
                                         {(visit.clients as any)?.name}
                                     </td>
                                     <td className="px-6 py-4 text-xs font-medium text-gray-500">
-                                        {(visit.clients as any)?.comuna || (visit.clients as any)?.zone || '-'}
+                                        {visit.dashboardComuna || (visit.clients as any)?.comuna || (visit.clients as any)?.zone || 'Sin Zona'}
                                     </td>
                                     <td className="px-6 py-4 text-sm font-medium text-gray-600">
                                         {visit.check_out_time ? (
