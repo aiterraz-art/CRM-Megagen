@@ -54,7 +54,6 @@ const MapContent = () => {
     const navigate = useNavigate();
     const map = useMap();
     const placesLib = useMapsLibrary('places');
-    const markerLib = useMapsLibrary('marker');
 
     const [clients, setClients] = useState<Client[]>([]);
     const [leads, setLeads] = useState<google.maps.places.PlaceResult[]>([]);
@@ -245,16 +244,13 @@ const MapContent = () => {
     };
 
     const filteredClients = clients.filter(client => {
-        if (!userLocation) return true;
-        const dist = calculateDistance(userLocation.lat, userLocation.lng, client.lat as number, client.lng as number);
-        const matchesSearch = client.name.toLowerCase().includes(search.toLowerCase());
+        if (!isValidLoc(client.lat, client.lng)) return false;
+        const matchesSearch = (client.name || '').toLowerCase().includes(search.toLowerCase());
+        if (!userLocation) return matchesSearch;
+        const dist = calculateDistance(userLocation.lat, userLocation.lng, Number(client.lat), Number(client.lng));
         return (dist / 1000) <= radius && matchesSearch;
     });
 
-
-
-    // Wait for libraries to load
-    if (!placesLib || !markerLib) return <div className="p-4 text-center">Loading Maps...</div>;
 
     return (
         <div className="h-full flex flex-col space-y-4 relative">
@@ -371,10 +367,10 @@ const MapContent = () => {
                                 <div className="p-2 space-y-2 min-w-[180px]">
                                     <div className="flex items-center space-x-2">
                                         <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold text-xs">
-                                            {selectedSellerLoc.profile?.email?.[0].toUpperCase()}
+                                            {(selectedSellerLoc.profile?.email?.[0] || '?').toUpperCase()}
                                         </div>
                                         <div>
-                                            <p className="font-bold text-gray-900 text-xs">{selectedSellerLoc.profile?.email?.split('@')[0]}</p>
+                                            <p className="font-bold text-gray-900 text-xs">{selectedSellerLoc.profile?.email?.split('@')?.[0] || 'sin email'}</p>
                                             <p className="text-[10px] text-gray-400 font-medium">{formatDate(selectedSellerLoc.created_at)} • {formatTimestamp(selectedSellerLoc.created_at)}</p>
                                         </div>
                                     </div>
@@ -450,8 +446,9 @@ const MapContent = () => {
                     <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[50]">
                         <button
                             onClick={handleSearchLeads}
-                            disabled={isSearchingLeads}
-                            className="bg-white text-dental-600 px-6 py-3 rounded-full shadow-xl font-bold text-sm hover:scale-105 active:scale-95 transition-all flex items-center border border-dental-100"
+                            disabled={isSearchingLeads || !placesService}
+                            className={`bg-white text-dental-600 px-6 py-3 rounded-full shadow-xl font-bold text-sm transition-all flex items-center border border-dental-100 ${isSearchingLeads || !placesService ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105 active:scale-95'}`}
+                            title={!placesService ? 'Google Places no está disponible para esta clave/dominio.' : 'Buscar clínicas cercanas'}
                         >
                             {isSearchingLeads ? (
                                 <span className="animate-pulse">Searching...</span>
@@ -514,7 +511,7 @@ const MapContent = () => {
                                         className="p-4 bg-gray-50 border border-transparent hover:border-indigo-100 hover:bg-white rounded-2xl cursor-pointer transition-all group"
                                     >
                                         <div className="flex justify-between items-start mb-2">
-                                            <p className="text-xs font-black text-gray-900">{loc.profile?.email?.split('@')[0]}</p>
+                                        <p className="text-xs font-black text-gray-900">{loc.profile?.email?.split('@')?.[0] || 'sin email'}</p>
                                             <div className="flex items-center text-[10px] text-gray-400 font-bold bg-white px-2 py-1 rounded-lg">
                                                 <Clock size={10} className="mr-1" />
                                                 {formatTimestamp(loc.created_at)}
@@ -554,7 +551,7 @@ const MapView = () => {
 
     return (
         <ErrorBoundary>
-            <APIProvider apiKey={apiKey} libraries={['places', 'marker']}>
+            <APIProvider apiKey={apiKey} libraries={['places']}>
                 <MapContent />
             </APIProvider>
         </ErrorBoundary>
