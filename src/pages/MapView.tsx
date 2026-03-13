@@ -59,6 +59,7 @@ const MapContent = () => {
     const [clients, setClients] = useState<Client[]>([]);
     const [leads, setLeads] = useState<google.maps.places.PlaceResult[]>([]);
     const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
+    const [filterOrigin, setFilterOrigin] = useState<{ lat: number, lng: number } | null>(null);
     const [radius, setRadius] = useState<number>(2); // km
     const [search, setSearch] = useState('');
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -134,7 +135,9 @@ const MapContent = () => {
             try {
                 const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 500 });
                 if (!mounted) return;
-                setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                const currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                setUserLocation(currentPos);
+                setFilterOrigin((prev) => prev || currentPos);
             } catch (error) {
                 console.warn('MapView GPS unavailable:', error);
             }
@@ -164,8 +167,21 @@ const MapContent = () => {
         if (userLocation && map) {
             map.panTo(userLocation);
             map.setZoom(14);
+            setFilterOrigin(userLocation);
         }
     }, [userLocation, map]);
+
+    const handleRadiusChange = useCallback((nextRadius: number) => {
+        if (map) {
+            const center = map.getCenter();
+            if (center) {
+                setFilterOrigin(center.toJSON());
+            }
+        } else if (userLocation) {
+            setFilterOrigin(userLocation);
+        }
+        setRadius(nextRadius);
+    }, [map, userLocation]);
 
     const handleSearchLeads = async () => {
         if (!placesService || !userLocation) return;
@@ -248,8 +264,9 @@ const MapContent = () => {
     const filteredClients = clients.filter(client => {
         if (!isValidLoc(client.lat, client.lng)) return false;
         const matchesSearch = (client.name || '').toLowerCase().includes(search.toLowerCase());
-        if (!userLocation) return matchesSearch;
-        const dist = calculateDistance(userLocation.lat, userLocation.lng, Number(client.lat), Number(client.lng));
+        const origin = filterOrigin || userLocation;
+        if (!origin) return matchesSearch;
+        const dist = calculateDistance(origin.lat, origin.lng, Number(client.lat), Number(client.lng));
         return (dist / 1000) <= radius && matchesSearch;
     });
 
@@ -272,7 +289,7 @@ const MapContent = () => {
                     {[1, 5, 10, 20, 50].map(r => (
                         <button
                             key={r}
-                            onClick={() => setRadius(r)}
+                            onClick={() => handleRadiusChange(r)}
                             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${radius === r ? 'bg-dental-500 text-white shadow-lg shadow-dental-100' : 'text-gray-400 hover:bg-gray-50'}`}
                         >
                             {r}km
