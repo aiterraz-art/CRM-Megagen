@@ -21,6 +21,13 @@ const isValidGpsNumber = (value: unknown) => {
     return Number.isFinite(n) && !(n === 0);
 };
 
+const hasMeaningfulZone = (value: unknown) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === '-' || normalized === 'sin zona' || normalized === 'n/a') return false;
+    return true;
+};
+
 const resolveComunaFromGps = async (lat: number, lng: number): Promise<string | null> => {
     const roundedLat = lat.toFixed(5);
     const roundedLng = lng.toFixed(5);
@@ -379,11 +386,17 @@ const Dashboard = () => {
                     }
                     return true;
                 });
+                const pendingClientGeoBackfill = new Map<string, { comuna?: string; zone?: string }>();
                 const enrichedVisits = await Promise.all(
                     filteredVisits.map(async (visit: any) => {
-                        const baseComuna = (visit.clients as any)?.comuna || (visit.clients as any)?.zone;
-                        if (baseComuna) {
-                            return { ...visit, dashboardComuna: baseComuna };
+                        const currentComuna = (visit.clients as any)?.comuna;
+                        const currentZone = (visit.clients as any)?.zone;
+
+                        const hasComuna = hasMeaningfulZone(currentComuna);
+                        const hasZone = hasMeaningfulZone(currentZone);
+
+                        if (hasComuna || hasZone) {
+                            return { ...visit, dashboardComuna: hasComuna ? currentComuna : currentZone };
                         }
 
                         const latCandidate = visit.check_out_lat ?? visit.lat;
@@ -394,11 +407,31 @@ const Dashboard = () => {
                         }
 
                         const resolvedComuna = await resolveComunaFromGps(Number(latCandidate), Number(lngCandidate));
+                        if (resolvedComuna && visit.client_id) {
+                            pendingClientGeoBackfill.set(visit.client_id, {
+                                comuna: resolvedComuna,
+                                zone: resolvedComuna
+                            });
+                        }
                         return { ...visit, dashboardComuna: resolvedComuna || 'Sin Zona' };
                     })
                 );
 
                 setDailyVisits(enrichedVisits);
+
+                if (pendingClientGeoBackfill.size > 0) {
+                    void Promise.all(
+                        Array.from(pendingClientGeoBackfill.entries()).map(async ([clientId, values]) => {
+                            const { error } = await supabase
+                                .from('clients')
+                                .update(values)
+                                .eq('id', clientId);
+                            if (error) {
+                                console.warn('Dashboard: no se pudo persistir comuna/zona desde GPS para client_id=', clientId, error.message);
+                            }
+                        })
+                    );
+                }
             } else if (visitsError) {
                 console.error("Error fetching detail visits:", visitsError);
             }
