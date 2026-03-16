@@ -52,6 +52,20 @@ const Inventory = () => {
         return null;
     };
 
+    const getValueByExactAliases = (row: Record<string, any>, aliases: string[]) => {
+        const normalizedAliases = new Set(aliases.map(normalizeHeader));
+        const entries = Object.entries(row);
+
+        for (const [key, value] of entries) {
+            const normalizedKey = normalizeHeader(key);
+            if (normalizedAliases.has(normalizedKey)) {
+                return value;
+            }
+        }
+
+        return null;
+    };
+
     const chunkArray = <T,>(arr: T[], size = 200): T[][] => {
         const out: T[][] = [];
         for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -260,10 +274,22 @@ const Inventory = () => {
 
                 alert(`Importador de stock completado. ${newItems.length} SKU procesados, ${deletedCount} SKU reemplazados y ${preservedHistoricalCount} SKU históricos conservados con stock 0.`);
             } else if (importType === 'pricing') {
+                const expectedSkuHeaders = ['sku'];
+                const expectedPriceHeaders = ['precionetoventa', 'precionetodeventa'];
+                const normalizedFileHeaders = new Set(
+                    Object.keys(rows[0] || {}).map(normalizeHeader)
+                );
+                const hasSkuHeader = expectedSkuHeaders.some((h) => normalizedFileHeaders.has(h));
+                const hasPriceHeader = expectedPriceHeaders.some((h) => normalizedFileHeaders.has(h));
+
+                if (!hasSkuHeader || !hasPriceHeader) {
+                    throw new Error('Formato inválido para importador de precios. Solo se aceptan columnas: SKU y Precio Neto Venta.');
+                }
+
                 const parsedPriceRows = rows
                     .map((row) => {
-                        const sku = normalizeSku(getValueByAliases(row, ['sku', 'codigo', 'codigoproducto', 'productoid']));
-                        const rawPrice = getValueByAliases(row, ['precionetoventa', 'precioneto', 'precio', 'neto', 'price']);
+                        const sku = normalizeSku(getValueByExactAliases(row, expectedSkuHeaders));
+                        const rawPrice = getValueByExactAliases(row, expectedPriceHeaders);
                         const price = Number(rawPrice);
                         return {
                             sku,

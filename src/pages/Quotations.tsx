@@ -1331,7 +1331,7 @@ const Quotations: React.FC = () => {
                                                         setFormItems(newItems);
 
                                                         if (val.length > 1) {
-                                                            const filtered = products.filter(p => p.sku?.toLowerCase().includes(val.toLowerCase())).slice(0, 5);
+                                                            const filtered = products.filter(p => p.sku?.toLowerCase().includes(val.toLowerCase()));
                                                             setSuggestions(filtered);
                                                             setActiveSuggestion({ index, field: 'code' });
                                                         } else {
@@ -1342,7 +1342,10 @@ const Quotations: React.FC = () => {
                                                     onBlur={() => setTimeout(() => setActiveSuggestion(null), 200)}
                                                 />
                                                 {activeSuggestion?.index === index && activeSuggestion.field === 'code' && suggestions.length > 0 && (
-                                                    <div className="absolute z-50 w-64 bg-white border border-gray-100 rounded-xl shadow-2xl mt-1 overflow-hidden">
+                                                    <div
+                                                        className="absolute z-50 w-64 max-h-72 overflow-y-auto overscroll-contain bg-white border border-gray-100 rounded-xl shadow-2xl mt-1"
+                                                        onMouseDown={(e) => e.preventDefault()}
+                                                    >
                                                         {suggestions.map((p, i) => (
                                                             <button
                                                                 key={i}
@@ -1386,7 +1389,7 @@ const Quotations: React.FC = () => {
                                                         setFormItems(newItems);
 
                                                         if (val.length > 2) {
-                                                            const filtered = products.filter(p => p.name?.toLowerCase().includes(val.toLowerCase())).slice(0, 5);
+                                                            const filtered = products.filter(p => p.name?.toLowerCase().includes(val.toLowerCase()));
                                                             setSuggestions(filtered);
                                                             setActiveSuggestion({ index, field: 'detail' });
                                                         } else {
@@ -1397,7 +1400,10 @@ const Quotations: React.FC = () => {
                                                     onBlur={() => setTimeout(() => setActiveSuggestion(null), 200)}
                                                 />
                                                 {activeSuggestion?.index === index && activeSuggestion.field === 'detail' && suggestions.length > 0 && (
-                                                    <div className="absolute z-50 w-full bg-white border border-gray-100 rounded-xl shadow-2xl mt-1 overflow-hidden">
+                                                    <div
+                                                        className="absolute z-50 w-full max-h-72 overflow-y-auto overscroll-contain bg-white border border-gray-100 rounded-xl shadow-2xl mt-1"
+                                                        onMouseDown={(e) => e.preventDefault()}
+                                                    >
                                                         {suggestions.map((p, i) => (
                                                             <button
                                                                 key={i}
