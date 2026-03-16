@@ -29,6 +29,7 @@ export interface Database {
                     email: string | null
                     notes: string | null
                     giro: string | null
+                    doctor_specialty: string | null
                     comuna: string | null
                     office: string | null
                     lead_score: number | null
@@ -51,6 +52,7 @@ export interface Database {
                     email?: string | null
                     notes?: string | null
                     giro?: string | null
+                    doctor_specialty?: string | null
                     comuna?: string | null
                     office?: string | null
                     lead_score?: number | null
@@ -73,6 +75,7 @@ export interface Database {
                     email?: string | null
                     notes?: string | null
                     giro?: string | null
+                    doctor_specialty?: string | null
                     comuna?: string | null
                     office?: string | null
                     lead_score?: number | null

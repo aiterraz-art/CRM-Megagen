@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar } from 'lucide-react';
+import { Calendar, Stethoscope, User } from 'lucide-react';
 
 interface VisitCheckoutModalProps {
     notes: string;
@@ -14,6 +14,11 @@ interface VisitCheckoutModalProps {
     requireClientEmail?: boolean;
     clientEmail?: string;
     onClientEmailChange?: (email: string) => void;
+    requireDoctorDetails?: boolean;
+    doctorName?: string;
+    onDoctorNameChange?: (name: string) => void;
+    doctorSpecialty?: string;
+    onDoctorSpecialtyChange?: (specialty: string) => void;
 }
 
 const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
@@ -28,14 +33,21 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
     onLeadScoreChange,
     requireClientEmail = false,
     clientEmail = '',
-    onClientEmailChange
+    onClientEmailChange,
+    requireDoctorDetails = false,
+    doctorName = '',
+    onDoctorNameChange,
+    doctorSpecialty = '',
+    onDoctorSpecialtyChange
 }) => {
     const requiresLeadScore = showLeadScore;
     const emailIsValid = /\S+@\S+\.\S+/.test(clientEmail.trim());
+    const doctorDetailsReady = doctorName.trim().length > 0 && doctorSpecialty.trim().length > 0;
     const canConfirm = notes.trim()
         && !saving
         && (!requiresLeadScore || leadScore !== null)
-        && (!requireClientEmail || emailIsValid);
+        && (!requireClientEmail || emailIsValid)
+        && (!requireDoctorDetails || doctorDetailsReady);
 
     return (
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -93,6 +105,39 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
                                 <p className="text-[11px] mt-2 font-bold text-red-500">Ingresa un correo válido para finalizar la visita.</p>
                             )}
                         </div>
+                    )}
+                    {requireDoctorDetails && (
+                        <>
+                            <div>
+                                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Nombre del Doctor <span className="text-red-500">*</span></label>
+                                <div className="relative">
+                                    <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" />
+                                    <input
+                                        type="text"
+                                        value={doctorName}
+                                        onChange={(e) => onDoctorNameChange?.(e.target.value)}
+                                        placeholder="Ej. Dr. Juan Pérez"
+                                        className="w-full pl-11 pr-4 py-4 bg-gray-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl font-bold text-gray-700 outline-none transition-all"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Especialidad <span className="text-red-500">*</span></label>
+                                <div className="relative">
+                                    <Stethoscope size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" />
+                                    <input
+                                        type="text"
+                                        value={doctorSpecialty}
+                                        onChange={(e) => onDoctorSpecialtyChange?.(e.target.value)}
+                                        placeholder="Ej. Implantología"
+                                        className="w-full pl-11 pr-4 py-4 bg-gray-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl font-bold text-gray-700 outline-none transition-all"
+                                    />
+                                </div>
+                                {!doctorDetailsReady && (
+                                    <p className="text-[11px] mt-2 font-bold text-red-500">Debes registrar doctor y especialidad para cerrar la visita en frío.</p>
+                                )}
+                            </div>
+                        </>
                     )}
 
                     {onSchedule && (

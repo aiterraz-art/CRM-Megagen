@@ -5,9 +5,27 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { useVisit } from '../contexts/VisitContext';
 import { queueVisitCheckinLocation } from '../services/locationQueue';
-import { User, MapPin, Building2, ChevronRight, Stethoscope } from 'lucide-react';
+import { MapPin, Building2, ChevronRight, Stethoscope } from 'lucide-react';
 
 const formatGpsAddress = (lat: number, lng: number) => `Ubicación GPS (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
+const COLD_VISIT_DRAFT_KEY = 'cold_visit_draft';
+
+const loadColdVisitDraft = () => {
+    if (typeof window === 'undefined') return { clinicName: '', address: '' };
+
+    try {
+        const savedDraft = localStorage.getItem(COLD_VISIT_DRAFT_KEY);
+        if (!savedDraft) return { clinicName: '', address: '' };
+
+        const parsed = JSON.parse(savedDraft);
+        return {
+            clinicName: String(parsed?.clinicName || ''),
+            address: String(parsed?.address || '')
+        };
+    } catch {
+        return { clinicName: '', address: '' };
+    }
+};
 
 const reverseGeocodeAddress = async (lat: number, lng: number): Promise<string | null> => {
     try {
@@ -30,11 +48,11 @@ const ColdVisit = () => {
     const navigate = useNavigate();
     const { profile } = useUser();
     const { startVisit, activeVisit } = useVisit();
+    const initialDraft = loadColdVisitDraft();
 
     // Form State
-    const [clinicName, setClinicName] = useState('');
-    const [doctorName, setDoctorName] = useState('');
-    const [address, setAddress] = useState('');
+    const [clinicName, setClinicName] = useState(initialDraft.clinicName);
+    const [address, setAddress] = useState(initialDraft.address);
     const [loading, setLoading] = useState(false);
     const [location, setLocation] = useState<{ lat: number, lng: number, accuracy: number } | null>(null);
     const [gpsReady, setGpsReady] = useState(false);
@@ -61,18 +79,24 @@ const ColdVisit = () => {
         return () => { mounted = false; };
     }, []);
 
+    useEffect(() => {
+        localStorage.setItem(COLD_VISIT_DRAFT_KEY, JSON.stringify({
+            clinicName,
+            address
+        }));
+    }, [clinicName, address]);
+
     const handleStartColdVisit = async (e: React.FormEvent) => {
         e.preventDefault();
         const clinicNameClean = clinicName.trim();
-        const doctorNameClean = doctorName.trim();
         const addressClean = address.trim();
 
-        if (!clinicNameClean || !doctorNameClean) {
-            alert('Por favor completa el nombre de la clínica y del doctor.');
+        if (!clinicNameClean) {
+            alert('Por favor completa el nombre de la clínica.');
             return;
         }
-        if (clinicNameClean.length < 3 || doctorNameClean.length < 3) {
-            alert('El nombre de clínica y doctor debe tener al menos 3 caracteres.');
+        if (clinicNameClean.length < 3) {
+            alert('El nombre de la clínica debe tener al menos 3 caracteres.');
             return;
         }
 
@@ -121,7 +145,8 @@ const ColdVisit = () => {
             // 1. Create "Prospect" Client
             const newClient = {
                 name: clinicNameClean,
-                purchase_contact: doctorNameClean,
+                purchase_contact: null,
+                doctor_specialty: null,
                 address: resolvedAddress,
                 lat: currentLocation?.lat ?? null,
                 lng: currentLocation?.lng ?? null,
@@ -144,6 +169,7 @@ const ColdVisit = () => {
             const visit = await startVisit(createdClient.id, { type: 'cold_visit' });
 
             if (visit) {
+                localStorage.removeItem(COLD_VISIT_DRAFT_KEY);
                 await queueVisitCheckinLocation({
                     visit_id: visit.id,
                     seller_id: profile.id,
@@ -192,22 +218,6 @@ const ColdVisit = () => {
                     </div>
                 </div>
 
-                {/* Doctor Name */}
-                <div className="space-y-2">
-                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Nombre Doctor / Contacto</label>
-                    <div className="relative group">
-                        <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-blue-500 transition-colors" size={20} />
-                        <input
-                            type="text"
-                            value={doctorName}
-                            onChange={(e) => setDoctorName(e.target.value)}
-                            className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-blue-50 focus:border-blue-100 outline-none transition-all placeholder:text-gray-300 placeholder:font-medium"
-                            placeholder="Ej. Dr. Juan Pérez"
-                            required
-                        />
-                    </div>
-                </div>
-
                 {/* Address (Optional) */}
                 <div className="space-y-2">
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Dirección (Opcional)</label>
@@ -247,6 +257,9 @@ const ColdVisit = () => {
             <div className="text-center mt-6">
                 <p className="text-xs text-gray-400 font-medium">
                     Se requiere GPS para iniciar visita en frío y registrar ubicación real.
+                </p>
+                <p className="text-[11px] text-gray-500 font-bold mt-2">
+                    Al finalizar la visita será obligatorio ingresar nombre del doctor y su especialidad.
                 </p>
                 <p className={`text-[10px] font-bold mt-1 flex items-center justify-center ${gpsReady ? 'text-green-500' : 'text-amber-500'}`}>
                     <MapPin size={10} className="mr-1" /> {gpsReady ? 'GPS Activo' : 'GPS no disponible'}

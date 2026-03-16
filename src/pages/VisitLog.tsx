@@ -39,6 +39,8 @@ const VisitLog = () => {
     const [visitNotes, setVisitNotes] = useState('');
     const [leadScore, setLeadScore] = useState<number | null>(null);
     const [checkoutClientEmail, setCheckoutClientEmail] = useState('');
+    const [checkoutDoctorName, setCheckoutDoctorName] = useState('');
+    const [checkoutDoctorSpecialty, setCheckoutDoctorSpecialty] = useState('');
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [confettiController, setConfettiController] = useState<ConfettiBurstController | null>(null);
 
@@ -77,6 +79,13 @@ const VisitLog = () => {
         };
         if (profile) fetchClient();
     }, [clientId, profile, effectiveRole, hasPermission, navigate]);
+
+    useEffect(() => {
+        setCheckoutClientEmail(client?.email || '');
+        setCheckoutDoctorName(client?.purchase_contact || '');
+        setCheckoutDoctorSpecialty(client?.doctor_specialty || '');
+        setLeadScore(client?.lead_score ?? null);
+    }, [client?.id]);
 
     const checkGeofence = async (clientData: Client) => {
         if (!clientData.lat || !clientData.lng) {
@@ -161,26 +170,54 @@ const VisitLog = () => {
         setFinishing(true);
 
         try {
-            if (client && isProspectStatus(client.status)) {
+            const isColdVisitFlow = (activeVisit?.type || '').toLowerCase() === 'cold_visit';
+            const requiresProspectCompletion = isProspectStatus(client?.status);
+            if (client && (requiresProspectCompletion || isColdVisitFlow)) {
                 const normalizedEmail = checkoutClientEmail.trim().toLowerCase();
                 const validEmail = /\S+@\S+\.\S+/.test(normalizedEmail);
-                if (!validEmail) {
+                const doctorNameClean = checkoutDoctorName.trim();
+                const doctorSpecialtyClean = checkoutDoctorSpecialty.trim();
+                if (requiresProspectCompletion && !validEmail) {
                     alert('Debes ingresar un correo válido del cliente para finalizar la visita en frío.');
                     setFinishing(false);
                     return;
                 }
-                if (leadScore === null) {
+                if (requiresProspectCompletion && leadScore === null) {
                     alert('Debes calificar el nivel de interés del prospecto para finalizar.');
+                    setFinishing(false);
+                    return;
+                }
+                if (isColdVisitFlow && (!doctorNameClean || !doctorSpecialtyClean)) {
+                    alert('Debes ingresar nombre del doctor y su especialidad para finalizar la visita en frío.');
                     setFinishing(false);
                     return;
                 }
                 const { error: clientUpdateError } = await supabase
                     .from('clients')
-                    .update({ lead_score: leadScore, email: normalizedEmail })
+                    .update({
+                        ...(requiresProspectCompletion ? {
+                            lead_score: leadScore,
+                            email: normalizedEmail
+                        } : {}),
+                        ...(isColdVisitFlow ? {
+                            purchase_contact: doctorNameClean,
+                            doctor_specialty: doctorSpecialtyClean
+                        } : {})
+                    })
                     .eq('id', client.id);
 
                 if (clientUpdateError) throw clientUpdateError;
-                setClient((prev) => prev ? { ...prev, email: normalizedEmail, lead_score: leadScore } : prev);
+                setClient((prev) => prev ? {
+                    ...prev,
+                    ...(requiresProspectCompletion ? {
+                        email: normalizedEmail,
+                        lead_score: leadScore
+                    } : {}),
+                    ...(isColdVisitFlow ? {
+                        purchase_contact: doctorNameClean,
+                        doctor_specialty: doctorSpecialtyClean
+                    } : {})
+                } : prev);
             }
             const closed = await endVisit({ notes: visitNotes });
             if (closed) {
@@ -212,6 +249,8 @@ const VisitLog = () => {
     if (loading) return <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest">Verifying Identity...</div>;
     if (!client) return <div className="p-8 text-center text-red-500 font-bold">Client not found</div>;
 
+    const isColdVisitFlow = (activeVisit?.type || '').toLowerCase() === 'cold_visit';
+
     // Previous conditional visual return was removed here.
 
     return (
@@ -237,6 +276,11 @@ const VisitLog = () => {
                         requireClientEmail={isProspectStatus(client?.status)}
                         clientEmail={checkoutClientEmail}
                         onClientEmailChange={setCheckoutClientEmail}
+                        requireDoctorDetails={isColdVisitFlow}
+                        doctorName={checkoutDoctorName}
+                        onDoctorNameChange={setCheckoutDoctorName}
+                        doctorSpecialty={checkoutDoctorSpecialty}
+                        onDoctorSpecialtyChange={setCheckoutDoctorSpecialty}
                         onSave={handleCheckOut}
                         onClose={() => setShowNotesModal(false)}
                         onSchedule={() => setShowScheduleModal(true)}

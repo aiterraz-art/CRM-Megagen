@@ -2,10 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVisit } from '../contexts/VisitContext';
 import { Clock, MapPin, Camera, ShoppingCart } from 'lucide-react';
-
+import { Database } from '../types/supabase';
 import VisitCheckoutModal from './modals/VisitCheckoutModal';
 import ScheduleVisitModal from './modals/ScheduleVisitModal';
 import { supabase } from '../services/supabase';
+import { isProspectStatus } from '../utils/prospect';
+
+type Client = Database['public']['Tables']['clients']['Row'];
 
 const GlobalVisitTimer = () => {
     const navigate = useNavigate();
@@ -15,6 +18,11 @@ const GlobalVisitTimer = () => {
     const [showNotesModal, setShowNotesModal] = useState(false);
     const [visitNotes, setVisitNotes] = useState('');
     const [showScheduleModal, setShowScheduleModal] = useState(false);
+    const [activeClient, setActiveClient] = useState<Client | null>(null);
+    const [leadScore, setLeadScore] = useState<number | null>(null);
+    const [checkoutClientEmail, setCheckoutClientEmail] = useState('');
+    const [checkoutDoctorName, setCheckoutDoctorName] = useState('');
+    const [checkoutDoctorSpecialty, setCheckoutDoctorSpecialty] = useState('');
 
     useEffect(() => {
         let interval: any;
@@ -36,6 +44,37 @@ const GlobalVisitTimer = () => {
         return () => clearInterval(interval);
     }, [activeVisit]);
 
+    useEffect(() => {
+        const fetchClient = async () => {
+            if (!activeVisit?.client_id) {
+                setActiveClient(null);
+                return;
+            }
+
+            const { data, error } = await (supabase.from('clients') as any)
+                .select('*')
+                .eq('id', activeVisit.client_id)
+                .single();
+
+            if (error) {
+                console.error('Error fetching active visit client:', error);
+                setActiveClient(null);
+                return;
+            }
+
+            setActiveClient(data as Client);
+        };
+
+        void fetchClient();
+    }, [activeVisit?.client_id]);
+
+    useEffect(() => {
+        setLeadScore(activeClient?.lead_score ?? null);
+        setCheckoutClientEmail(activeClient?.email || '');
+        setCheckoutDoctorName(activeClient?.purchase_contact || '');
+        setCheckoutDoctorSpecialty(activeClient?.doctor_specialty || '');
+    }, [activeClient?.id]);
+
     const formatTime = (totalSeconds: number) => {
         const isOvertime = totalSeconds > 20 * 60; // 20 minutes limit
         const displaySeconds = isOvertime ? totalSeconds - (20 * 60) : (20 * 60) - totalSeconds;
@@ -52,6 +91,60 @@ const GlobalVisitTimer = () => {
         setFinishing(true);
 
         try {
+            const isColdVisitFlow = (activeVisit.type || '').toLowerCase() === 'cold_visit';
+            const requiresProspectCompletion = isProspectStatus(activeClient?.status);
+
+            if (activeClient && (requiresProspectCompletion || isColdVisitFlow)) {
+                const normalizedEmail = checkoutClientEmail.trim().toLowerCase();
+                const validEmail = /\S+@\S+\.\S+/.test(normalizedEmail);
+                const doctorNameClean = checkoutDoctorName.trim();
+                const doctorSpecialtyClean = checkoutDoctorSpecialty.trim();
+
+                if (requiresProspectCompletion && !validEmail) {
+                    alert('Debes ingresar un correo válido del cliente para finalizar la visita en frío.');
+                    setFinishing(false);
+                    return;
+                }
+                if (requiresProspectCompletion && leadScore === null) {
+                    alert('Debes calificar el nivel de interés del prospecto para finalizar.');
+                    setFinishing(false);
+                    return;
+                }
+                if (isColdVisitFlow && (!doctorNameClean || !doctorSpecialtyClean)) {
+                    alert('Debes ingresar nombre del doctor y su especialidad para finalizar la visita en frío.');
+                    setFinishing(false);
+                    return;
+                }
+
+                const { error: clientUpdateError } = await supabase
+                    .from('clients')
+                    .update({
+                        ...(requiresProspectCompletion ? {
+                            lead_score: leadScore,
+                            email: normalizedEmail
+                        } : {}),
+                        ...(isColdVisitFlow ? {
+                            purchase_contact: doctorNameClean,
+                            doctor_specialty: doctorSpecialtyClean
+                        } : {})
+                    })
+                    .eq('id', activeClient.id);
+
+                if (clientUpdateError) throw clientUpdateError;
+
+                setActiveClient((prev) => prev ? {
+                    ...prev,
+                    ...(requiresProspectCompletion ? {
+                        email: normalizedEmail,
+                        lead_score: leadScore
+                    } : {}),
+                    ...(isColdVisitFlow ? {
+                        purchase_contact: doctorNameClean,
+                        doctor_specialty: doctorSpecialtyClean
+                    } : {})
+                } : prev);
+            }
+
             const closed = await endVisit({ notes: visitNotes });
             if (closed) {
                 setShowNotesModal(false);
@@ -67,6 +160,8 @@ const GlobalVisitTimer = () => {
     if (!activeVisit) return null;
 
     const timeInfo = formatTime(elapsedTime);
+    const isColdVisitFlow = (activeVisit.type || '').toLowerCase() === 'cold_visit';
+    const requiresProspectCompletion = isProspectStatus(activeClient?.status);
 
     return (
         <div className="fixed bottom-0 left-0 right-0 z-50 animate-in slide-in-from-bottom-full duration-500">
@@ -132,6 +227,17 @@ const GlobalVisitTimer = () => {
                 <VisitCheckoutModal
                     notes={visitNotes}
                     onNotesChange={setVisitNotes}
+                    leadScore={leadScore}
+                    onLeadScoreChange={setLeadScore}
+                    showLeadScore={requiresProspectCompletion}
+                    requireClientEmail={requiresProspectCompletion}
+                    clientEmail={checkoutClientEmail}
+                    onClientEmailChange={setCheckoutClientEmail}
+                    requireDoctorDetails={isColdVisitFlow}
+                    doctorName={checkoutDoctorName}
+                    onDoctorNameChange={setCheckoutDoctorName}
+                    doctorSpecialty={checkoutDoctorSpecialty}
+                    onDoctorSpecialtyChange={setCheckoutDoctorSpecialty}
                     onSave={handleConfirmCheckout}
                     onClose={() => setShowNotesModal(false)}
                     onSchedule={() => setShowScheduleModal(true)}
