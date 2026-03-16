@@ -6,6 +6,7 @@ import { Database } from '../types/supabase';
 import * as XLSX from 'xlsx';
 
 type InventoryItem = Database['public']['Tables']['inventory']['Row'] & { sku?: string | null };
+type ImportType = 'stock' | 'pricing';
 
 const Inventory = () => {
     const { hasPermission, effectiveRole } = useUser();
@@ -16,7 +17,7 @@ const Inventory = () => {
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(true);
     const [isImporting, setIsImporting] = useState(false);
-    const [importType, setImportType] = useState<'inventory' | 'pricing' | null>(null);
+    const [importType, setImportType] = useState<ImportType | null>(null);
     const [showNewProductModal, setShowNewProductModal] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [newProduct, setNewProduct] = useState({
@@ -27,6 +28,35 @@ const Inventory = () => {
         category: 'General'
     });
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const normalizeHeader = (value: string) =>
+        value
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]/g, '');
+
+    const normalizeSku = (value: any) => String(value || '').trim().toUpperCase();
+
+    const getValueByAliases = (row: Record<string, any>, aliases: string[]) => {
+        const normalizedAliases = aliases.map(normalizeHeader);
+        const entries = Object.entries(row);
+
+        for (const [key, value] of entries) {
+            const normalizedKey = normalizeHeader(key);
+            if (normalizedAliases.some(alias => normalizedKey.includes(alias))) {
+                return value;
+            }
+        }
+
+        return null;
+    };
+
+    const chunkArray = <T,>(arr: T[], size = 200): T[][] => {
+        const out: T[][] = [];
+        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        return out;
+    };
 
     const fetchInventory = async () => {
         setLoading(true);
@@ -79,7 +109,7 @@ const Inventory = () => {
         }
     };
 
-    const handleImportClick = (type: 'inventory' | 'pricing') => {
+    const handleImportClick = (type: ImportType) => {
         if (!canUploadInventory) {
             alert('No tienes permisos para importar datos de inventario.');
             return;
@@ -88,23 +118,37 @@ const Inventory = () => {
         fileInputRef.current?.click();
     };
 
-    const downloadInventoryTemplate = () => {
+    const downloadStockTemplate = () => {
         const rows = [
             {
                 SKU: 'SKU-001',
                 Nombre: 'Implante Demo',
-                Stock: 25,
-                Categoria: 'Insumos',
-                'Precio Neto': 15990
+                Cantidad: 25
             }
         ];
 
         const worksheet = XLSX.utils.json_to_sheet(rows, {
-            header: ['SKU', 'Nombre', 'Stock', 'Categoria', 'Precio Neto']
+            header: ['SKU', 'Nombre', 'Cantidad']
         });
         const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario');
-        XLSX.writeFile(workbook, 'plantilla_importacion_inventario.xlsx');
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Stock');
+        XLSX.writeFile(workbook, 'plantilla_importador_stock.xlsx');
+    };
+
+    const downloadPricingTemplate = () => {
+        const rows = [
+            {
+                SKU: 'SKU-001',
+                'Precio Neto Venta': 15990
+            }
+        ];
+
+        const worksheet = XLSX.utils.json_to_sheet(rows, {
+            header: ['SKU', 'Precio Neto Venta']
+        });
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Precios');
+        XLSX.writeFile(workbook, 'plantilla_importador_precios.xlsx');
     };
 
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,59 +177,153 @@ const Inventory = () => {
                 throw new Error('El archivo no contiene filas para importar.');
             }
 
-            const getValue = (row: any, keywords: string[]) => {
-                const keys = Object.keys(row);
-                const foundKey = keys.find(k =>
-                    keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase()))
-                );
-                return foundKey ? row[foundKey] : null;
-            };
-
-            if (importType === 'inventory') {
-                const parsedItems = rows.map(row => ({
-                    sku: (getValue(row, ['digo', 'SKU']) || '').toString().trim(),
-                    name: (getValue(row, ['descrip', 'Nombre', 'Name', 'Detail']) || '').toString().trim(),
-                    stock_qty: parseInt(getValue(row, ['Saldo', 'Stock', 'Cantidad']) || '0') || 0,
-                    category: (getValue(row, ['Categoria', 'Categoría', 'Category']) || 'General').toString().trim(),
-                    price: parseFloat(getValue(row, ['Precio', 'Price', 'Neto', 'Valor', 'P.Unit']) || '0')
-                })).filter(item => item.name && item.sku);
+            if (importType === 'stock') {
+                const parsedItems = rows
+                    .map((row) => ({
+                        sku: normalizeSku(getValueByAliases(row, ['sku', 'codigo', 'codigoproducto', 'productoid'])),
+                        name: String(getValueByAliases(row, ['nombre', 'producto', 'descripcion', 'detalle', 'name']) || '').trim(),
+                        stock_qty: Math.max(0, parseInt(String(getValueByAliases(row, ['cantidad', 'stock', 'saldo', 'unidades', 'qty']) ?? '0'), 10) || 0)
+                    }))
+                    .filter((item) => item.sku && item.name);
 
                 const dedupedBySku = new Map<string, typeof parsedItems[number]>();
-                parsedItems.forEach((item) => {
-                    dedupedBySku.set(item.sku, item);
-                });
+                parsedItems.forEach((item) => dedupedBySku.set(item.sku, item));
                 const newItems = Array.from(dedupedBySku.values());
 
                 if (newItems.length === 0) {
-                    throw new Error('No se encontraron columnas de SKU y Nombre. Asegúrese de que el archivo tenga las columnas correspondientes (Código, Descripción, Saldo).');
+                    throw new Error('No se encontraron datos válidos. Este importador requiere columnas: SKU, Nombre y Cantidad.');
                 }
 
-                const { error: deleteError } = await (supabase.from('inventory') as any).delete().not('id', 'is', null);
-                if (deleteError) throw deleteError;
+                const { data: existingData, error: existingError } = await (supabase.from('inventory') as any)
+                    .select('id, sku, price, category');
+                if (existingError) throw existingError;
 
-                const { error: insertError } = await (supabase.from('inventory') as any).insert(newItems);
-                if (insertError) throw insertError;
+                const existingBySku = new Map<string, any>();
+                (existingData || []).forEach((row: any) => {
+                    existingBySku.set(normalizeSku(row.sku), row);
+                });
 
-                alert(`¡Inventario actualizado! ${newItems.length} productos cargados.`);
+                const upsertPayload = newItems.map((item) => {
+                    const existing = existingBySku.get(item.sku);
+                    return {
+                        ...(existing?.id ? { id: existing.id } : {}),
+                        sku: item.sku,
+                        name: item.name,
+                        stock_qty: item.stock_qty,
+                        price: Number(existing?.price ?? 0),
+                        category: existing?.category || 'General'
+                    };
+                });
+
+                const { error: upsertError } = await (supabase.from('inventory') as any)
+                    .upsert(upsertPayload, { onConflict: 'sku' });
+                if (upsertError) throw upsertError;
+
+                const importedSkuSet = new Set(newItems.map((item) => item.sku));
+                const obsoleteRows = (existingData || []).filter((row: any) => !importedSkuSet.has(normalizeSku(row.sku)) && row.id);
+                let deletedCount = 0;
+                let preservedHistoricalCount = 0;
+
+                if (obsoleteRows.length > 0) {
+                    const obsoleteIds = obsoleteRows.map((row: any) => row.id as string);
+                    const referencedIds = new Set<string>();
+
+                    for (const chunk of chunkArray(obsoleteIds, 200)) {
+                        const { data: orderRefs, error: refsError } = await (supabase.from('order_items') as any)
+                            .select('product_id')
+                            .in('product_id', chunk);
+                        if (refsError) throw refsError;
+                        (orderRefs || []).forEach((ref: any) => {
+                            if (ref?.product_id) referencedIds.add(ref.product_id);
+                        });
+                    }
+
+                    const idsToDelete = obsoleteIds.filter((id: string) => !referencedIds.has(id));
+                    const idsToPreserve = obsoleteIds.filter((id: string) => referencedIds.has(id));
+
+                    for (const chunk of chunkArray(idsToDelete, 200)) {
+                        const { error: deleteError } = await (supabase.from('inventory') as any)
+                            .delete()
+                            .in('id', chunk);
+                        if (deleteError) throw deleteError;
+                        deletedCount += chunk.length;
+                    }
+
+                    for (const chunk of chunkArray(idsToPreserve, 200)) {
+                        const { error: preserveError } = await (supabase.from('inventory') as any)
+                            .update({ stock_qty: 0 })
+                            .in('id', chunk);
+                        if (preserveError) throw preserveError;
+                        preservedHistoricalCount += chunk.length;
+                    }
+                }
+
+                alert(`Importador de stock completado. ${newItems.length} SKU procesados, ${deletedCount} SKU reemplazados y ${preservedHistoricalCount} SKU históricos conservados con stock 0.`);
             } else if (importType === 'pricing') {
-                const priceUpdates = rows.map(row => ({
-                    sku: (getValue(row, ['digo', 'SKU']) || '').toString().trim(),
-                    price: parseFloat(getValue(row, ['Precio neto', 'Precio Neto', 'Neto', 'PRECIO NETO', 'Price']) || '0')
-                })).filter(p => p.sku && p.price > 0);
+                const parsedPriceRows = rows
+                    .map((row) => {
+                        const sku = normalizeSku(getValueByAliases(row, ['sku', 'codigo', 'codigoproducto', 'productoid']));
+                        const rawPrice = getValueByAliases(row, ['precionetoventa', 'precioneto', 'precio', 'neto', 'price']);
+                        const price = Number(rawPrice);
+                        return {
+                            sku,
+                            price: Number.isFinite(price) ? Math.max(0, price) : NaN
+                        };
+                    })
+                    .filter((row) => row.sku && Number.isFinite(row.price));
 
-                if (priceUpdates.length === 0) {
-                    throw new Error('No se encontraron datos de precios válidos. Asegúrese de que el archivo tenga columnas de SKU y Precio Neto.');
+                const dedupedPrices = new Map<string, number>();
+                parsedPriceRows.forEach((row) => dedupedPrices.set(row.sku, row.price));
+
+                if (dedupedPrices.size === 0) {
+                    throw new Error('No se encontraron datos válidos. Este importador requiere columnas: SKU y Precio Neto Venta.');
                 }
 
-                let successCount = 0;
-                for (const update of priceUpdates) {
-                    const { error } = await (supabase.from('inventory') as any)
-                        .update({ price: update.price })
-                        .eq('sku', update.sku);
-                    if (!error) successCount++;
+                const { data: existingData, error: existingError } = await (supabase.from('inventory') as any)
+                    .select('id, sku');
+                if (existingError) throw existingError;
+
+                const existingBySku = new Map<string, any>();
+                (existingData || []).forEach((row: any) => existingBySku.set(normalizeSku(row.sku), row));
+
+                const rowsToApply: Array<{ id: string; price: number }> = [];
+                const unknownSkus: string[] = [];
+
+                dedupedPrices.forEach((price, sku) => {
+                    const existing = existingBySku.get(sku);
+                    if (existing?.id) {
+                        rowsToApply.push({ id: existing.id, price });
+                    } else {
+                        unknownSkus.push(sku);
+                    }
+                });
+
+                if (rowsToApply.length === 0) {
+                    throw new Error('Ningún SKU del archivo de precios coincide con el inventario actual.');
                 }
 
-                alert(`¡Lista de precios actualizada! Se actualizaron ${successCount} de ${priceUpdates.length} productos.`);
+                for (const chunk of chunkArray(rowsToApply, 200)) {
+                    const { error: applyError } = await (supabase.from('inventory') as any)
+                        .upsert(chunk, { onConflict: 'id' });
+                    if (applyError) throw applyError;
+                }
+
+                const appliedIdSet = new Set(rowsToApply.map((row) => row.id));
+                const idsToReset = (existingData || [])
+                    .map((row: any) => row.id as string)
+                    .filter((id: string) => Boolean(id) && !appliedIdSet.has(id));
+
+                for (const chunk of chunkArray(idsToReset, 200)) {
+                    const { error: resetError } = await (supabase.from('inventory') as any)
+                        .update({ price: 0 })
+                        .in('id', chunk);
+                    if (resetError) throw resetError;
+                }
+
+                const unknownMsg = unknownSkus.length > 0
+                    ? ` SKUs no encontrados: ${unknownSkus.length}.`
+                    : '';
+                alert(`Importador de precios completado. ${rowsToApply.length} SKU con precio actualizado y ${idsToReset.length} SKU reseteados a precio 0.${unknownMsg}`);
             }
 
             fetchInventory();
@@ -302,26 +440,26 @@ const Inventory = () => {
                     />
                 </div>
                 {canUploadInventory && (
-                    <div className="flex items-center space-x-3">
+                    <div className="flex flex-wrap items-center gap-3">
                         <button
-                            onClick={() => handleImportClick('inventory')}
+                            onClick={() => handleImportClick('stock')}
                             disabled={isImporting}
                             className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-indigo-600 font-bold hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
                         >
-                            {isImporting && importType === 'inventory' ? (
+                            {isImporting && importType === 'stock' ? (
                                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-indigo-600 border-t-transparent mr-2"></div>
                             ) : (
                                 <FileSpreadsheet size={18} className="mr-2" />
                             )}
-                            Importar Inventario
+                            Importar SKU + Nombre + Cantidad
                         </button>
                         <button
-                            onClick={downloadInventoryTemplate}
+                            onClick={downloadStockTemplate}
                             disabled={isImporting}
                             className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-slate-700 font-bold hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
                         >
                             <Download size={18} className="mr-2" />
-                            Descargar Plantilla
+                            Plantilla Stock
                         </button>
                         <button
                             onClick={() => handleImportClick('pricing')}
@@ -333,7 +471,15 @@ const Inventory = () => {
                             ) : (
                                 <TrendingUp size={18} className="mr-2" />
                             )}
-                            Cargar Lista Precios
+                            Importar SKU + Precio Neto
+                        </button>
+                        <button
+                            onClick={downloadPricingTemplate}
+                            disabled={isImporting}
+                            className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-slate-700 font-bold hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
+                        >
+                            <Download size={18} className="mr-2" />
+                            Plantilla Precios
                         </button>
                         <button
                             onClick={() => setShowNewProductModal(true)}

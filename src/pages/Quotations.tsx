@@ -544,7 +544,7 @@ const Quotations: React.FC = () => {
         const hasPendingApproval = editingQuotation?.discount_approval?.status === 'pending';
         const shouldCreateApprovalRequest = requiresApproval && !hasPendingApproval;
         if (requiresApproval && !discountApprovalRequested) {
-            setCreateError(`Descuento máximo permitido para vendedor: ${SELLER_MAX_DISCOUNT_PCT}%. Debes usar "Pedir autorización".`);
+            setCreateError(`Si el precio neto manual supera ${SELLER_MAX_DISCOUNT_PCT}% de descuento del precio de sistema, debes usar "Pedir autorización".`);
             return;
         }
 
@@ -1301,7 +1301,7 @@ const Quotations: React.FC = () => {
                                     <div className="mb-4 p-3 rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-800 text-xs font-bold">
                                         Vista comercial: costos y márgenes internos no se muestran en esta pantalla.
                                         <div className="mt-1 font-semibold">
-                                            Precio manual habilitado solo para {DISPATCH_SERVICE_NAME}.
+                                            Puedes editar precio neto manual. Si supera {SELLER_MAX_DISCOUNT_PCT}% de descuento, se solicitará autorización.
                                         </div>
                                     </div>
                                 )}
@@ -1312,7 +1312,8 @@ const Quotations: React.FC = () => {
                                         <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100 relative group">
                                             {(() => {
                                                 const resolvedProduct = resolveInventoryProduct(item);
-                                                const allowManualPrice = !isSellerRole || isDispatchServiceProduct(resolvedProduct);
+                                                const allowManualUnitPrice = !isSellerRole || isDispatchServiceProduct(resolvedProduct);
+                                                const allowManualNetPrice = !isSellerRole || Boolean(resolvedProduct);
                                                 return (
                                                     <>
                                             <div className="col-span-1 md:col-span-3 relative">
@@ -1449,15 +1450,15 @@ const Quotations: React.FC = () => {
                                                 <input
                                                     type="number"
                                                     min="0"
-                                                    disabled={!allowManualPrice}
-                                                    className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none ${allowManualPrice
+                                                    disabled={!allowManualUnitPrice}
+                                                    className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none ${allowManualUnitPrice
                                                         ? 'bg-white border-gray-200 focus:ring-2 focus:ring-indigo-500'
                                                         : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
                                                         }`}
                                                     placeholder="$ 0"
                                                     value={item.price}
                                                     onChange={(e) => {
-                                                        if (!allowManualPrice) return;
+                                                        if (!allowManualUnitPrice) return;
                                                         const price = parseFloat(e.target.value) || 0;
                                                         applyItemPricing(index, (current) => ({ ...current, price, netPrice: price }));
                                                     }}
@@ -1486,14 +1487,14 @@ const Quotations: React.FC = () => {
                                                 <input
                                                     type="number"
                                                     min="0"
-                                                    disabled={!allowManualPrice}
-                                                    className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none ${allowManualPrice
+                                                    disabled={!allowManualNetPrice}
+                                                    className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none ${allowManualNetPrice
                                                         ? 'bg-white border-gray-200 focus:ring-2 focus:ring-indigo-500'
                                                         : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
                                                         }`}
                                                     value={item.netPrice ?? item.price ?? 0}
                                                     onChange={(e) => {
-                                                        if (!allowManualPrice) return;
+                                                        if (!allowManualNetPrice) return;
                                                         const netPrice = Math.max(0, parseFloat(e.target.value) || 0);
                                                         applyItemPricing(index, (current) => ({ ...current, netPrice }));
                                                     }}
