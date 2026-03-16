@@ -7,6 +7,7 @@ type SendGmailMessageInput = {
     subject: string;
     message: string;
     attachment?: File | null;
+    attachments?: File[];
     clientId?: string;
     profileId?: string;
 };
@@ -18,7 +19,7 @@ const toWebSafeBase64 = (value: string) =>
         .replace(/=+$/, '');
 
 export const sendGmailMessage = async (input: SendGmailMessageInput) => {
-    const { to, cc = '', subject, message, attachment = null, clientId, profileId } = input;
+    const { to, cc = '', subject, message, attachment = null, attachments = [], clientId, profileId } = input;
     const { data: { session } } = await supabase.auth.getSession();
     const validToken = await googleService.ensureSession();
 
@@ -43,23 +44,28 @@ export const sendGmailMessage = async (input: SendGmailMessageInput) => {
         ''
     ];
 
+    const allAttachments = [...attachments];
     if (attachment) {
+        allAttachments.push(attachment);
+    }
+
+    for (const currentAttachment of allAttachments) {
         const reader = new FileReader();
         await new Promise((resolve, reject) => {
             reader.onload = () => resolve(reader.result);
             reader.onerror = reject;
-            reader.readAsDataURL(attachment);
+            reader.readAsDataURL(currentAttachment);
         });
 
         const base64Data = String(reader.result || '').split(',')[1];
         if (!base64Data) {
-            throw new Error('No se pudo leer el archivo adjunto.');
+            throw new Error(`No se pudo leer el archivo adjunto ${currentAttachment.name}.`);
         }
 
         messageParts.push(
             `--${boundary}`,
-            `Content-Type: ${attachment.type}; name="${attachment.name}"`,
-            `Content-Disposition: attachment; filename="${attachment.name}"`,
+            `Content-Type: ${currentAttachment.type || 'application/octet-stream'}; name="${currentAttachment.name}"`,
+            `Content-Disposition: attachment; filename="${currentAttachment.name}"`,
             'Content-Transfer-Encoding: base64',
             '',
             base64Data,

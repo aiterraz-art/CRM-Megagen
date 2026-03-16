@@ -52,6 +52,24 @@ const normalizeSellerToken = (value: string): string => value
     .replace(/\s+/g, ' ')
     .trim();
 
+const normalizeSheetHeader = (value: string): string => value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildNormalizedSheetRow = (row: Record<string, unknown>) => {
+    const normalizedRow = new globalThis.Map<string, unknown>();
+    Object.entries(row).forEach(([key, value]) => {
+        normalizedRow.set(normalizeSheetHeader(key), value);
+    });
+    return normalizedRow;
+};
+
+const isBlankSpreadsheetValue = (value: unknown): boolean => value == null || `${value}`.trim() === '';
+
 const looksLikeRutValue = (value: string): boolean => {
     const clean = (value || '').replace(/[^0-9kK]/g, '').toUpperCase();
     if (clean.length < 2) return false;
@@ -112,6 +130,22 @@ const deg2rad = (deg: number) => {
     return deg * (Math.PI / 180);
 };
 
+const buildClientFormState = (assignedSellerId = '') => ({
+    name: '',
+    rut: '',
+    phone: '',
+    email: '',
+    address: '',
+    lat: SANTIAGO_CENTER.lat,
+    lng: SANTIAGO_CENTER.lng,
+    notes: '',
+    giro: '',
+    comuna: '',
+    office: '',
+    assignedSellerId,
+    creditDays: 0
+});
+
 const ClientsContent = () => {
     const { profile, hasPermission, isSupervisor, effectiveRole } = useUser();
     const navigate = useNavigate();
@@ -150,7 +184,9 @@ const ClientsContent = () => {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const csvInputRef = useRef<HTMLInputElement>(null);
+    const creditDaysInputRef = useRef<HTMLInputElement>(null);
     const [importing, setImporting] = useState(false);
+    const [creditDaysImporting, setCreditDaysImporting] = useState(false);
 
     const [viewMode, setViewMode] = useState<'all' | 'mine'>('all'); // For Admins
     const [portfolioTab, setPortfolioTab] = useState<'portfolio' | 'pool'>('portfolio');
@@ -159,26 +195,14 @@ const ClientsContent = () => {
     const isSellerRole = effectiveRole === 'seller';
     const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canAssignClientOwner = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canManageClientCredit = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
     );
 
     // New/Edit Client Form State
-    const [clientForm, setClientForm] = useState({
-        name: '',
-        rut: '',
-        phone: '',
-        email: '',
-        address: '',
-        lat: SANTIAGO_CENTER.lat,
-        lng: SANTIAGO_CENTER.lng,
-        notes: '',
-        giro: '',
-        comuna: '',
-        office: '',
-        assignedSellerId: ''
-    });
+    const [clientForm, setClientForm] = useState(buildClientFormState());
 
     // Maps State for Modal
     const [manualLocation, setManualLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -196,7 +220,7 @@ const ClientsContent = () => {
                 const parsed = JSON.parse(savedState);
                 // Only restore if it was open
                 if (parsed.isModalOpen) {
-                    setClientForm(parsed.clientForm);
+                    setClientForm({ ...buildClientFormState(), ...(parsed.clientForm || {}) });
                     setManualLocation(parsed.manualLocation);
                     setIsEditing(parsed.isEditing);
                     setIsModalOpen(true);
@@ -354,6 +378,7 @@ const ClientsContent = () => {
         if (clientToEdit) {
             setIsEditing(clientToEdit.id);
             setClientForm({
+                ...buildClientFormState(clientToEdit.created_by || ''),
                 name: clientToEdit.name,
                 rut: clientToEdit.rut || '',
                 phone: clientToEdit.phone || '',
@@ -365,7 +390,8 @@ const ClientsContent = () => {
                 giro: clientToEdit.giro || '',
                 comuna: clientToEdit.comuna || '',
                 office: clientToEdit.office || '',
-                assignedSellerId: clientToEdit.created_by || ''
+                assignedSellerId: clientToEdit.created_by || '',
+                creditDays: clientToEdit.credit_days ?? 0
             });
             if (clientToEdit.lat && clientToEdit.lng) {
                 setManualLocation({ lat: clientToEdit.lat, lng: clientToEdit.lng });
@@ -374,20 +400,7 @@ const ClientsContent = () => {
             }
         } else {
             setIsEditing(null);
-            setClientForm({
-                name: '',
-                rut: '',
-                phone: '',
-                email: '',
-                address: '',
-                lat: SANTIAGO_CENTER.lat,
-                lng: SANTIAGO_CENTER.lng,
-                notes: '',
-                giro: '',
-                comuna: '',
-                office: '',
-                assignedSellerId: profile?.id || ''
-            });
+            setClientForm(buildClientFormState(profile?.id || ''));
             setManualLocation(null);
         }
         setIsModalOpen(true);
@@ -446,6 +459,7 @@ const ClientsContent = () => {
         e.preventDefault();
         setSubmitting(true);
         const normalizedRut = normalizeRut(clientForm.rut);
+        const sanitizedCreditDays = Math.max(0, Math.trunc(Number(clientForm.creditDays || 0)));
 
         // Always try to read from the input DOM value to capture latest typing.
         let finalAddress = (inputRef.current?.value || clientForm.address || '').trim();
@@ -518,6 +532,7 @@ const ClientsContent = () => {
                         giro: clientForm.giro,
                         comuna: finalComuna,
                         office: clientForm.office,
+                        ...(canManageClientCredit ? { credit_days: sanitizedCreditDays } : {}),
                         ...(canAssignClientOwner ? { created_by: clientForm.assignedSellerId, pending_seller_email: null } : {})
                     })
                     .eq('id', isEditing);
@@ -562,7 +577,8 @@ const ClientsContent = () => {
                         zone: 'Santiago',
                         giro: clientForm.giro,
                         comuna: finalComuna,
-                        office: clientForm.office
+                        office: clientForm.office,
+                        credit_days: 0
                     });
 
                 if (insertError) throw insertError;
@@ -765,6 +781,7 @@ const ClientsContent = () => {
                             lat: SANTIAGO_CENTER.lat,
                             lng: SANTIAGO_CENTER.lng,
                             office: office,
+                            credit_days: 0,
                             notes: 'Importado vía Excel'
                         },
                         meta: {
@@ -922,6 +939,183 @@ const ClientsContent = () => {
         });
     }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode, clientTypeFilter, portfolioTab]);
 
+    const downloadCreditDaysList = () => {
+        if (filteredClients.length === 0) {
+            alert('No hay clientes cargados en esta vista para exportar.');
+            return;
+        }
+
+        const headers = ['ID', 'RUT', 'Nombre', 'Días de Crédito'];
+        const data = filteredClients.map((client) => [
+            client.id,
+            client.rut || '',
+            client.name,
+            client.credit_days ?? ''
+        ]);
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+        XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+        XLSX.writeFile(wb, 'clientes_dias_credito.xlsx');
+    };
+
+    const handleCreditDaysUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!canManageClientCredit) {
+            alert('Acceso denegado: Solo admin o jefe pueden importar días de crédito.');
+            if (creditDaysInputRef.current) creditDaysInputRef.current.value = '';
+            return;
+        }
+
+        setCreditDaysImporting(true);
+        const reader = new FileReader();
+
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+
+                if (rows.length === 0) {
+                    alert('El archivo está vacío.');
+                    return;
+                }
+
+                const normalizedHeaders = new Set(
+                    Object.keys(rows[0] || {}).map((header) => normalizeSheetHeader(header))
+                );
+                const hasIdHeader = normalizedHeaders.has('id');
+                const hasRutHeader = normalizedHeaders.has('rut');
+                const hasCreditDaysHeader = normalizedHeaders.has('dias de credito') || normalizedHeaders.has('credit days');
+
+                if ((!hasIdHeader && !hasRutHeader) || !hasCreditDaysHeader) {
+                    alert('Formato inválido. El archivo debe incluir las columnas "ID" o "RUT" y "Días de Crédito".');
+                    return;
+                }
+
+                let updatedCount = 0;
+                let skippedCount = 0;
+                let errorCount = 0;
+                const rejectedRows: Array<{ fila: number; motivo: string; id: string; rut: string; nombre: string; dias_credito: string }> = [];
+
+                for (let idx = 0; idx < rows.length; idx++) {
+                    const row = rows[idx];
+                    const rowNumber = idx + 2;
+                    const normalizedRow = buildNormalizedSheetRow(row);
+                    const clientId = `${normalizedRow.get('id') ?? ''}`.trim();
+                    const rutRaw = `${normalizedRow.get('rut') ?? ''}`.trim();
+                    const clientName = `${normalizedRow.get('nombre') ?? ''}`.trim();
+                    const creditDaysRaw = normalizedRow.get('dias de credito');
+                    const creditDaysText = `${creditDaysRaw ?? ''}`.trim();
+
+                    if (!clientId && !rutRaw) {
+                        errorCount++;
+                        rejectedRows.push({
+                            fila: rowNumber,
+                            motivo: 'Fila sin ID ni RUT para identificar al cliente',
+                            id: clientId,
+                            rut: rutRaw,
+                            nombre: clientName,
+                            dias_credito: creditDaysText
+                        });
+                        continue;
+                    }
+
+                    if (isBlankSpreadsheetValue(creditDaysRaw)) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    const parsedCreditDays = Number(creditDaysText.replace(',', '.'));
+                    if (!Number.isFinite(parsedCreditDays) || parsedCreditDays < 0 || !Number.isInteger(parsedCreditDays)) {
+                        errorCount++;
+                        rejectedRows.push({
+                            fila: rowNumber,
+                            motivo: 'Días de crédito inválidos. Usa un entero mayor o igual a 0',
+                            id: clientId,
+                            rut: rutRaw,
+                            nombre: clientName,
+                            dias_credito: creditDaysText
+                        });
+                        continue;
+                    }
+
+                    try {
+                        let updateQuery = supabase
+                            .from('clients')
+                            .update({ credit_days: parsedCreditDays })
+                            .select('id');
+
+                        if (clientId) {
+                            updateQuery = updateQuery.eq('id', clientId);
+                        } else {
+                            const normalizedRut = looksLikeRutValue(rutRaw) ? normalizeRut(rutRaw).toUpperCase() : rutRaw;
+                            updateQuery = updateQuery.eq('rut', normalizedRut);
+                        }
+
+                        const { data: updatedRows, error } = await updateQuery;
+                        if (error) throw error;
+
+                        if (!updatedRows || updatedRows.length === 0) {
+                            errorCount++;
+                            rejectedRows.push({
+                                fila: rowNumber,
+                                motivo: 'Cliente no encontrado o sin permisos para actualizar',
+                                id: clientId,
+                                rut: rutRaw,
+                                nombre: clientName,
+                                dias_credito: creditDaysText
+                            });
+                            continue;
+                        }
+
+                        updatedCount++;
+                    } catch (error: any) {
+                        errorCount++;
+                        rejectedRows.push({
+                            fila: rowNumber,
+                            motivo: `Error al actualizar: ${error.message}`,
+                            id: clientId,
+                            rut: rutRaw,
+                            nombre: clientName,
+                            dias_credito: creditDaysText
+                        });
+                    }
+                }
+
+                alert(
+                    `Importación de días de crédito finalizada.\n\n` +
+                    `✅ Actualizados: ${updatedCount}\n` +
+                    `⏭️ Omitidos sin valor: ${skippedCount}\n` +
+                    `❌ Errores: ${errorCount}`
+                );
+
+                if (rejectedRows.length > 0) {
+                    const rejectedWb = XLSX.utils.book_new();
+                    const rejectedWs = XLSX.utils.json_to_sheet(rejectedRows, {
+                        header: ['fila', 'motivo', 'id', 'rut', 'nombre', 'dias_credito']
+                    });
+                    XLSX.utils.book_append_sheet(rejectedWb, rejectedWs, 'Rechazados');
+                    XLSX.writeFile(rejectedWb, 'clientes_dias_credito_rechazados.xlsx');
+                }
+
+                fetchClients();
+            } catch (error) {
+                console.error('Credit days import error:', error);
+                alert('Error al leer el archivo Excel de días de crédito. Verifica que sea un .xlsx válido.');
+            } finally {
+                setCreditDaysImporting(false);
+                if (creditDaysInputRef.current) creditDaysInputRef.current.value = '';
+            }
+        };
+
+        reader.readAsBinaryString(file);
+    };
+
     const clientStats = useMemo(() => {
         const inRisk = filteredClients.filter((client) => (neglectedData[client.id] || 0) >= 15).length;
         const withCoordinates = filteredClients.filter((client) => !!client.lat && !!client.lng).length;
@@ -996,6 +1190,39 @@ const ClientsContent = () => {
                                     <Upload size={18} className="mr-2" />
                                 )}
                                 {importing ? '...' : 'Importar Excel'}
+                            </button>
+                        </>
+                    )}
+
+                    {canManageClientCredit && (
+                        <>
+                            <input
+                                type="file"
+                                accept=".xlsx, .xls"
+                                ref={creditDaysInputRef}
+                                onChange={handleCreditDaysUpload}
+                                className="hidden"
+                            />
+                            <button
+                                onClick={downloadCreditDaysList}
+                                className="bg-sky-50 text-sky-700 px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-sky-100 transition-all text-sm"
+                                title="Descargar listado de clientes con días de crédito"
+                            >
+                                <CheckCircle2 size={18} className="mr-2" />
+                                Días Crédito
+                            </button>
+                            <button
+                                onClick={() => creditDaysInputRef.current?.click()}
+                                disabled={creditDaysImporting}
+                                className="bg-sky-600 text-white px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-sky-700 shadow-lg shadow-sky-100 transition-all text-sm disabled:opacity-50"
+                                title="Importar días de crédito"
+                            >
+                                {creditDaysImporting ? (
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent animate-spin rounded-full mr-2"></div>
+                                ) : (
+                                    <Upload size={18} className="mr-2" />
+                                )}
+                                {creditDaysImporting ? '...' : 'Importar Crédito'}
                             </button>
                         </>
                     )}
@@ -1587,6 +1814,34 @@ const ClientsContent = () => {
                                                 />
                                             </div>
                                         </div>
+
+                                        {isEditing && canManageClientCredit && (
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Días de Crédito</label>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="1"
+                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                    value={clientForm.creditDays}
+                                                    onChange={e => setClientForm({ ...clientForm, creditDays: Math.max(0, Math.trunc(Number(e.target.value || 0))) })}
+                                                />
+                                                <p className="text-xs text-gray-400 font-medium ml-1">Solo admin o jefe pueden modificar el crédito del cliente.</p>
+                                            </div>
+                                        )}
+
+                                        {!isEditing && (
+                                            <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-800">
+                                                Todo cliente nuevo se crea sin crédito. Si corresponde, admin o jefe pueden asignarlo después.
+                                            </div>
+                                        )}
+
+                                        {isEditing && !canManageClientCredit && (
+                                            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Días de Crédito</p>
+                                                <p className="mt-1 text-sm font-bold text-gray-700">{clientForm.creditDays || 0} días</p>
+                                            </div>
+                                        )}
 
                                         {canAssignClientOwner && (
                                             <div className="space-y-2">

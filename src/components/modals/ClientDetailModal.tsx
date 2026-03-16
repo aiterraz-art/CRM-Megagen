@@ -316,6 +316,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Teléfono</label><a href={`tel:${client.phone}`} className="font-bold text-indigo-600 hover:underline">{client.phone}</a></div>
                                                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Email</label><a href={`mailto:${client.email}`} className="font-bold text-indigo-600 hover:underline">{client.email}</a></div>
                                                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Giro</label><p className="font-medium text-gray-700">{client.giro || '---'}</p></div>
+                                                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Días de Crédito</label><p className="font-medium text-gray-700">{client.credit_days || 0} días</p></div>
                                                 <div className="col-span-1 md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Notas</label><p className="font-medium text-gray-600 bg-gray-50 p-4 rounded-xl border border-gray-200/50 italic">{client.notes || 'Sin notas registradas.'}</p></div>
                                             </div>
                                         </div>

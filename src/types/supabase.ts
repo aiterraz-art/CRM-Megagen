@@ -25,6 +25,7 @@ export interface Database {
                     created_at: string
                     updated_at: string
                     rut: string | null
+                    credit_days: number
                     phone: string | null
                     email: string | null
                     notes: string | null
@@ -48,6 +49,7 @@ export interface Database {
                     created_at?: string
                     updated_at?: string
                     rut?: string | null
+                    credit_days?: number
                     phone?: string | null
                     email?: string | null
                     notes?: string | null
@@ -71,6 +73,7 @@ export interface Database {
                     created_at?: string
                     updated_at?: string
                     rut?: string | null
+                    credit_days?: number
                     phone?: string | null
                     email?: string | null
                     notes?: string | null
@@ -205,44 +208,82 @@ export interface Database {
             }
             orders: {
                 Row: {
+                    client_id: string | null
+                    created_at: string | null
+                    delivery_photo_url: string | null
+                    delivery_status: string | null
+                    delivered_at: string | null
                     id: string
                     folio: number | null
+                    interaction_type: string | null
                     items: Json | null
+                    notes: string | null
+                    payment_email_error: string | null
+                    payment_email_sent_at: string | null
+                    payment_email_status: string
+                    payment_proof_mime_type: string | null
+                    payment_proof_name: string | null
+                    payment_proof_path: string | null
+                    payment_proof_uploaded_at: string | null
+                    quotation_id: string | null
+                    route_id: string | null
                     status: string | null
                     total_amount: number | null
                     total_discount: number | null
+                    user_id: string | null
                     visit_id: string | null
-                    interaction_type: string | null
-                    delivery_status: string | null
-                    delivery_photo_url: string | null
-                    delivered_at: string | null
-                    route_id: string | null
                 }
                 Insert: {
+                    client_id?: string | null
+                    created_at?: string | null
+                    delivery_photo_url?: string | null
+                    delivery_status?: string | null
+                    delivered_at?: string | null
                     id?: string
                     folio?: number | null
+                    interaction_type?: string | null
                     items?: Json | null
+                    notes?: string | null
+                    payment_email_error?: string | null
+                    payment_email_sent_at?: string | null
+                    payment_email_status?: string
+                    payment_proof_mime_type?: string | null
+                    payment_proof_name?: string | null
+                    payment_proof_path?: string | null
+                    payment_proof_uploaded_at?: string | null
+                    quotation_id?: string | null
+                    route_id?: string | null
                     status?: string | null
                     total_amount?: number | null
                     total_discount?: number | null
+                    user_id?: string | null
                     visit_id?: string | null
-                    delivery_status?: string | null
-                    delivery_photo_url?: string | null
-                    delivered_at?: string | null
-                    route_id?: string | null
                 }
                 Update: {
+                    client_id?: string | null
+                    created_at?: string | null
+                    delivery_photo_url?: string | null
+                    delivery_status?: string | null
+                    delivered_at?: string | null
                     id?: string
                     folio?: number | null
+                    interaction_type?: string | null
                     items?: Json | null
+                    notes?: string | null
+                    payment_email_error?: string | null
+                    payment_email_sent_at?: string | null
+                    payment_email_status?: string
+                    payment_proof_mime_type?: string | null
+                    payment_proof_name?: string | null
+                    payment_proof_path?: string | null
+                    payment_proof_uploaded_at?: string | null
+                    quotation_id?: string | null
+                    route_id?: string | null
                     status?: string | null
                     total_amount?: number | null
                     total_discount?: number | null
+                    user_id?: string | null
                     visit_id?: string | null
-                    delivery_status?: string | null
-                    delivery_photo_url?: string | null
-                    delivered_at?: string | null
-                    route_id?: string | null
                 }
             }
             installed_base: {

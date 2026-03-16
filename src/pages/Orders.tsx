@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, RefreshCw, Search, ShoppingCart } from 'lucide-react';
+import { FileText, RefreshCw, Search, ShoppingCart, Send } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { sendOrderNotificationEmail } from '../utils/orderEmail';
+import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 
 type OrderStatusFilter = 'all' | 'completed' | 'cancelled';
 type DeliveryStatusFilter = 'all' | 'pending' | 'out_for_delivery' | 'delivered';
@@ -20,10 +22,39 @@ type EnrichedOrder = {
     total_amount: number | null;
     created_at: string | null;
     user_id: string | null;
+    payment_email_status: string | null;
+    payment_email_error: string | null;
 };
 
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString('es-CL')}`;
 const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL') : '-';
+const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
+
+const getPaymentEmailStatusStyles = (status: string | null | undefined) => {
+    switch ((status || '').toLowerCase()) {
+        case 'sent':
+            return 'bg-emerald-100 text-emerald-700';
+        case 'failed':
+            return 'bg-red-100 text-red-700';
+        case 'pending':
+            return 'bg-amber-100 text-amber-700';
+        default:
+            return 'bg-gray-100 text-gray-600';
+    }
+};
+
+const getPaymentEmailStatusLabel = (status: string | null | undefined) => {
+    switch ((status || '').toLowerCase()) {
+        case 'sent':
+            return 'Correo enviado';
+        case 'failed':
+            return 'Error correo';
+        case 'pending':
+            return 'Pendiente correo';
+        default:
+            return 'Sin envio';
+    }
+};
 
 const Orders = () => {
     const { profile, effectiveRole, hasPermission, isSupervisor } = useUser();
@@ -35,6 +66,7 @@ const Orders = () => {
     const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<DeliveryStatusFilter>('all');
     const [viewMode, setViewMode] = useState<ViewMode>('all');
+    const [resendingOrderId, setResendingOrderId] = useState<string | null>(null);
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewAll = useMemo(
@@ -48,7 +80,7 @@ const Orders = () => {
         try {
             let query = supabase
                 .from('orders')
-                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, total_amount, created_at')
+                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, total_amount, created_at, payment_email_status, payment_email_error')
                 .not('quotation_id', 'is', null)
                 .order('created_at', { ascending: false });
 
@@ -108,7 +140,9 @@ const Orders = () => {
                     delivery_status: order.delivery_status ?? null,
                     total_amount: order.total_amount ?? 0,
                     created_at: order.created_at ?? null,
-                    user_id: order.user_id ?? null
+                    user_id: order.user_id ?? null,
+                    payment_email_status: order.payment_email_status ?? null,
+                    payment_email_error: order.payment_email_error ?? null
                 };
             });
 
@@ -128,6 +162,136 @@ const Orders = () => {
             fetchOrders();
         }
     }, [fetchOrders, profile?.id]);
+
+    const updateOrderEmailStatus = useCallback(async (orderId: string, status: 'sent' | 'failed', errorMessage?: string | null) => {
+        const payload: any = {
+            payment_email_status: status,
+            payment_email_error: status === 'failed' ? (errorMessage || 'No se pudo enviar el correo') : null,
+            payment_email_sent_at: status === 'sent' ? new Date().toISOString() : null
+        };
+
+        const { error } = await supabase
+            .from('orders')
+            .update(payload)
+            .eq('id', orderId);
+
+        if (error) {
+            console.warn('No se pudo actualizar el estado de correo del pedido:', error.message);
+        }
+    }, []);
+
+    const handleResendOrderEmail = useCallback(async (order: EnrichedOrder) => {
+        if (!profile?.id) {
+            alert('No se pudo identificar al usuario actual.');
+            return;
+        }
+        if (order.user_id !== profile.id) {
+            alert('Solo el vendedor dueño del pedido puede reenviar este correo.');
+            return;
+        }
+
+        setResendingOrderId(order.id);
+        try {
+            const { data: orderRow, error: orderError } = await supabase
+                .from('orders')
+                .select('id, folio, client_id, user_id, total_amount, payment_proof_path, payment_proof_name, payment_proof_mime_type')
+                .eq('id', order.id)
+                .single();
+
+            if (orderError) throw orderError;
+
+            const [clientRes, sellerRes, itemsRes] = await Promise.all([
+                supabase
+                    .from('clients')
+                    .select('id, name, rut, address, office, phone, email, giro, credit_days')
+                    .eq('id', orderRow.client_id)
+                    .single(),
+                supabase
+                    .from('profiles')
+                    .select('id, full_name, email')
+                    .eq('id', orderRow.user_id)
+                    .single(),
+                supabase
+                    .from('order_items')
+                    .select('quantity, unit_price, total_price, inventory(name, sku)')
+                    .eq('order_id', order.id)
+            ]);
+
+            if (clientRes.error) throw clientRes.error;
+            if (sellerRes.error) throw sellerRes.error;
+            if (itemsRes.error) throw itemsRes.error;
+
+            const client = clientRes.data;
+            const seller = sellerRes.data;
+            const creditDays = getClientCreditDays(client);
+
+            let proofAttachment: File | null = null;
+            if (orderRow.payment_proof_path) {
+                const { data: proofBlob, error: proofError } = await supabase.storage
+                    .from(PAYMENT_PROOFS_BUCKET)
+                    .download(orderRow.payment_proof_path);
+
+                if (proofError) throw proofError;
+
+                proofAttachment = new File(
+                    [proofBlob],
+                    orderRow.payment_proof_name || 'comprobante_pago',
+                    { type: orderRow.payment_proof_mime_type || proofBlob.type || 'application/octet-stream' }
+                );
+            } else if (creditDays === 0) {
+                throw new Error('El pedido no tiene un comprobante de pago guardado para reenviar.');
+            }
+
+            await sendOrderNotificationEmail({
+                order: {
+                    folio: orderRow.folio || order.id.slice(0, 8),
+                    quotationFolio: order.quotation_folio,
+                    date: new Date(order.created_at || new Date().toISOString()).toLocaleDateString('es-CL'),
+                    clientName: client.name,
+                    clientRut: client.rut || '',
+                    clientAddress: client.address || '',
+                    clientOffice: client.office || '',
+                    clientPhone: client.phone || '',
+                    clientEmail: client.email || '',
+                    clientGiro: client.giro || '',
+                    paymentTerms: formatPaymentTermsFromCreditDays(creditDays),
+                    sellerName: seller.full_name || seller.email || 'Vendedor',
+                    sellerEmail: seller.email || '',
+                    items: (itemsRes.data || []).map((item: any) => ({
+                        code: item.inventory?.sku || '',
+                        detail: item.inventory?.name || 'Producto',
+                        qty: Number(item.quantity || 0),
+                        unit: 'UN',
+                        unitPrice: Number(item.unit_price || 0),
+                        total: Number(item.total_price || 0)
+                    })),
+                    totalAmount: Number(orderRow.total_amount || 0)
+                },
+                proofAttachment,
+                clientId: client.id,
+                profileId: profile.id
+            });
+
+            await updateOrderEmailStatus(order.id, 'sent');
+            setOrders((prev) => prev.map((current) => (
+                current.id === order.id
+                    ? { ...current, payment_email_status: 'sent', payment_email_error: null }
+                    : current
+            )));
+            alert('Correo reenviado correctamente.');
+        } catch (error: any) {
+            const message = error?.message || 'No se pudo reenviar el correo';
+            await updateOrderEmailStatus(order.id, 'failed', message);
+            setOrders((prev) => prev.map((current) => (
+                current.id === order.id
+                    ? { ...current, payment_email_status: 'failed', payment_email_error: message }
+                    : current
+            )));
+            alert(message);
+        } finally {
+            setResendingOrderId(null);
+        }
+    }, [profile?.id, updateOrderEmailStatus]);
 
     const filteredOrders = useMemo(() => {
         const term = search.trim().toLowerCase();
@@ -277,7 +441,7 @@ const Orders = () => {
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full min-w-[1024px] text-sm">
+                        <table className="w-full min-w-[1240px] text-sm">
                             <thead className="bg-gray-50 border-y border-gray-100">
                                 <tr>
                                     <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Pedido</th>
@@ -285,9 +449,11 @@ const Orders = () => {
                                     <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Cliente</th>
                                     <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Vendedor</th>
                                     <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Estado Venta</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Correo</th>
                                     <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Estado Despacho</th>
                                     <th className="text-right px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Total</th>
                                     <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Fecha</th>
+                                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-black text-gray-500">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -303,12 +469,44 @@ const Orders = () => {
                                             </span>
                                         </td>
                                         <td className="px-4 py-3">
+                                            <div className="space-y-1">
+                                                <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${getPaymentEmailStatusStyles(order.payment_email_status)}`}>
+                                                    {getPaymentEmailStatusLabel(order.payment_email_status)}
+                                                </span>
+                                                {order.payment_email_error && (
+                                                    <p className="text-[11px] font-medium text-red-600 max-w-[200px] truncate" title={order.payment_email_error}>
+                                                        {order.payment_email_error}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3">
                                             <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${String(order.delivery_status || '').toLowerCase() === 'delivered' ? 'bg-emerald-100 text-emerald-700' : String(order.delivery_status || '').toLowerCase() === 'out_for_delivery' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
                                                 {order.delivery_status || 'pending'}
                                             </span>
                                         </td>
                                         <td className="px-4 py-3 text-right font-black text-gray-900">{formatMoney(order.total_amount)}</td>
                                         <td className="px-4 py-3 font-medium text-gray-500">{formatDate(order.created_at)}</td>
+                                        <td className="px-4 py-3">
+                                            {(order.user_id === profile?.id && (order.payment_email_status === 'pending' || order.payment_email_status === 'failed')) ? (
+                                                <button
+                                                    onClick={() => handleResendOrderEmail(order)}
+                                                    disabled={resendingOrderId === order.id}
+                                                    className="inline-flex items-center px-3 py-2 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-wider hover:bg-indigo-700 transition-all disabled:opacity-50"
+                                                >
+                                                    {resendingOrderId === order.id ? (
+                                                        <div className="w-4 h-4 border-2 border-white border-t-transparent animate-spin rounded-full" />
+                                                    ) : (
+                                                        <>
+                                                            <Send size={14} className="mr-2" />
+                                                            Reenviar
+                                                        </>
+                                                    )}
+                                                </button>
+                                            ) : (
+                                                <span className="text-xs text-gray-400 font-medium">-</span>
+                                            )}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>

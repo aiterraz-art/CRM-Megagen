@@ -1,12 +1,14 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone, Mail } from 'lucide-react';
+import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone, Mail, Upload } from 'lucide-react';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { useVisit } from '../contexts/VisitContext';
 import { checkGPSConnection } from '../utils/gps';
 import { queueQuotationLocation } from '../services/locationQueue';
+import { sendOrderNotificationEmail } from '../utils/orderEmail';
+import { formatPaymentTermsFromCreditDays, getClientCreditDays, getPaymentTermsFromCreditDays } from '../utils/credit';
 
 const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
 
@@ -21,6 +23,8 @@ const formatMoney = (value: number) => `$${Number(value || 0).toLocaleString('es
 const SELLER_MAX_DISCOUNT_PCT = 5;
 const DISPATCH_SERVICE_NAME = 'SERVICIO DE DESPACHO';
 const DISPATCH_SERVICE_SKU = 'SERV-DESPACHO';
+const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
+const PAYMENT_PROOF_MAX_BYTES = 20 * 1024 * 1024;
 const normalizeProductKey = (value: string) =>
     value
         .toUpperCase()
@@ -29,6 +33,8 @@ const normalizeProductKey = (value: string) =>
         .replace(/[^A-Z0-9]/g, '');
 const DISPATCH_SERVICE_NAME_KEY = normalizeProductKey(DISPATCH_SERVICE_NAME);
 const DISPATCH_SERVICE_SKU_KEY = normalizeProductKey(DISPATCH_SERVICE_SKU);
+
+const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp']);
 
 const notifyApprovalPush = async (approvalId: string) => {
     try {
@@ -70,6 +76,9 @@ const Quotations: React.FC = () => {
     const [isInteractionModalOpen, setIsInteractionModalOpen] = useState(false);
     const [selectedInteractionType, setSelectedInteractionType] = useState<'Presencial' | 'WhatsApp' | 'Teléfono'>('Presencial');
     const [discountApprovalRequested, setDiscountApprovalRequested] = useState(false);
+    const [quotationPendingOrder, setQuotationPendingOrder] = useState<any | null>(null);
+    const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
+    const [paymentProofError, setPaymentProofError] = useState<string | null>(null);
 
     // Form State
     const [formItems, setFormItems] = useState<any[]>([{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
@@ -194,7 +203,7 @@ const Quotations: React.FC = () => {
                 .from('quotations')
                 .select(`
                     *,
-                    clients (name, rut, address, zone, purchase_contact, status, phone, email, giro, comuna)
+                    clients (id, name, rut, address, zone, purchase_contact, status, phone, email, giro, comuna, office, credit_days)
                 `);
 
             if (isSellerRole && profile?.id) {
@@ -357,6 +366,30 @@ const Quotations: React.FC = () => {
         }
     }, [isItemModalOpen, selectedClient, formItems, formComments, paymentTerms, editingQuotation]);
 
+    useEffect(() => {
+        if (!selectedClient?.id || availableClients.length === 0) return;
+        const freshClient = availableClients.find((client) => client.id === selectedClient.id);
+        if (!freshClient) return;
+
+        if (freshClient !== selectedClient) {
+            setSelectedClient((prev: any) => {
+                if (!prev || prev.id !== freshClient.id) return prev;
+                return prev.credit_days === freshClient.credit_days
+                    && prev.name === freshClient.name
+                    && prev.office === freshClient.office
+                    ? prev
+                    : freshClient;
+            });
+        }
+
+        const nextPaymentTerms = getPaymentTermsFromCreditDays(getClientCreditDays(freshClient));
+        setPaymentTerms((prev) => (
+            prev.type === nextPaymentTerms.type && prev.days === nextPaymentTerms.days
+                ? prev
+                : nextPaymentTerms
+        ));
+    }, [availableClients, selectedClient]);
+
     const handleClientSelect = (client: any) => {
         setSelectedClient(client);
         setIsClientModalOpen(false);
@@ -364,7 +397,7 @@ const Quotations: React.FC = () => {
         // Reset form
         setFormItems([{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
         setFormComments('');
-        setPaymentTerms({ type: 'Contado', days: 0 }); // Reset defaults
+        setPaymentTerms(getPaymentTermsFromCreditDays(getClientCreditDays(client)));
         setManualLocation(null);
         setEditingQuotation(null); // Ensure we are NOT in edit mode
         setDiscountApprovalRequested(false);
@@ -389,18 +422,7 @@ const Quotations: React.FC = () => {
         });
         setFormItems(loadedItems.length > 0 ? loadedItems : [{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
         setFormComments(q.comments || '');
-        let parsedPaymentTerms = { type: 'Contado' as const, days: 0 };
-        if (q.payment_terms && typeof q.payment_terms === 'object') {
-            parsedPaymentTerms = q.payment_terms;
-        } else if (typeof q.payment_terms === 'string') {
-            try {
-                const decoded = JSON.parse(q.payment_terms);
-                if (decoded?.type) parsedPaymentTerms = decoded;
-            } catch {
-                parsedPaymentTerms = { type: 'Contado', days: 0 };
-            }
-        }
-        setPaymentTerms(parsedPaymentTerms);
+        setPaymentTerms(getPaymentTermsFromCreditDays(getClientCreditDays(q.client)));
         setCreateError(null);
         setDiscountApprovalRequested(q.discount_approval?.status === 'pending');
         setIsItemModalOpen(true);
@@ -466,6 +488,103 @@ const Quotations: React.FC = () => {
         const skuKey = normalizeProductKey(String(product.sku || ''));
         const nameKey = normalizeProductKey(String(product.name || ''));
         return skuKey === DISPATCH_SERVICE_SKU_KEY || nameKey === DISPATCH_SERVICE_NAME_KEY;
+    }, []);
+
+    const getQuotationCreditDays = useCallback((quotation: any) => getClientCreditDays(quotation?.client), []);
+
+    const validatePaymentProofFile = useCallback((file: File | null) => {
+        if (!file) return 'Debes adjuntar el comprobante de pago.';
+        if (file.size > PAYMENT_PROOF_MAX_BYTES) {
+            return 'El comprobante supera el máximo de 20MB.';
+        }
+        const extension = file.name.split('.').pop()?.toLowerCase() || '';
+        const mimeType = (file.type || '').toLowerCase();
+        const validMime = mimeType === 'application/pdf'
+            || mimeType === 'image/jpeg'
+            || mimeType === 'image/png'
+            || mimeType === 'image/webp';
+        if (!allowedPaymentProofExtensions.has(extension) && !validMime) {
+            return 'Formato inválido. Usa PDF, JPG, JPEG, PNG o WEBP.';
+        }
+        return null;
+    }, []);
+
+    const uploadPaymentProof = useCallback(async (quotation: any, file: File) => {
+        if (!profile?.id) throw new Error('No se pudo identificar al vendedor para subir el comprobante.');
+        const fileExt = file.name.split('.').pop()?.toLowerCase() || 'bin';
+        const safeBaseName = file.name
+            .replace(/\.[^.]+$/, '')
+            .replace(/[^a-zA-Z0-9_-]/g, '_')
+            .slice(0, 80) || 'comprobante';
+        const filePath = `${profile.id}/${quotation.id}/${Date.now()}_${safeBaseName}.${fileExt}`;
+
+        const { error } = await supabase.storage
+            .from(PAYMENT_PROOFS_BUCKET)
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: false,
+                contentType: file.type || undefined
+            });
+
+        if (error) throw error;
+
+        return {
+            path: filePath,
+            name: file.name,
+            mimeType: file.type || 'application/octet-stream'
+        };
+    }, [profile?.id]);
+
+    const updateOrderEmailStatus = useCallback(async (orderId: string, status: 'sent' | 'failed', errorMessage?: string | null) => {
+        const payload: any = {
+            payment_email_status: status,
+            payment_email_error: status === 'failed' ? (errorMessage || 'No se pudo enviar el correo') : null,
+            payment_email_sent_at: status === 'sent' ? new Date().toISOString() : null
+        };
+
+        const { error } = await supabase
+            .from('orders')
+            .update(payload)
+            .eq('id', orderId);
+
+        if (error) {
+            console.warn('No se pudo actualizar el estado de correo del pedido:', error.message);
+        }
+    }, []);
+
+    const buildOrderEmailPayload = useCallback((quotation: any, orderFolio: number | string) => {
+        const creditDays = getQuotationCreditDays(quotation);
+        const client = quotation?.client || {};
+        return {
+            folio: orderFolio,
+            quotationFolio: quotation?.folio || null,
+            date: new Date().toLocaleDateString('es-CL'),
+            clientName: client?.name || quotation?.client_name || 'Cliente',
+            clientRut: client?.rut || '',
+            clientAddress: client?.address || client?.comuna || '',
+            clientOffice: client?.office || '',
+            clientPhone: client?.phone || '',
+            clientEmail: client?.email || '',
+            clientGiro: client?.giro || '',
+            paymentTerms: formatPaymentTermsFromCreditDays(creditDays),
+            sellerName: quotation?.seller_name || 'Vendedor',
+            sellerEmail: quotation?.seller_email || '',
+            items: (quotation?.items || []).map((item: any) => ({
+                code: item.code || '',
+                detail: item.detail || '',
+                qty: Number(item.qty || 0),
+                unit: item.unit || 'UN',
+                unitPrice: Number(item.net_price ?? item.netPrice ?? item.price ?? 0),
+                total: Number(item.total ?? (Number(item.qty || 0) * Number(item.net_price ?? item.netPrice ?? item.price ?? 0) || 0))
+            })),
+            totalAmount: Number(quotation?.total_amount || 0)
+        };
+    }, [getQuotationCreditDays]);
+
+    const closePaymentProofModal = useCallback(() => {
+        setQuotationPendingOrder(null);
+        setPaymentProofFile(null);
+        setPaymentProofError(null);
     }, []);
 
     const handleDeleteQuotation = async (id: string) => {
@@ -603,6 +722,7 @@ const Quotations: React.FC = () => {
                     .update({
                         items: calculatedItems,
                         total_amount: grandTotal,
+                        payment_terms: paymentTerms,
                         comments: formComments,
                     })
                     .eq('id', editingQuotation.id);
@@ -729,10 +849,13 @@ const Quotations: React.FC = () => {
     useEffect(() => {
         if (isClientModalOpen) setClientSelectorSearch('');
     }, [isClientModalOpen]);
-    const handleConvertToOrder = async (quotation: any) => {
-        if (!confirm('¿Confirmar que el cliente aceptó esta cotización? Se generará una Venta y se actualizarán las metas.')) return;
+    const executeConvertToOrder = useCallback(async (quotation: any, proofFile: File | null) => {
         if (!profile?.id) {
             alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
+            return;
+        }
+        if (quotation?.seller_id !== profile.id) {
+            alert('Solo el vendedor dueño de la cotización puede convertirla a pedido.');
             return;
         }
         if (quotation?.discount_approval?.status === 'pending' || quotation?.discount_approval?.status === 'rejected') {
@@ -740,30 +863,104 @@ const Quotations: React.FC = () => {
             return;
         }
 
+        const creditDays = getQuotationCreditDays(quotation);
+        const requiresProof = creditDays === 0;
+        const validationError = requiresProof ? validatePaymentProofFile(proofFile) : null;
+        if (validationError) {
+            setPaymentProofError(validationError);
+            return;
+        }
+
         setSubmitting(true);
+        let uploadedProof: { path: string; name: string; mimeType: string } | null = null;
+        let createdOrderId: string | null = null;
+
         try {
-            // CALL THE NEW ATOMIC RPC FUNCTION
+            if (requiresProof && proofFile) {
+                uploadedProof = await uploadPaymentProof(quotation, proofFile);
+            }
+
             const { data, error } = await supabase.rpc('convert_quotation_to_order', {
                 p_quotation_id: quotation.id,
-                p_user_id: profile.id
+                p_user_id: profile.id,
+                p_payment_proof_path: uploadedProof?.path ?? null,
+                p_payment_proof_name: uploadedProof?.name ?? null,
+                p_payment_proof_mime_type: uploadedProof?.mimeType ?? null
             });
 
             if (error) throw error;
 
-            const alreadyExists = Boolean((data as any)?.already_exists);
-            if (alreadyExists) {
-                alert('Esta cotización ya tenía una venta asociada. Se abrió el registro existente sin duplicar.');
-            } else {
-                alert('¡Venta generada exitosamente! Stock actualizado y meta ajustada.');
+            const response = (data || {}) as any;
+            if (response?.already_exists) {
+                closePaymentProofModal();
+                alert('Esta cotización ya tenía un pedido asociado. Revisa el módulo de Pedidos para su estado de correo.');
+                fetchQuotations();
+                return;
             }
-            fetchQuotations();
 
+            createdOrderId = response?.order_id || null;
+            const orderFolio = response?.order_folio || response?.order_id?.slice?.(0, 8) || 'N/A';
+
+            try {
+                await sendOrderNotificationEmail({
+                    order: buildOrderEmailPayload(quotation, orderFolio),
+                    proofAttachment: requiresProof ? proofFile : null,
+                    clientId: quotation?.client_id || quotation?.client?.id,
+                    profileId: profile.id
+                });
+                if (createdOrderId) {
+                    await updateOrderEmailStatus(createdOrderId, 'sent');
+                }
+                alert('Pedido generado y correo enviado correctamente.');
+            } catch (emailError: any) {
+                if (createdOrderId) {
+                    await updateOrderEmailStatus(createdOrderId, 'failed', emailError?.message || 'No se pudo enviar el correo');
+                }
+                alert('Pedido generado, pero el correo falló. Puedes reenviarlo desde el módulo de Pedidos.');
+            }
+
+            closePaymentProofModal();
+            fetchQuotations();
         } catch (error: any) {
+            if (uploadedProof?.path && !createdOrderId) {
+                await supabase.storage.from(PAYMENT_PROOFS_BUCKET).remove([uploadedProof.path]);
+            }
             console.error('Error converting to order:', error);
             alert('Error al generar la venta: ' + (error.message || error.details || error));
         } finally {
             setSubmitting(false);
         }
+    }, [
+        buildOrderEmailPayload,
+        closePaymentProofModal,
+        fetchQuotations,
+        getQuotationCreditDays,
+        profile?.id,
+        updateOrderEmailStatus,
+        uploadPaymentProof,
+        validatePaymentProofFile
+    ]);
+
+    const handleConvertToOrder = async (quotation: any) => {
+        if (!confirm('¿Confirmar que el cliente aceptó esta cotización? Se generará un pedido y se enviará correo a soporte y amerino.')) return;
+        if (!profile?.id) {
+            alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
+            return;
+        }
+        if (quotation?.seller_id !== profile.id) {
+            alert('Solo el vendedor dueño de la cotización puede convertirla a pedido.');
+            return;
+        }
+
+        const creditDays = getQuotationCreditDays(quotation);
+        if (creditDays === 0) {
+            setQuotationPendingOrder(quotation);
+            setPaymentProofFile(null);
+            setPaymentProofError(null);
+            return;
+        }
+
+        await executeConvertToOrder(quotation, null);
     };
 
 
@@ -941,6 +1138,7 @@ const Quotations: React.FC = () => {
                         const hasPendingDiscountBlock = q.discount_approval?.status === 'pending' || q.discount_approval?.status === 'rejected';
                         const hasWhatsappTarget = Boolean(normalizePhoneForWhatsapp(q.client_phone || q.client?.phone));
                         const hasEmailTarget = Boolean(String(q.client_email || q.client?.email || '').trim());
+                        const canConvertOrder = q.seller_id === profile?.id;
 
                         return (
                         <div key={q.id} className="premium-card p-4 flex flex-col justify-between group">
@@ -1074,9 +1272,12 @@ const Quotations: React.FC = () => {
                                 {q.status !== 'approved' && (
                                     <button
                                         onClick={() => handleConvertToOrder(q)}
-                                        disabled={submitting || q.status === 'rejected' || hasPendingDiscountBlock}
-                                        className="bg-green-50 text-green-600 px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border border-green-100 active:scale-95 transition-all flex items-center justify-center hover:bg-green-600 hover:text-white"
-                                        title="Convertir en Venta Real"
+                                        disabled={submitting || q.status === 'rejected' || hasPendingDiscountBlock || !canConvertOrder}
+                                        className={`px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || q.status === 'rejected' || hasPendingDiscountBlock || !canConvertOrder
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                            : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
+                                            }`}
+                                        title={canConvertOrder ? 'Convertir en Pedido' : 'Solo el vendedor dueño puede convertir y enviar el correo'}
                                     >
                                         <ShoppingBag size={12} className="mr-1" />
                                         {q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}
@@ -1192,11 +1393,7 @@ const Quotations: React.FC = () => {
                                 clientPhone: selectedForTemplate.client_phone,
                                 clientEmail: selectedForTemplate.client_email,
                                 clientContact: selectedForTemplate.client_contact,
-                                paymentTerms: typeof selectedForTemplate.payment_terms === 'string'
-                                    ? selectedForTemplate.payment_terms
-                                    : (selectedForTemplate.payment_terms?.type === 'Crédito'
-                                        ? `Crédito ${selectedForTemplate.payment_terms.days} Días`
-                                        : 'Contado'),
+                                paymentTerms: formatPaymentTermsFromCreditDays(getClientCreditDays(selectedForTemplate.client)),
                                 sellerName: selectedForTemplate.seller_name,
                                 sellerEmail: selectedForTemplate.seller_email,
                                 items: selectedForTemplate.items || [],
@@ -1263,6 +1460,84 @@ const Quotations: React.FC = () => {
                                             <p className="text-sm font-medium">No se encontraron clientes.</p>
                                         </div>
                                     )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {
+                quotationPendingOrder && (
+                    <div className="fixed inset-0 z-[2100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+                        <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
+                            <div className="p-6 bg-gradient-to-br from-emerald-600 to-teal-700 text-white flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-bold text-lg">Comprobante de Pago</h3>
+                                    <p className="text-white/80 text-sm">{quotationPendingOrder.client_name}</p>
+                                </div>
+                                <button onClick={closePaymentProofModal} className="p-2 hover:bg-white/20 rounded-full transition-all">
+                                    <XIcon size={20} />
+                                </button>
+                            </div>
+
+                            <div className="p-6 space-y-4">
+                                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-medium text-amber-900">
+                                    Este cliente no tiene crédito. Debes adjuntar el comprobante de pago para generar el pedido y enviar el correo a soporte y amerino.
+                                </div>
+
+                                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Archivos permitidos</p>
+                                    <p className="mt-1 text-sm font-bold text-gray-700">PDF, JPG, JPEG, PNG, WEBP hasta 20MB</p>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <input
+                                        type="file"
+                                        accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0] || null;
+                                            setPaymentProofFile(file);
+                                            setPaymentProofError(file ? validatePaymentProofFile(file) : null);
+                                        }}
+                                        className="block w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-4 file:py-3 file:font-bold file:text-white hover:file:bg-emerald-700"
+                                    />
+                                    {paymentProofFile && (
+                                        <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3">
+                                            <p className="text-sm font-bold text-gray-800">{paymentProofFile.name}</p>
+                                            <p className="text-xs text-gray-500 mt-1">{(paymentProofFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                                        </div>
+                                    )}
+                                    {paymentProofError && (
+                                        <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                                            {paymentProofError}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={closePaymentProofModal}
+                                        className="flex-1 px-4 py-3 rounded-2xl border border-gray-200 text-gray-600 font-bold hover:bg-gray-50 transition-all"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => executeConvertToOrder(quotationPendingOrder, paymentProofFile)}
+                                        disabled={submitting}
+                                        className="flex-1 px-4 py-3 rounded-2xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-all disabled:opacity-50 flex items-center justify-center"
+                                    >
+                                        {submitting ? (
+                                            <div className="w-5 h-5 border-2 border-white border-t-transparent animate-spin rounded-full" />
+                                        ) : (
+                                            <>
+                                                <Upload size={16} className="mr-2" />
+                                                Generar Pedido
+                                            </>
+                                        )}
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1541,31 +1816,12 @@ const Quotations: React.FC = () => {
                                 <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>
                                         <label className="text-xs uppercase font-bold text-gray-400 mb-2 block">Condición de Pago</label>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => setPaymentTerms({ type: 'Contado', days: 0 })}
-                                                className={`flex-1 py-3 px-4 rounded-xl font-bold border-2 transition-all ${paymentTerms.type === 'Contado' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}
-                                            >
-                                                Contado
-                                            </button>
-                                            <button
-                                                onClick={() => setPaymentTerms({ type: 'Crédito', days: 30 })}
-                                                className={`flex-1 py-3 px-4 rounded-xl font-bold border-2 transition-all ${paymentTerms.type === 'Crédito' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}
-                                            >
-                                                Crédito
-                                            </button>
+                                        <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-4">
+                                            <p className="text-lg font-black text-indigo-700">{formatPaymentTermsFromCreditDays(getClientCreditDays(selectedClient))}</p>
+                                            <p className="mt-1 text-xs font-medium text-indigo-600">
+                                                Se toma automáticamente desde la ficha del cliente y no se puede modificar en la cotización.
+                                            </p>
                                         </div>
-                                        {paymentTerms.type === 'Crédito' && (
-                                            <div className="mt-3 animate-in slide-in-from-top-2">
-                                                <label className="text-[10px] uppercase font-bold text-gray-400 mb-1 block">Días de Crédito</label>
-                                                <input
-                                                    type="number"
-                                                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none"
-                                                    value={paymentTerms.days}
-                                                    onChange={(e) => setPaymentTerms({ ...paymentTerms, days: parseInt(e.target.value) || 0 })}
-                                                />
-                                            </div>
-                                        )}
                                     </div>
                                     <div>
                                         <label className="text-xs uppercase font-bold text-gray-400 mb-2 block">Comentarios Adicionales</label>
