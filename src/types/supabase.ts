@@ -317,6 +317,7 @@ export interface Database {
                     created_at: string | null
                     description: string | null
                     due_date: string | null
+                    end_date: string | null
                     id: string
                     status: string | null
                     title: string
@@ -328,6 +329,7 @@ export interface Database {
                     created_at?: string | null
                     description?: string | null
                     due_date?: string | null
+                    end_date?: string | null
                     id?: string
                     status?: string | null
                     title: string
@@ -339,6 +341,7 @@ export interface Database {
                     created_at?: string | null
                     description?: string | null
                     due_date?: string | null
+                    end_date?: string | null
                     id?: string
                     status?: string | null
                     title?: string

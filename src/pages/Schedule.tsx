@@ -12,6 +12,7 @@ interface CalendarEvent {
     summary: string;
     description?: string;
     start: { dateTime?: string; date?: string };
+    end?: { dateTime?: string; date?: string };
     location?: string;
     source: 'google' | 'crm' | 'internal';
     clientId?: string;
@@ -24,6 +25,7 @@ const Schedule = () => {
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [tasks, setTasks] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
+    const [googleCalendarNotice, setGoogleCalendarNotice] = useState<string | null>(null);
 
     // Supervisor Features
     const [sellers, setSellers] = useState<any[]>([]);
@@ -106,34 +108,55 @@ const Schedule = () => {
         if (!selectedSellerId) return;
 
         setLoading(true);
+        setGoogleCalendarNotice(null);
         const allEvents: CalendarEvent[] = [];
         const isSelf = selectedSellerId === profile?.id;
+        const selectedSeller = sellers.find((seller) => seller.id === selectedSellerId);
+        const selectedSellerEmail = (selectedSeller?.email || (isSelf ? profile?.email : '') || '').trim().toLowerCase();
         const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString();
         const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
 
-        // 1. Google Events (Only Self)
-        if (isSelf) {
+        // 1. Google Events
+        if (isSelf || selectedSellerEmail) {
             try {
                 const token = await googleService.getValidToken();
                 if (token) {
-                    const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${startOfMonth}&timeMax=${endOfMonth}&singleEvents=true`, {
+                    const calendarId = isSelf ? 'primary' : encodeURIComponent(selectedSellerEmail);
+                    const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?timeMin=${encodeURIComponent(startOfMonth)}&timeMax=${encodeURIComponent(endOfMonth)}&singleEvents=true&orderBy=startTime`, {
                         headers: { Authorization: `Bearer ${token}` }
                     });
-                    const data = await response.json();
-                    if (data.items) {
-                        allEvents.push(...data.items.map((item: any) => ({
-                            id: item.id,
-                            summary: item.summary,
-                            description: item.description,
-                            start: item.start,
-                            location: item.location,
-                            source: 'google' as const
-                        })));
+
+                    if (!response.ok) {
+                        const googleError = await response.text();
+                        console.warn('Google Calendar fetch failed', googleError);
+                        if (!isSelf) {
+                            setGoogleCalendarNotice(`No se pudo leer Google Calendar de ${selectedSeller?.full_name || selectedSellerEmail}. Verifica acceso compartido en Google Workspace.`);
+                        }
+                    } else {
+                        const data = await response.json();
+                        if (data.items) {
+                            allEvents.push(...data.items.map((item: any) => ({
+                                id: item.id,
+                                summary: item.summary,
+                                description: item.description,
+                                start: item.start,
+                                end: item.end,
+                                location: item.location,
+                                source: 'google' as const
+                            })));
+                        }
                     }
+                } else if (!isSelf) {
+                    setGoogleCalendarNotice(`No hay sesión Google activa para consultar el calendario de ${selectedSeller?.full_name || selectedSellerEmail}.`);
                 }
             } catch (err) {
-                console.warn("Google Calendar sync skipped/failed");
+                console.warn("Google Calendar sync skipped/failed", err);
+                if (!isSelf) {
+                    setGoogleCalendarNotice(`No se pudo leer Google Calendar de ${selectedSeller?.full_name || selectedSellerEmail}.`);
+                }
             }
+        } else if (!isSelf) {
+            setGoogleCalendarNotice('El vendedor seleccionado no tiene correo corporativo para consultar Google Calendar.');
         }
 
         // 2. CRM Visits
@@ -181,6 +204,7 @@ const Schedule = () => {
                     summary: task.title || 'Reunión Interna',
                     description: task.description || '',
                     start: { dateTime: task.due_date },
+                    end: task.end_date ? { dateTime: task.end_date } : undefined,
                     location: 'Interno / Oficina',
                     source: 'internal' as const
                 })));
@@ -246,6 +270,16 @@ const Schedule = () => {
         });
     };
 
+    const formatEventTimeRange = (event: CalendarEvent) => {
+        if (!event.start.dateTime) return 'Todo el día';
+        const start = new Date(event.start.dateTime);
+        const startLabel = start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (!event.end?.dateTime) return startLabel;
+        const end = new Date(event.end.dateTime);
+        const endLabel = end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return `${startLabel} - ${endLabel}`;
+    };
+
     return (
         <div className="flex h-full gap-8">
             <div className="flex-1 space-y-6 flex flex-col">
@@ -253,6 +287,9 @@ const Schedule = () => {
                     <div>
                         <h2 className="text-4xl font-black text-gray-900">Agenda</h2>
                         {isSupervisor && <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Vista de Supervisor</p>}
+                        {googleCalendarNotice && (
+                            <p className="text-xs text-amber-600 font-bold mt-2 max-w-xl">{googleCalendarNotice}</p>
+                        )}
                     </div>
 
                     <div className="flex items-center gap-4">
@@ -322,7 +359,7 @@ const Schedule = () => {
                                                 <div className="flex items-center gap-1">
                                                     <div className={`w-1.5 h-1.5 rounded-full ${event.source === 'crm' ? 'bg-purple-500' :
                                                         event.source === 'internal' ? 'bg-orange-500' : 'bg-blue-500'}`}></div>
-                                                    {event.start.dateTime && new Date(event.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    {formatEventTimeRange(event)}
                                                 </div>
                                                 <div className="truncate font-medium" title={event.summary}>{event.summary}</div>
                                                 <div className="absolute hidden group-hover:block z-50 left-0 top-full mt-1 w-48 bg-gray-800 text-white p-2 rounded-lg shadow-xl text-xs whitespace-normal">
@@ -409,9 +446,7 @@ const Schedule = () => {
                                             <p className="text-[10px] text-gray-400 font-medium truncate mt-0.5">{event.description || 'Sin detalles'}</p>
                                             <div className="flex items-center gap-2 mt-1.5">
                                                 <span className="text-[10px] font-bold text-gray-500 bg-white border border-gray-100 px-1.5 py-0.5 rounded-md shadow-sm">
-                                                    {event.start.dateTime
-                                                        ? eventDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                                        : 'Todo el día'}
+                                                    {formatEventTimeRange(event)}
                                                 </span>
                                             </div>
                                         </div>

@@ -20,10 +20,19 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
     const [loading, setLoading] = useState(false);
     const [sellers, setSellers] = useState<Profile[]>([]);
 
+    const getDefaultEndTime = (time: string) => {
+        const [hours, minutes] = time.split(':').map(Number);
+        const end = new Date();
+        end.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0);
+        end.setMinutes(end.getMinutes() + 60);
+        return `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+    };
+
     const [formData, setFormData] = useState({
         assigneeId: preSelectedAssigneeId || '',
         date: new Date().toISOString().split('T')[0],
         time: '09:00',
+        endTime: '10:00',
         title: '',
         notes: ''
     });
@@ -63,7 +72,15 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
         try {
             // 1. Calculate Timestamps
             const dueDateTime = new Date(`${formData.date}T${formData.time}:00`);
+            const endDateTime = new Date(`${formData.date}T${formData.endTime}:00`);
             const isoDue = dueDateTime.toISOString();
+            const isoEnd = endDateTime.toISOString();
+
+            if (!(endDateTime.getTime() > dueDateTime.getTime())) {
+                alert("La hora de finalización debe ser posterior a la hora de inicio.");
+                setLoading(false);
+                return;
+            }
 
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) {
@@ -83,7 +100,8 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                     assigned_by: session.user.id,
                     status: 'pending',
                     priority: 'medium',
-                    due_date: isoDue
+                    due_date: isoDue,
+                    end_date: isoEnd
                 }));
 
                 const { error } = await supabase
@@ -103,43 +121,45 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                         assigned_by: session.user.id,
                         status: 'pending',
                         priority: 'medium',
-                        due_date: isoDue
+                        due_date: isoDue,
+                        end_date: isoEnd
                     });
 
                 if (error) throw error;
             }
 
             // 3. Sync to Google Calendar (Organizer Mode + Attendee Injection)
-            // Session is already fetched above
-            // Only sync if single assignment (not 'all') to avoid spamming self with N events
-            if (formData.assigneeId !== 'all') {
-                try {
-                    const validToken = await googleService.ensureSession();
-                    if (!validToken) {
-                        onSaved();
-                        onClose();
-                        setFormData(p => ({ ...p, title: '', notes: '' }));
-                        alert("Actividad asignada correctamente. (Sincronización Google omitida)");
-                        return;
-                    }
+            let googleSyncNote = '';
+            try {
+                const validToken = await googleService.ensureSession();
+                if (!validToken) {
+                    googleSyncNote = ' (Sincronización Google omitida)';
+                } else {
+                    const attendeeEmails = formData.assigneeId === 'all'
+                        ? Array.from(new Set(
+                            sellers
+                                .map((seller) => (seller.email || '').trim().toLowerCase())
+                                .filter((email) => !!email && email !== session.user.email?.toLowerCase())
+                        ))
+                        : (() => {
+                            const assignee = sellers.find(s => s.id === formData.assigneeId);
+                            const email = (assignee?.email || '').trim().toLowerCase();
+                            if (!email || email === session.user.email?.toLowerCase()) return [];
+                            return [email];
+                        })();
 
-                    const attendees = [];
-                    // If not self, add as attendee
-                    if (formData.assigneeId !== session.user.id) {
-                        const assignee = sellers.find(s => s.id === formData.assigneeId);
-                        if (assignee?.email) {
-                            attendees.push({ email: assignee.email });
-                        }
-                    }
-
+                    const attendees = attendeeEmails.map((email) => ({ email }));
                     const gCalEvent: any = {
                         summary: formData.title,
                         description: `${formData.notes}\n\nAsignado por: ${session.user.email}`,
                         location: 'Reunión / Actividad Interna',
                         start: { dateTime: isoDue },
-                        end: { dateTime: new Date(dueDateTime.getTime() + 60 * 60 * 1000).toISOString() }, // Default 1 hour
-                        attendees: attendees
+                        end: { dateTime: isoEnd },
                     };
+
+                    if (attendees.length > 0) {
+                        gCalEvent.attendees = attendees;
+                    }
 
                     const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
                         method: 'POST',
@@ -151,18 +171,21 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                     });
 
                     if (!response.ok) {
-                        console.warn("Google Calendar sync failed", await response.text());
+                        const googleErrorText = await response.text();
+                        console.warn("Google Calendar sync failed", googleErrorText);
+                        googleSyncNote = ' (Actividad creada, pero Google falló)';
                     }
-                } catch (gError) {
-                    console.error("Google Calendar Error:", gError);
                 }
+            } catch (gError) {
+                console.error("Google Calendar Error:", gError);
+                googleSyncNote = ' (Actividad creada, pero Google falló)';
             }
 
             onSaved();
             onClose();
             // Reset crucial fields
-            setFormData(p => ({ ...p, title: '', notes: '' }));
-            alert("Actividad asignada correctamente.");
+            setFormData(p => ({ ...p, time: '09:00', endTime: '10:00', title: '', notes: '' }));
+            alert(`Actividad asignada correctamente.${googleSyncNote}`);
 
         } catch (error: any) {
             console.error("Error creating activity:", error);
@@ -215,28 +238,50 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                         </div>
                     </div>
 
+                    <div className="space-y-2">
+                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Fecha</label>
+                        <div className="relative">
+                            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                            <input
+                                type="date"
+                                className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                value={formData.date}
+                                onChange={e => setFormData({ ...formData, date: e.target.value })}
+                            />
+                        </div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Fecha</label>
-                            <div className="relative">
-                                <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                                <input
-                                    type="date"
-                                    className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
-                                    value={formData.date}
-                                    onChange={e => setFormData({ ...formData, date: e.target.value })}
-                                />
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Hora</label>
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Hora Inicio</label>
                             <div className="relative">
                                 <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                                 <input
                                     type="time"
                                     className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
                                     value={formData.time}
-                                    onChange={e => setFormData({ ...formData, time: e.target.value })}
+                                    onChange={e => {
+                                        const nextTime = e.target.value;
+                                        setFormData(prev => {
+                                            const next = { ...prev, time: nextTime };
+                                            if (!prev.endTime || prev.endTime <= nextTime) {
+                                                next.endTime = getDefaultEndTime(nextTime);
+                                            }
+                                            return next;
+                                        });
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Hora Fin</label>
+                            <div className="relative">
+                                <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                <input
+                                    type="time"
+                                    className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                    value={formData.endTime}
+                                    onChange={e => setFormData({ ...formData, endTime: e.target.value })}
                                 />
                             </div>
                         </div>
