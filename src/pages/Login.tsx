@@ -11,7 +11,8 @@ const Login = () => {
                 redirectTo: authRedirectUrl,
                 queryParams: {
                     access_type: 'offline',
-                    prompt: 'select_account',
+                    prompt: 'consent select_account',
+                    include_granted_scopes: 'true',
                 },
                 scopes: GOOGLE_SCOPES
             }

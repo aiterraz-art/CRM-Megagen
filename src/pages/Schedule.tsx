@@ -54,6 +54,7 @@ const Schedule = () => {
     const [selectedSellerId, setSelectedSellerId] = useState<string>('');
     const [showAddModal, setShowAddModal] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+    const isViewingOwnCalendar = selectedSellerId === profile?.id;
 
     const canViewSharedGoogleCalendars = hasPermission('VIEW_TEAM_CALENDARS');
     const canSelectOtherCalendars = isSupervisor || hasPermission('VIEW_ALL_TEAM_STATS') || canViewSharedGoogleCalendars;
@@ -349,7 +350,17 @@ const Schedule = () => {
                         <h2 className="text-4xl font-black text-gray-900">Agenda</h2>
                         {isSupervisor && <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Vista de Supervisor</p>}
                         {googleCalendarNotice && (
-                            <p className="text-xs text-amber-600 font-bold mt-2 max-w-xl">{googleCalendarNotice}</p>
+                            <div className="mt-2 flex flex-wrap items-center gap-3 max-w-2xl">
+                                <p className="text-xs text-amber-600 font-bold">{googleCalendarNotice}</p>
+                                {isViewingOwnCalendar && (
+                                    <button
+                                        onClick={() => void googleService.startReconnect()}
+                                        className="text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border border-amber-300 text-amber-700 hover:bg-amber-50 transition-colors"
+                                    >
+                                        Reconectar Google
+                                    </button>
+                                )}
+                            </div>
                         )}
                     </div>
 
