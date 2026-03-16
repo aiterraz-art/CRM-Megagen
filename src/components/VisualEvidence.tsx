@@ -17,6 +17,11 @@ interface PhotoEvidence {
     created_at?: string;
 }
 
+const getErrorMessage = (error: any) => {
+    if (!error) return 'Error desconocido';
+    return error.message || error.details || error.hint || JSON.stringify(error);
+};
+
 const CATEGORIES = [
     { id: 'fachada', label: 'Fachada / Exterior', color: 'bg-blue-100 text-blue-700' },
     { id: 'vitrina', label: 'Vitrina / Exhibición', color: 'bg-purple-100 text-purple-700' },
@@ -42,14 +47,16 @@ const VisualEvidence: React.FC<VisualEvidenceProps> = ({ visitId, clientName, on
 
     const fetchPhotos = async () => {
         setLoading(true);
-        // We assume a table 'visit_photos' exists. If not, it will default to empty or error.
         const { data, error } = await supabase
             .from('visit_photos')
             .select('*')
             .eq('visit_id', visitId)
             .order('created_at', { ascending: false });
 
-        if (!error && data) {
+        if (error) {
+            console.error('Error loading visual evidence:', error);
+            setPhotos([]);
+        } else if (data) {
             setPhotos(data as PhotoEvidence[]);
         }
         setLoading(false);
@@ -85,7 +92,12 @@ const VisualEvidence: React.FC<VisualEvidenceProps> = ({ visitId, clientName, on
             .single();
 
         if (error) {
-            alert('Error al guardar foto: ' + error.message + '\n\nNOTA: Si la tabla "visit_photos" no existe, pide al administrador crearla.');
+            const errorMessage = getErrorMessage(error);
+            const relationMissing = errorMessage.toLowerCase().includes('visit_photos') || errorMessage.toLowerCase().includes('schema cache');
+            alert(
+                'Error al guardar foto: ' + errorMessage +
+                (relationMissing ? '\n\nNOTA: La tabla "visit_photos" no estaba disponible en la base o en el schema cache.' : '')
+            );
         } else {
             setPhotos([data, ...photos]);
             // Reset form
