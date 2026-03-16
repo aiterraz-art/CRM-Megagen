@@ -406,13 +406,10 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                             try {
                                                                 // 1. Delete from Google if ID exists
                                                                 if (visit.google_event_id) {
-                                                                    const token = await googleService.ensureSession();
-                                                                    if (token) {
-                                                                        await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${visit.google_event_id}`, {
-                                                                            method: 'DELETE',
-                                                                            headers: { Authorization: `Bearer ${token}` }
-                                                                        });
-                                                                    }
+                                                                    await googleService.fetchGoogle(
+                                                                        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(visit.google_event_id)}`,
+                                                                        { method: 'DELETE' }
+                                                                    );
                                                                 }
                                                                 // 2. Mark as Cancelled in Supabase
                                                                 await supabase.from('visits').update({ status: 'cancelled' }).eq('id', visit.id);

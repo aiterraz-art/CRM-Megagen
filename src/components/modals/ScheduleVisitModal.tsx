@@ -81,17 +81,6 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
 
 
     if (!isOpen) return null;
-
-    const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 8000) => {
-        const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-        try {
-            return await fetch(input, { ...init, signal: controller.signal });
-        } finally {
-            window.clearTimeout(timeoutId);
-        }
-    };
-
     const syncToGoogleCalendar = async (
         targetRepId: string,
         isoStart: string,
@@ -102,14 +91,7 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
         visitId: string,
         schedulerEmail: string | null | undefined
     ) => {
-        const showReauthAlert = () => {
-            alert("⚠️ Google Calendar no pudo sincronizarse.\n\nDebes cerrar sesión y volver a ingresar con Google para renovar permisos.");
-        };
-
         try {
-            const validToken = await googleService.ensureSession().catch(() => null);
-            if (!validToken) return;
-
             const attendees: Array<{ email: string }> = [];
             if (targetRepId !== (await supabase.auth.getSession()).data.session?.user?.id) {
                 const { data: assigneeProfile } = await supabase
@@ -129,34 +111,18 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                 attendees
             };
 
-            const response = await fetchWithTimeout('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+            const gData = await googleService.fetchGoogleJson<any>('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
                 method: 'POST',
                 headers: {
-                    Authorization: `Bearer ${validToken}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(gCalEvent)
             });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.warn('Google Calendar sync failed', errorText);
-                if (response.status === 401 || response.status === 403) {
-                    showReauthAlert();
-                }
-                return;
-            }
-
-            const gData = await response.json();
             if (gData?.id) {
                 await supabase.from('visits').update({ google_event_id: gData.id }).eq('id', visitId);
             }
         } catch (gError) {
             console.error('Google Calendar Error:', gError);
-            const message = `${(gError as any)?.message || gError || ''}`.toLowerCase();
-            if (message.includes('token') || message.includes('auth') || message.includes('permission')) {
-                showReauthAlert();
-            }
         }
     };
 
@@ -206,7 +172,7 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
             alert("Visita agendada correctamente.");
 
             // Sync Google in background so UI never stays blocked.
-            if (session.provider_token && insertedVisit?.id) {
+            if (insertedVisit?.id) {
                 void syncToGoogleCalendar(
                     targetRepId,
                     isoStart,

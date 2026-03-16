@@ -1,4 +1,5 @@
 import { supabase } from '../services/supabase';
+import { GOOGLE_SCOPES } from '../services/googleService';
 
 const Login = () => {
     const handleGoogleLogin = async () => {
@@ -12,7 +13,7 @@ const Login = () => {
                     access_type: 'offline',
                     prompt: 'select_account',
                 },
-                scopes: 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.send'
+                scopes: GOOGLE_SCOPES
             }
         });
 

@@ -143,14 +143,18 @@ export interface Database {
                     check_out_lat: number | null
                     check_out_lng: number | null
                     client_id: string | null
+                    doctor_name: string | null
+                    google_event_id: string | null
                     id: string
                     lat: number | null
                     lng: number | null
                     notes: string | null
                     outcome: string | null
+                    purpose: string | null
                     sales_rep_id: string | null
                     type: string | null
                     status: string | null
+                    title: string | null
                 }
                 Insert: {
                     check_in_time?: string | null
@@ -158,14 +162,18 @@ export interface Database {
                     check_out_lat?: number | null
                     check_out_lng?: number | null
                     client_id?: string | null
+                    doctor_name?: string | null
+                    google_event_id?: string | null
                     id?: string
                     lat?: number | null
                     lng?: number | null
                     notes?: string | null
                     outcome?: string | null
+                    purpose?: string | null
                     sales_rep_id?: string | null
                     type?: string | null
                     status?: string | null
+                    title?: string | null
                 }
                 Update: {
                     check_in_time?: string | null
@@ -173,14 +181,18 @@ export interface Database {
                     check_out_lat?: number | null
                     check_out_lng?: number | null
                     client_id?: string | null
+                    doctor_name?: string | null
+                    google_event_id?: string | null
                     id?: string
                     lat?: number | null
                     lng?: number | null
                     notes?: string | null
                     outcome?: string | null
+                    purpose?: string | null
                     sales_rep_id?: string | null
                     type?: string | null
                     status?: string | null
+                    title?: string | null
                 }
             }
             delivery_routes: {
@@ -318,6 +330,9 @@ export interface Database {
                     description: string | null
                     due_date: string | null
                     end_date: string | null
+                    google_calendar_id: string | null
+                    google_event_id: string | null
+                    google_html_link: string | null
                     id: string
                     status: string | null
                     title: string
@@ -330,6 +345,9 @@ export interface Database {
                     description?: string | null
                     due_date?: string | null
                     end_date?: string | null
+                    google_calendar_id?: string | null
+                    google_event_id?: string | null
+                    google_html_link?: string | null
                     id?: string
                     status?: string | null
                     title: string
@@ -342,6 +360,9 @@ export interface Database {
                     description?: string | null
                     due_date?: string | null
                     end_date?: string | null
+                    google_calendar_id?: string | null
+                    google_event_id?: string | null
+                    google_html_link?: string | null
                     id?: string
                     status?: string | null
                     title?: string

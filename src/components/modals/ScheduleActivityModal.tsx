@@ -90,6 +90,7 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
             }
 
             // 2. Insert into tasks
+            let insertedTaskIds: string[] = [];
             if (formData.assigneeId === 'all') {
                 // Bulk Insert for ALL sellers
                 const tasksToInsert = sellers.map(seller => ({
@@ -104,14 +105,16 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                     end_date: isoEnd
                 }));
 
-                const { error } = await supabase
+                const { data, error } = await supabase
                     .from('tasks')
-                    .insert(tasksToInsert);
+                    .insert(tasksToInsert)
+                    .select('id');
 
                 if (error) throw error;
+                insertedTaskIds = (data || []).map((task: any) => task.id);
             } else {
                 // Single Insert
-                const { error } = await supabase
+                const { data, error } = await supabase
                     .from('tasks')
                     .insert({
                         title: formData.title,
@@ -123,28 +126,30 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                         priority: 'medium',
                         due_date: isoDue,
                         end_date: isoEnd
-                    });
+                    })
+                    .select('id');
 
                 if (error) throw error;
+                insertedTaskIds = (data || []).map((task: any) => task.id);
             }
 
             // 3. Sync to Google Calendar (Organizer Mode + Attendee Injection)
             let googleSyncNote = '';
             try {
-                const validToken = await googleService.ensureSession();
-                if (!validToken) {
+                const sessionEmail = (session.user.email || '').trim().toLowerCase();
+                if (!sessionEmail) {
                     googleSyncNote = ' (Sincronización Google omitida)';
                 } else {
                     const attendeeEmails = formData.assigneeId === 'all'
                         ? Array.from(new Set(
                             sellers
                                 .map((seller) => (seller.email || '').trim().toLowerCase())
-                                .filter((email) => !!email && email !== session.user.email?.toLowerCase())
+                                .filter((email) => !!email && email !== sessionEmail)
                         ))
                         : (() => {
                             const assignee = sellers.find(s => s.id === formData.assigneeId);
                             const email = (assignee?.email || '').trim().toLowerCase();
-                            if (!email || email === session.user.email?.toLowerCase()) return [];
+                            if (!email || email === sessionEmail) return [];
                             return [email];
                         })();
 
@@ -161,19 +166,23 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                         gCalEvent.attendees = attendees;
                     }
 
-                    const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+                    const gData = await googleService.fetchGoogleJson<any>('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${validToken}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(gCalEvent)
                     });
 
-                    if (!response.ok) {
-                        const googleErrorText = await response.text();
-                        console.warn("Google Calendar sync failed", googleErrorText);
-                        googleSyncNote = ' (Actividad creada, pero Google falló)';
+                    if (gData?.id && insertedTaskIds.length > 0) {
+                        await supabase
+                            .from('tasks')
+                            .update({
+                                google_event_id: gData.id,
+                                google_calendar_id: sessionEmail,
+                                google_html_link: gData.htmlLink || null,
+                            })
+                            .in('id', insertedTaskIds);
                     }
                 }
             } catch (gError) {

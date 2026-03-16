@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'r
 import { Layout } from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './services/supabase';
+import { googleService } from './services/googleService';
 import { Session } from '@supabase/supabase-js';
 import { UserProvider } from './contexts/UserContext';
 import { useUser } from './contexts/UserContext';
@@ -99,11 +100,19 @@ function App() {
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
             setLoading(false);
+            if (session) {
+                void googleService.storeRefreshTokenIfPresent(session);
+            }
         });
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             setLoading(false);
+            if (session) {
+                void googleService.storeRefreshTokenIfPresent(session);
+            } else {
+                googleService.clearCachedToken();
+            }
         });
 
         return () => {

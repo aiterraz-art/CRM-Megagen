@@ -20,6 +20,15 @@ const Settings: React.FC = () => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'integrations'>('users');
     const [testingSync, setTestingSync] = useState(false);
+    const [googleStatus, setGoogleStatus] = useState<{
+        googleEmail: string | null;
+        hasRefreshToken: boolean;
+        lastRefreshAt: string | null;
+        lastError: string | null;
+        updatedAt: string | null;
+        needsReconnect: boolean;
+    } | null>(null);
+    const [loadingGoogleStatus, setLoadingGoogleStatus] = useState(false);
 
     // RESTORED STATE
     const [tempRole, setTempRole] = useState<string>('');
@@ -49,7 +58,8 @@ const Settings: React.FC = () => {
         { key: 'MANAGE_CLIENTS', label: 'Gestionar Clientes', desc: 'Editar, eliminar y crear fichas de clientes.' },
         { key: 'IMPORT_CLIENTS', label: 'Importar Clientes', desc: 'Subida masiva de clientes vía CSV.' },
         { key: 'VIEW_TEAM_STATS', label: 'Panel Equipo', desc: 'Acceso a estadísticas y supervisión de representantes.' },
-        { key: 'VIEW_ALL_TEAM_STATS', label: 'Ver Todo el Equipo', desc: 'Supervisión global (vs solo subordinados directos).' }
+        { key: 'VIEW_ALL_TEAM_STATS', label: 'Ver Todo el Equipo', desc: 'Supervisión global (vs solo subordinados directos).' },
+        { key: 'VIEW_TEAM_CALENDARS', label: 'Calendarios del Equipo', desc: 'Permite ver Google Calendar de otros vendedores compartidos por Workspace.' }
     ];
 
     useEffect(() => {
@@ -84,7 +94,7 @@ const Settings: React.FC = () => {
         } else {
             setRolePerms({
                 'admin': permissionList.map(p => p.key),
-                'jefe': ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS'],
+                'jefe': ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_TEAM_CALENDARS'],
                 'administrativo': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH'],
                 'seller': ['VIEW_METAS'],
                 'driver': ['EXECUTE_DELIVERY']
@@ -258,11 +268,7 @@ const Settings: React.FC = () => {
 
     const sendInvitationEmail = async (invite: InvitePayload): Promise<{ sent: boolean }> => {
         const { data: { session } } = await supabase.auth.getSession();
-        const providerToken = (session as any)?.provider_token;
-        if (!providerToken) return { sent: false };
-
-        const token = await googleService.ensureSession().catch(() => null);
-        if (!token) return { sent: false };
+        if (!session) return { sent: false };
 
         const companyName = import.meta.env.VITE_COMPANY_NAME || 'Megagen';
         const contactName = invite.full_name?.trim() || invite.email.split('@')[0];
@@ -282,18 +288,13 @@ const Settings: React.FC = () => {
             message
         ].join('\r\n');
 
-        const sendResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        await googleService.fetchGoogleJson('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ raw: btoa(unescape(encodeURIComponent(rawMimeMessage))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') })
         });
-        if (!sendResponse.ok) {
-            const errorText = await sendResponse.text();
-            throw new Error(`Gmail API ${sendResponse.status}: ${errorText}`);
-        }
 
         return { sent: true };
     };
@@ -359,29 +360,10 @@ const Settings: React.FC = () => {
     const handleTestGoogleSync = async () => {
         setTestingSync(true);
         try {
-            const token = await googleService.ensureSession();
-            if (!token) return;
-
-            // Test call to Google Calendar API (List Calendars)
-            const response = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                console.log("Google Sync Success:", data);
-                alert(`✅ CONEXIÓN EXITOSA\n\nGoogle Calendar respondió correctamente.\nCalendarios detectados: ${data.items?.length || 0}\n\nLa sincronización está activa.`);
-            } else {
-                const errorText = await response.text();
-                console.error("Google Sync Failed:", errorText);
-                if (response.status === 401 || response.status === 403) {
-                    alert("❌ ERROR DE PERMISOS (401/403):\nEl token de Google ha expirado o fue revocado.\n\nSolución: Cierra sesión y vuelve a entrar.");
-                } else {
-                    alert(`❌ ERROR DE CONEXIÓN (${response.status}):\n${errorText}`);
-                }
-            }
+            const data = await googleService.fetchGoogleJson<any>('https://www.googleapis.com/calendar/v3/users/me/calendarList');
+            console.log("Google Sync Success:", data);
+            alert(`✅ CONEXIÓN EXITOSA\n\nGoogle Calendar respondió correctamente.\nCalendarios detectados: ${data.items?.length || 0}\n\nLa sincronización está activa.`);
+            fetchGoogleStatus();
         } catch (error: any) {
             console.error("Test Error:", error);
             alert("❌ ERROR CRÍTICO:\n" + error.message);
@@ -389,6 +371,24 @@ const Settings: React.FC = () => {
             setTestingSync(false);
         }
     };
+
+    const fetchGoogleStatus = async () => {
+        setLoadingGoogleStatus(true);
+        try {
+            const status = await googleService.getConnectionStatus();
+            setGoogleStatus(status);
+        } catch (error) {
+            console.error('Error fetching Google status:', error);
+        } finally {
+            setLoadingGoogleStatus(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'integrations') {
+            fetchGoogleStatus();
+        }
+    }, [activeTab]);
 
     if (!profile || effectiveRole !== 'admin') return <div className="p-20 text-center font-bold">Acceso Denegado</div>;
 
@@ -657,18 +657,58 @@ const Settings: React.FC = () => {
 
                             <div className="bg-gray-50 rounded-2xl p-6 mb-6">
                                 <p className="text-sm text-gray-600 font-medium leading-relaxed">
-                                    Verifica si el sistema tiene permiso para leer y escribir en tu calendario. Si hay errores, usualmente se resuelven cerrando y re-iniciando sesión.
+                                    Verifica si el sistema tiene permiso para leer y escribir en tu calendario. Si falta un refresh token, usa reconexión explícita sin cerrar sesión.
                                 </p>
                             </div>
 
-                            <button
-                                onClick={handleTestGoogleSync}
-                                disabled={testingSync}
-                                className={`w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest shadow-lg transition-all flex items-center justify-center gap-2
+                            <div className="rounded-2xl border border-gray-100 p-4 mb-4 space-y-2">
+                                <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Estado Google</p>
+                                {loadingGoogleStatus ? (
+                                    <p className="text-sm font-bold text-gray-500">Consultando conexión...</p>
+                                ) : googleStatus ? (
+                                    <>
+                                        <p className={`text-sm font-black ${googleStatus.needsReconnect ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                            {googleStatus.needsReconnect ? 'Reconexión requerida' : 'Renovación automática activa'}
+                                        </p>
+                                        <p className="text-xs text-gray-500 font-medium">
+                                            Cuenta: {googleStatus.googleEmail || profile?.email || 'Sin cuenta'}
+                                        </p>
+                                        {googleStatus.lastRefreshAt && (
+                                            <p className="text-xs text-gray-500 font-medium">
+                                                Última renovación: {new Date(googleStatus.lastRefreshAt).toLocaleString('es-CL')}
+                                            </p>
+                                        )}
+                                        {googleStatus.lastError && (
+                                            <p className="text-xs text-rose-600 font-bold">
+                                                Último error: {googleStatus.lastError}
+                                            </p>
+                                        )}
+                                    </>
+                                ) : (
+                                    <p className="text-sm font-bold text-gray-500">Sin diagnóstico disponible.</p>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <button
+                                    onClick={handleTestGoogleSync}
+                                    disabled={testingSync}
+                                    className={`w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest shadow-lg transition-all flex items-center justify-center gap-2
                                     ${testingSync ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 shadow-indigo-200'}`}
-                            >
-                                {testingSync ? 'Verificando...' : 'Probar Conexión Ahora'}
-                            </button>
+                                >
+                                    {testingSync ? 'Verificando...' : 'Probar Conexión'}
+                                </button>
+                                <button
+                                    onClick={() => void googleService.startReconnect()}
+                                    className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest border border-gray-200 text-gray-700 hover:bg-gray-50 transition-all"
+                                >
+                                    Reconectar Google
+                                </button>
+                            </div>
+
+                            <p className="text-[11px] text-gray-400 font-medium">
+                                Para ver calendarios ajenos, Google Workspace debe compartir esos calendarios corporativos con jefes o admins.
+                            </p>
                         </div>
                     </div>
                 </div>

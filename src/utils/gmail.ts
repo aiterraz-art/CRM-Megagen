@@ -21,9 +21,7 @@ const toWebSafeBase64 = (value: string) =>
 export const sendGmailMessage = async (input: SendGmailMessageInput) => {
     const { to, cc = '', subject, message, attachment = null, attachments = [], clientId, profileId } = input;
     const { data: { session } } = await supabase.auth.getSession();
-    const validToken = await googleService.ensureSession();
-
-    if (!session || !validToken) {
+    if (!session) {
         throw new Error('Sesion de Google no disponible.');
     }
 
@@ -76,19 +74,13 @@ export const sendGmailMessage = async (input: SendGmailMessageInput) => {
     messageParts.push(`--${boundary}--`);
     const rawMimeMessage = messageParts.filter(Boolean).join('\r\n');
 
-    const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    const data = await googleService.fetchGoogleJson<any>('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
         method: 'POST',
         headers: {
-            Authorization: `Bearer ${validToken}`,
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({ raw: toWebSafeBase64(rawMimeMessage) })
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-        throw new Error(data.error?.message || 'Error al enviar correo.');
-    }
 
     if (clientId && profileId) {
         await supabase.from('email_logs').insert({
