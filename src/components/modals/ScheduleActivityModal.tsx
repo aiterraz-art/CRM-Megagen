@@ -19,6 +19,7 @@ interface ScheduleActivityModalProps {
 const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId }: ScheduleActivityModalProps) => {
     const [loading, setLoading] = useState(false);
     const [sellers, setSellers] = useState<Profile[]>([]);
+    const [inviteAll, setInviteAll] = useState(false);
 
     const getDefaultEndTime = (time: string) => {
         const [hours, minutes] = time.split(':').map(Number);
@@ -29,7 +30,7 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
     };
 
     const [formData, setFormData] = useState({
-        assigneeId: preSelectedAssigneeId || '',
+        assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [] as string[],
         date: new Date().toISOString().split('T')[0],
         time: '09:00',
         endTime: '10:00',
@@ -49,18 +50,48 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
         fetchSellers();
     }, []);
 
-    // Update form if preSelectedAssigneeId changes
+    // Reset selection when opening from a specific calendar view
     useEffect(() => {
-        if (preSelectedAssigneeId) {
-            setFormData(prev => ({ ...prev, assigneeId: preSelectedAssigneeId }));
-        }
-    }, [preSelectedAssigneeId]);
+        if (!isOpen) return;
+        setInviteAll(false);
+        setFormData(prev => ({
+            ...prev,
+            assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : []
+        }));
+    }, [isOpen, preSelectedAssigneeId]);
+
+    const toggleAssignee = (sellerId: string) => {
+        setInviteAll(false);
+        setFormData(prev => {
+            const alreadySelected = prev.assigneeIds.includes(sellerId);
+            return {
+                ...prev,
+                assigneeIds: alreadySelected
+                    ? prev.assigneeIds.filter(id => id !== sellerId)
+                    : [...prev.assigneeIds, sellerId]
+            };
+        });
+    };
+
+    const selectedRecipients = inviteAll
+        ? sellers
+        : sellers.filter(seller => formData.assigneeIds.includes(seller.id));
+
+    const selectionLabel = inviteAll
+        ? `Equipo completo (${sellers.length})`
+        : selectedRecipients.length === 0
+            ? 'Sin vendedores seleccionados'
+            : `${selectedRecipients.length} vendedor${selectedRecipients.length === 1 ? '' : 'es'} seleccionado${selectedRecipients.length === 1 ? '' : 's'}`;
 
     if (!isOpen) return null;
 
     const handleSave = async () => {
-        if (!formData.assigneeId) {
-            alert("Debes seleccionar un responsable o 'Todos'.");
+        if (!inviteAll && formData.assigneeIds.length === 0) {
+            alert("Debes seleccionar al menos un responsable o usar 'Todos'.");
+            return;
+        }
+        if (selectedRecipients.length === 0) {
+            alert("No hay vendedores seleccionados para esta reunión.");
             return;
         }
         if (!formData.title) {
@@ -91,47 +122,25 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
 
             // 2. Insert into tasks
             let insertedTaskIds: string[] = [];
-            if (formData.assigneeId === 'all') {
-                // Bulk Insert for ALL sellers
-                const tasksToInsert = sellers.map(seller => ({
-                    title: formData.title,
-                    description: formData.notes,
-                    user_id: seller.id,
-                    assigned_to: seller.id,
-                    assigned_by: session.user.id,
-                    status: 'pending',
-                    priority: 'medium',
-                    due_date: isoDue,
-                    end_date: isoEnd
-                }));
+            const tasksToInsert = selectedRecipients.map((seller) => ({
+                title: formData.title,
+                description: formData.notes,
+                user_id: seller.id,
+                assigned_to: seller.id,
+                assigned_by: session.user.id,
+                status: 'pending',
+                priority: 'medium',
+                due_date: isoDue,
+                end_date: isoEnd
+            }));
 
-                const { data, error } = await supabase
-                    .from('tasks')
-                    .insert(tasksToInsert)
-                    .select('id');
+            const { data, error } = await supabase
+                .from('tasks')
+                .insert(tasksToInsert)
+                .select('id');
 
-                if (error) throw error;
-                insertedTaskIds = (data || []).map((task: any) => task.id);
-            } else {
-                // Single Insert
-                const { data, error } = await supabase
-                    .from('tasks')
-                    .insert({
-                        title: formData.title,
-                        description: formData.notes,
-                        user_id: formData.assigneeId,
-                        assigned_to: formData.assigneeId,
-                        assigned_by: session.user.id,
-                        status: 'pending',
-                        priority: 'medium',
-                        due_date: isoDue,
-                        end_date: isoEnd
-                    })
-                    .select('id');
-
-                if (error) throw error;
-                insertedTaskIds = (data || []).map((task: any) => task.id);
-            }
+            if (error) throw error;
+            insertedTaskIds = (data || []).map((task: any) => task.id);
 
             // 3. Sync to Google Calendar (Organizer Mode + Attendee Injection)
             let googleSyncNote = '';
@@ -140,18 +149,11 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                 if (!sessionEmail) {
                     googleSyncNote = ' (Sincronización Google omitida)';
                 } else {
-                    const attendeeEmails = formData.assigneeId === 'all'
-                        ? Array.from(new Set(
-                            sellers
-                                .map((seller) => (seller.email || '').trim().toLowerCase())
-                                .filter((email) => !!email && email !== sessionEmail)
-                        ))
-                        : (() => {
-                            const assignee = sellers.find(s => s.id === formData.assigneeId);
-                            const email = (assignee?.email || '').trim().toLowerCase();
-                            if (!email || email === sessionEmail) return [];
-                            return [email];
-                        })();
+                    const attendeeEmails = Array.from(new Set(
+                        selectedRecipients
+                            .map((seller) => (seller.email || '').trim().toLowerCase())
+                            .filter((email) => !!email && email !== sessionEmail)
+                    ));
 
                     const attendees = attendeeEmails.map((email) => ({ email }));
                     const gCalEvent: any = {
@@ -193,7 +195,8 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
             onSaved();
             onClose();
             // Reset crucial fields
-            setFormData(p => ({ ...p, time: '09:00', endTime: '10:00', title: '', notes: '' }));
+            setInviteAll(false);
+            setFormData(p => ({ ...p, assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [], time: '09:00', endTime: '10:00', title: '', notes: '' }));
             alert(`Actividad asignada correctamente.${googleSyncNote}`);
 
         } catch (error: any) {
@@ -217,20 +220,49 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                     {/* Assignee Selector */}
                     <div className="space-y-2">
                         <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Asignar a</label>
-                        <div className="relative">
-                            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                            <select
-                                value={formData.assigneeId}
-                                onChange={e => setFormData({ ...formData, assigneeId: e.target.value })}
-                                className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none appearance-none"
+                        <div className="rounded-2xl bg-gray-50 border border-transparent focus-within:bg-white focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all overflow-hidden">
+                            <button
+                                type="button"
+                                onClick={() => setInviteAll((current) => !current)}
+                                className={`w-full flex items-center justify-between px-4 py-4 border-b border-gray-100 transition-colors ${inviteAll ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-white/70'}`}
                             >
-                                <option value="">Seleccionar miembro del equipo...</option>
-                                <option value="all" className="font-black text-indigo-600">📢 Invitar a TODOS (Equipo Completo)</option>
-                                {sellers.map(s => (
-                                    <option key={s.id} value={s.id}>{s.full_name || s.email}</option>
-                                ))}
-                            </select>
+                                <span className="flex items-center gap-3 font-bold">
+                                    <User size={18} className={inviteAll ? 'text-indigo-600' : 'text-gray-400'} />
+                                    📢 Invitar a TODOS (Equipo Completo)
+                                </span>
+                                <span className={`w-5 h-5 rounded-md border flex items-center justify-center text-[10px] font-black ${inviteAll ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 text-transparent'}`}>
+                                    ✓
+                                </span>
+                            </button>
+                            <div className="max-h-52 overflow-y-auto divide-y divide-gray-100">
+                                {sellers.map((seller) => {
+                                    const isSelected = inviteAll || formData.assigneeIds.includes(seller.id);
+                                    return (
+                                        <button
+                                            key={seller.id}
+                                            type="button"
+                                            onClick={() => toggleAssignee(seller.id)}
+                                            className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors ${isSelected && !inviteAll ? 'bg-white text-indigo-700' : 'text-gray-700 hover:bg-white/70'} ${inviteAll ? 'opacity-60' : ''}`}
+                                        >
+                                            <span className="font-bold">{seller.full_name || seller.email}</span>
+                                            <span className={`w-5 h-5 rounded-md border flex items-center justify-center text-[10px] font-black ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 text-transparent'}`}>
+                                                ✓
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
+                        <p className="text-[11px] text-gray-500 font-bold ml-1">{selectionLabel}</p>
+                        {!inviteAll && selectedRecipients.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                                {selectedRecipients.map((seller) => (
+                                    <span key={seller.id} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-black">
+                                        {seller.full_name || seller.email}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
                     </div>
 
                     <div className="space-y-2">
