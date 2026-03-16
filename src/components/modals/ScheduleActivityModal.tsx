@@ -7,6 +7,7 @@ interface Profile {
     id: string;
     full_name: string;
     email: string;
+    role?: string | null;
 }
 
 interface ScheduleActivityModalProps {
@@ -38,12 +39,20 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
         notes: ''
     });
 
-    // Fetch potential assignees (Sellers/Drivers/Etc)
+    const roleLabel = (role?: string | null) => {
+        const normalizedRole = (role || '').trim().toLowerCase();
+        if (normalizedRole === 'manager' || normalizedRole === 'admin') return 'Admin';
+        if (normalizedRole === 'jefe') return 'Jefe';
+        if (normalizedRole === 'seller') return 'Vendedor';
+        return 'Usuario';
+    };
+
+    // Fetch potential assignees
     useEffect(() => {
         const fetchSellers = async () => {
             const { data } = await supabase.from('profiles')
-                .select('id, full_name, email')
-                .neq('role', 'super_admin_placeholder') // Filter if needed
+                .select('id, full_name, email, role')
+                .in('role', ['seller', 'jefe', 'admin', 'manager'])
                 .order('full_name');
             if (data) setSellers(data);
         };
@@ -80,8 +89,8 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
     const selectionLabel = inviteAll
         ? `Equipo completo (${sellers.length})`
         : selectedRecipients.length === 0
-            ? 'Sin vendedores seleccionados'
-            : `${selectedRecipients.length} vendedor${selectedRecipients.length === 1 ? '' : 'es'} seleccionado${selectedRecipients.length === 1 ? '' : 's'}`;
+            ? 'Sin participantes seleccionados'
+            : `${selectedRecipients.length} participante${selectedRecipients.length === 1 ? '' : 's'} seleccionado${selectedRecipients.length === 1 ? '' : 's'}`;
 
     if (!isOpen) return null;
 
@@ -91,7 +100,7 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
             return;
         }
         if (selectedRecipients.length === 0) {
-            alert("No hay vendedores seleccionados para esta reunión.");
+            alert("No hay participantes seleccionados para esta reunión.");
             return;
         }
         if (!formData.title) {
@@ -208,14 +217,17 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
     };
 
     return (
-        <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-8 space-y-6 animate-in zoom-in duration-300">
-                <div className="flex justify-between items-center">
+        <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+            <div
+                className="bg-white w-full max-w-md max-h-[92vh] rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in duration-300 flex flex-col"
+                onClick={(event) => event.stopPropagation()}
+            >
+                <div className="flex justify-between items-center px-8 py-6 border-b border-gray-100 bg-white">
                     <h3 className="text-2xl font-black text-gray-900">Asignar Reunión</h3>
                     <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X size={24} /></button>
                 </div>
 
-                <div className="space-y-5">
+                <div className="flex-1 overflow-y-auto px-8 py-6 space-y-5">
 
                     {/* Assignee Selector */}
                     <div className="space-y-2">
@@ -244,7 +256,12 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                                             onClick={() => toggleAssignee(seller.id)}
                                             className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors ${isSelected && !inviteAll ? 'bg-white text-indigo-700' : 'text-gray-700 hover:bg-white/70'} ${inviteAll ? 'opacity-60' : ''}`}
                                         >
-                                            <span className="font-bold">{seller.full_name || seller.email}</span>
+                                            <span>
+                                                <span className="block font-bold">{seller.full_name || seller.email}</span>
+                                                <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                                                    {roleLabel(seller.role)}
+                                                </span>
+                                            </span>
                                             <span className={`w-5 h-5 rounded-md border flex items-center justify-center text-[10px] font-black ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 text-transparent'}`}>
                                                 ✓
                                             </span>
@@ -340,12 +357,12 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                     </div>
                 </div>
 
-                <div className="pt-4 flex gap-4">
+                <div className="border-t border-gray-100 px-8 py-4 flex gap-4 bg-white">
                     <button
                         onClick={onClose}
                         className="flex-1 py-4 font-bold text-gray-400 hover:text-gray-600 transition-colors"
                     >
-                        Cancelar
+                        Cerrar
                     </button>
                     <button
                         onClick={handleSave}
