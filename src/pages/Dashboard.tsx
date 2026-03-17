@@ -754,25 +754,6 @@ const Dashboard = () => {
                             className="pl-10 pr-4 py-3 bg-white border border-gray-100 rounded-2xl font-bold text-gray-700 shadow-sm focus:ring-2 focus:ring-indigo-200 outline-none"
                         />
                     </div>
-
-                    {hasPermission('MANAGE_PERMISSIONS') && (
-                        <button
-                            onClick={async () => {
-                                if (confirm('PELIGRO CRÍTICO: Se borrarán TODAS las VISITAS y sus PEDIDOS asociados.\n\n¿Confirmar limpieza total?')) {
-                                    const { error: orderError } = await supabase.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-                                    if (orderError) { alert('Error borrando pedidos: ' + orderError.message); return; }
-                                    const { error } = await supabase.from('visits').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-                                    if (error) alert('Error borrando visitas: ' + error.message);
-                                    else { alert('Sistema limpio.'); fetchDashboardData(); }
-                                }
-                            }}
-                            className="bg-red-50 text-red-600 px-4 py-3 rounded-2xl font-bold text-xs hover:bg-red-100 transition-all flex items-center border border-red-100"
-                        >
-                            <AlertCircle size={14} className="mr-2" />
-                            Limpiar DB
-                        </button>
-                    )}
-
                     <Link to="/clients" className="bg-gray-900 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-xl hover:shadow-2xl active:scale-95 transition-all flex items-center">
                         <Plus size={18} className="mr-2" />
                         Nueva Clínica

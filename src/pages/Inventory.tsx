@@ -66,12 +66,6 @@ const Inventory = () => {
         return null;
     };
 
-    const chunkArray = <T,>(arr: T[], size = 200): T[][] => {
-        const out: T[][] = [];
-        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-        return out;
-    };
-
     const fetchInventory = async () => {
         setLoading(true);
         // Explicit projection: avoid leaking internal cost/margin columns to client UI.
@@ -208,71 +202,12 @@ const Inventory = () => {
                     throw new Error('No se encontraron datos válidos. Este importador requiere columnas: SKU, Nombre y Cantidad.');
                 }
 
-                const { data: existingData, error: existingError } = await (supabase.from('inventory') as any)
-                    .select('id, sku, price, category');
-                if (existingError) throw existingError;
-
-                const existingBySku = new Map<string, any>();
-                (existingData || []).forEach((row: any) => {
-                    existingBySku.set(normalizeSku(row.sku), row);
+                const { data, error } = await supabase.rpc('replace_inventory_stock_import', {
+                    p_items: newItems
                 });
+                if (error) throw error;
 
-                const upsertPayload = newItems.map((item) => {
-                    const existing = existingBySku.get(item.sku);
-                    return {
-                        ...(existing?.id ? { id: existing.id } : {}),
-                        sku: item.sku,
-                        name: item.name,
-                        stock_qty: item.stock_qty,
-                        price: Number(existing?.price ?? 0),
-                        category: existing?.category || 'General'
-                    };
-                });
-
-                const { error: upsertError } = await (supabase.from('inventory') as any)
-                    .upsert(upsertPayload, { onConflict: 'sku' });
-                if (upsertError) throw upsertError;
-
-                const importedSkuSet = new Set(newItems.map((item) => item.sku));
-                const obsoleteRows = (existingData || []).filter((row: any) => !importedSkuSet.has(normalizeSku(row.sku)) && row.id);
-                let deletedCount = 0;
-                let preservedHistoricalCount = 0;
-
-                if (obsoleteRows.length > 0) {
-                    const obsoleteIds = obsoleteRows.map((row: any) => row.id as string);
-                    const referencedIds = new Set<string>();
-
-                    for (const chunk of chunkArray(obsoleteIds, 200)) {
-                        const { data: orderRefs, error: refsError } = await (supabase.from('order_items') as any)
-                            .select('product_id')
-                            .in('product_id', chunk);
-                        if (refsError) throw refsError;
-                        (orderRefs || []).forEach((ref: any) => {
-                            if (ref?.product_id) referencedIds.add(ref.product_id);
-                        });
-                    }
-
-                    const idsToDelete = obsoleteIds.filter((id: string) => !referencedIds.has(id));
-                    const idsToPreserve = obsoleteIds.filter((id: string) => referencedIds.has(id));
-
-                    for (const chunk of chunkArray(idsToDelete, 200)) {
-                        const { error: deleteError } = await (supabase.from('inventory') as any)
-                            .delete()
-                            .in('id', chunk);
-                        if (deleteError) throw deleteError;
-                        deletedCount += chunk.length;
-                    }
-
-                    for (const chunk of chunkArray(idsToPreserve, 200)) {
-                        const { error: preserveError } = await (supabase.from('inventory') as any)
-                            .update({ stock_qty: 0 })
-                            .in('id', chunk);
-                        if (preserveError) throw preserveError;
-                        preservedHistoricalCount += chunk.length;
-                    }
-                }
-
-                alert(`Importador de stock completado. ${newItems.length} SKU procesados, ${deletedCount} SKU reemplazados y ${preservedHistoricalCount} SKU históricos conservados con stock 0.`);
+                alert(`Importador de stock completado. ${data?.processed_count || newItems.length} SKU procesados, ${data?.deleted_count || 0} SKU reemplazados y ${data?.preserved_historical_count || 0} SKU históricos conservados con stock 0.`);
             } else if (importType === 'pricing') {
                 const expectedSkuHeaders = ['sku'];
                 const expectedPriceHeaders = ['precionetoventa', 'precionetodeventa'];
@@ -305,51 +240,17 @@ const Inventory = () => {
                     throw new Error('No se encontraron datos válidos. Este importador requiere columnas: SKU y Precio Neto Venta.');
                 }
 
-                const { data: existingData, error: existingError } = await (supabase.from('inventory') as any)
-                    .select('id, sku');
-                if (existingError) throw existingError;
-
-                const existingBySku = new Map<string, any>();
-                (existingData || []).forEach((row: any) => existingBySku.set(normalizeSku(row.sku), row));
-
-                const rowsToApply: Array<{ id: string; price: number }> = [];
-                const unknownSkus: string[] = [];
-
-                dedupedPrices.forEach((price, sku) => {
-                    const existing = existingBySku.get(sku);
-                    if (existing?.id) {
-                        rowsToApply.push({ id: existing.id, price });
-                    } else {
-                        unknownSkus.push(sku);
-                    }
+                const pricingItems = Array.from(dedupedPrices.entries()).map(([sku, price]) => ({ sku, price }));
+                const { data, error } = await supabase.rpc('replace_inventory_pricing_import', {
+                    p_items: pricingItems
                 });
+                if (error) throw error;
 
-                if (rowsToApply.length === 0) {
-                    throw new Error('Ningún SKU del archivo de precios coincide con el inventario actual.');
-                }
-
-                for (const chunk of chunkArray(rowsToApply, 200)) {
-                    const { error: applyError } = await (supabase.from('inventory') as any)
-                        .upsert(chunk, { onConflict: 'id' });
-                    if (applyError) throw applyError;
-                }
-
-                const appliedIdSet = new Set(rowsToApply.map((row) => row.id));
-                const idsToReset = (existingData || [])
-                    .map((row: any) => row.id as string)
-                    .filter((id: string) => Boolean(id) && !appliedIdSet.has(id));
-
-                for (const chunk of chunkArray(idsToReset, 200)) {
-                    const { error: resetError } = await (supabase.from('inventory') as any)
-                        .update({ price: 0 })
-                        .in('id', chunk);
-                    if (resetError) throw resetError;
-                }
-
-                const unknownMsg = unknownSkus.length > 0
-                    ? ` SKUs no encontrados: ${unknownSkus.length}.`
+                const unknownCount = Number(data?.unknown_skus_count || 0);
+                const unknownMsg = unknownCount > 0
+                    ? ` SKUs no encontrados: ${unknownCount}.`
                     : '';
-                alert(`Importador de precios completado. ${rowsToApply.length} SKU con precio actualizado y ${idsToReset.length} SKU reseteados a precio 0.${unknownMsg}`);
+                alert(`Importador de precios completado. ${data?.updated_count || 0} SKU con precio actualizado y ${data?.reset_count || 0} SKU reseteados a precio 0.${unknownMsg}`);
             }
 
             fetchInventory();
@@ -376,9 +277,18 @@ const Inventory = () => {
 
         setIsSaving(true);
         try {
+            const payload = {
+                ...newProduct,
+                sku: normalizeSku(newProduct.sku),
+                name: String(newProduct.name || '').trim(),
+                price: Math.max(0, Number(newProduct.price || 0)),
+                stock_qty: Math.max(0, Math.trunc(Number(newProduct.stock_qty || 0))),
+                category: String(newProduct.category || 'General').trim() || 'General'
+            };
+
             const { error } = await supabase
                 .from('inventory')
-                .insert([newProduct]);
+                .insert([payload]);
 
             if (error) throw error;
 

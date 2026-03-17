@@ -11,6 +11,14 @@ type InvitePayload = {
     role: string;
 };
 
+const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+    admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS'],
+    jefe: ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS'],
+    facturador: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS'],
+    seller: ['VIEW_METAS'],
+    driver: ['EXECUTE_DELIVERY']
+};
+
 const Settings: React.FC = () => {
     const { profile, effectiveRole } = useUser();
     const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'owner@company.com';
@@ -42,8 +50,13 @@ const Settings: React.FC = () => {
     const [pendingInvites, setPendingInvites] = useState<any[]>([]); // New state for Pending Invites
     const [resendingInviteEmail, setResendingInviteEmail] = useState<string | null>(null);
 
-    const normalizeRole = (role: string | null | undefined) => ((role || '').toLowerCase().trim() === 'manager' ? 'admin' : (role || '').toLowerCase().trim());
-    const roles = ['admin', 'jefe', 'administrativo', 'seller', 'driver'];
+    const normalizeRole = (role: string | null | undefined) => {
+        const normalized = (role || '').toLowerCase().trim();
+        if (normalized === 'manager') return 'admin';
+        if (normalized === 'administrativo') return 'facturador';
+        return normalized;
+    };
+    const roles = ['admin', 'jefe', 'facturador', 'seller', 'driver'];
     const permissionList = [
         { key: 'UPLOAD_EXCEL', label: 'Cargar Excel', desc: 'Permite subir archivos de inventario, precios y despacho.' },
         { key: 'MANAGE_INVENTORY', label: 'Gestión Inventario', desc: 'Crear, editar y eliminar productos.' },
@@ -59,6 +72,12 @@ const Settings: React.FC = () => {
         { key: 'IMPORT_CLIENTS', label: 'Importar Clientes', desc: 'Subida masiva de clientes vía CSV.' },
         { key: 'VIEW_TEAM_STATS', label: 'Panel Equipo', desc: 'Acceso a estadísticas y supervisión de representantes.' },
         { key: 'VIEW_ALL_TEAM_STATS', label: 'Ver Todo el Equipo', desc: 'Supervisión global (vs solo subordinados directos).' },
+        { key: 'VIEW_OPERATIONS', label: 'Ver Operaciones', desc: 'Acceso al centro de operaciones y monitoreo operativo.' },
+        { key: 'MANAGE_AUTOMATIONS', label: 'Gestionar Automatizaciones', desc: 'Configurar reglas automáticas del sistema.' },
+        { key: 'MANAGE_SLA', label: 'Gestionar SLA', desc: 'Administrar compromisos y tiempos de servicio.' },
+        { key: 'MANAGE_APPROVALS', label: 'Gestionar Aprobaciones', desc: 'Resolver solicitudes de autorización y descuentos.' },
+        { key: 'MANAGE_POSTSALE', label: 'Gestionar Postventa', desc: 'Administrar flujos y seguimiento de postventa.' },
+        { key: 'MANAGE_COLLECTIONS', label: 'Gestionar Cobranzas', desc: 'Subir y administrar información de cobranzas.' },
         { key: 'VIEW_TEAM_CALENDARS', label: 'Calendarios del Equipo', desc: 'Permite ver Google Calendar de otros vendedores compartidos por Workspace.' }
     ];
 
@@ -90,15 +109,16 @@ const Settings: React.FC = () => {
                 if (!matrix[roleKey]) matrix[roleKey] = [];
                 matrix[roleKey].push(p.permission);
             });
-            setRolePerms(matrix);
-        } else {
-            setRolePerms({
-                'admin': permissionList.map(p => p.key),
-                'jefe': ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_TEAM_CALENDARS'],
-                'administrativo': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH'],
-                'seller': ['VIEW_METAS'],
-                'driver': ['EXECUTE_DELIVERY']
+            const merged: Record<string, string[]> = { ...DEFAULT_ROLE_PERMISSIONS };
+            Object.entries(matrix).forEach(([role, perms]) => {
+                const basePerms = role === 'admin'
+                    ? permissionList.map((permission) => permission.key)
+                    : (DEFAULT_ROLE_PERMISSIONS[role] || []);
+                merged[role] = Array.from(new Set([...basePerms, ...perms]));
             });
+            setRolePerms(merged);
+        } else {
+            setRolePerms(DEFAULT_ROLE_PERMISSIONS);
         }
     };
 
@@ -108,7 +128,6 @@ const Settings: React.FC = () => {
             // Solo consultamos public.profiles para evitar "usuarios fantasma" del esquema crm
             const { data, error } = await supabase.from('profiles').select('*').order('email');
             if (error) throw error;
-            console.log("Settings Audit: Fetched Profiles:", data);
             setUsers((data || []) as Profile[]);
         } catch (error: any) {
             console.error('Error fetching users:', error);
@@ -178,27 +197,24 @@ const Settings: React.FC = () => {
     const handleSaveRolePermissions = async () => {
         setSavingPerms(true);
         try {
-            // Transform matrix into array of rows
             const rows: any[] = [];
-
-            // 1. Force 'admin' to always have EVERYTHING (Safety redundancy)
             permissionList.forEach(p => {
                 rows.push({ role: 'admin', permission: p.key });
             });
 
-            // 2. Add other roles from current state (excluding admin as we already forced it)
             Object.entries(rolePerms).forEach(([role, perms]) => {
                 if (role === 'admin') return;
                 perms.forEach(p => {
-                    rows.push({ role, permission: p });
+                    rows.push({ role: normalizeRole(role), permission: p });
                 });
             });
 
-            // Delete existing and insert new (simplified sync)
-            await supabase.from('role_permissions').delete().neq('role', 'super_admin_placeholder');
-            const { error } = await supabase.from('role_permissions').insert(rows);
+            const { error } = await supabase.rpc('sync_role_permissions', {
+                p_rows: rows
+            });
 
             if (error) throw error;
+            await fetchRolePermissions();
             alert('Matriz de permisos actualizada correctamente y accesos de Administrador blindados.');
         } catch (error: any) {
             console.error('Error saving perms:', error);
@@ -316,44 +332,30 @@ const Settings: React.FC = () => {
         }
     };
 
-    const handleDeleteUser = async (id: string, email: string) => {
-        if (email === ownerEmail || !window.confirm(`¿BORRADO DEFINITIVO de ${email}?`)) return;
+    const handleDisableUser = async (id: string, email: string) => {
+        if (email === ownerEmail || !window.confirm(`¿Deshabilitar a ${email}?\n\nEl historial de visitas, pedidos, cotizaciones y tareas se conservará.`)) return;
 
         try {
-            // 1. Limpieza de Dependencias (Foreign Keys)
-            await supabase.from('clients').update({ created_by: null }).eq('created_by', id);
+            let { error } = await supabase
+                .from('profiles')
+                .update({ status: 'disabled' })
+                .eq('id', id);
 
-            const { data: visits } = await supabase.from('visits').select('id').eq('sales_rep_id', id);
-            if (visits && visits.length > 0) {
-                const visitIds = visits.map(v => v.id);
-                await supabase.from('orders').update({ visit_id: null }).in('visit_id', visitIds);
+            if (error) {
+                const legacyRetry = await supabase
+                    .from('profiles')
+                    .update({ status: 'suspended' } as any)
+                    .eq('id', id);
+                error = legacyRetry.error;
             }
 
-            await supabase.from('visits').delete().eq('sales_rep_id', id);
-            await supabase.from('quotations').update({ seller_id: null }).eq('seller_id', id);
-            await supabase.from('delivery_routes').update({ driver_id: null }).eq('driver_id', id);
-            await supabase.from('tasks').delete().eq('user_id', id);
-            await supabase.from('tasks').delete().eq('assigned_to', id);
-            await supabase.from('tasks').delete().eq('assigned_by', id);
-            try {
-                await supabase.from('meta_config').delete().eq('id', id);
-            } catch (e) {
-                console.warn("meta_config cleanup skipped:", e);
-            }
+            if (error) throw error;
 
-            // 2. Borrado Esquema CRM (Silencioso - best effort)
-            try { await (supabase.schema('crm').from('profiles') as any).delete().eq('id', id); } catch (e) { }
-
-            // 3. Borrado Final en esquema Public (Fuente de Verdad)
-            const { error: pubErr } = await supabase.from('profiles').delete().eq('id', id);
-
-            if (pubErr) throw pubErr;
-
-            alert(`Usuario ${email} eliminado correctamente.`);
+            alert(`Usuario ${email} deshabilitado correctamente.`);
             fetchUsers();
         } catch (error: any) {
-            console.error('Error al eliminar usuario:', error);
-            alert('Error en el borrado: ' + error.message);
+            console.error('Error al deshabilitar usuario:', error);
+            alert('Error al deshabilitar: ' + error.message);
         }
     };
 
@@ -497,7 +499,7 @@ const Settings: React.FC = () => {
                                                     </div>
                                                 ) : (
                                                     <div className="flex justify-end items-center gap-6">
-                                                        <button onClick={() => handleDeleteUser(user.id, user.email || '')} disabled={user.email === ownerEmail} className="text-gray-300 hover:text-rose-500 transition-all disabled:opacity-0 hover:scale-125"><Trash2 size={18} /></button>
+                                                        <button onClick={() => handleDisableUser(user.id, user.email || '')} disabled={user.email === ownerEmail} className="text-gray-300 hover:text-amber-600 transition-all disabled:opacity-0 hover:scale-125"><Ban size={18} /></button>
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
@@ -732,7 +734,7 @@ const Settings: React.FC = () => {
                                         className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black appearance-none focus:ring-4 focus:ring-indigo-500/10 transition-all uppercase"
                                     >
                                         <option value="seller">Vendedor</option>
-                                        <option value="administrativo">Administrativo</option>
+                                        <option value="facturador">Facturador</option>
                                         <option value="jefe">Jefe de Ventas</option>
                                         <option value="driver">Repartidor</option>
                                         <option value="admin">Admin</option>

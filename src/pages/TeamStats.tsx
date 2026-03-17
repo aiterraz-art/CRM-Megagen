@@ -6,7 +6,7 @@ import { Link, Navigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 
 const TeamStats = () => {
-    const { hasPermission, loading: userLoading, profile: currentUser } = useUser();
+    const { hasPermission, loading: userLoading, profile: currentUser, effectiveRole } = useUser();
     const [teamData, setTeamData] = useState<any[]>([]);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [stats, setStats] = useState({
@@ -34,7 +34,7 @@ const TeamStats = () => {
     const [exportSellerId, setExportSellerId] = useState<'all' | string>('all');
     const [exporting, setExporting] = useState(false);
     const [cleaningLeads, setCleaningLeads] = useState(false);
-    const normalizedCurrentRole = (currentUser?.role || '').toLowerCase();
+    const normalizedCurrentRole = (effectiveRole || '').toLowerCase();
     const canCleanGhostLeads = normalizedCurrentRole === 'admin' || normalizedCurrentRole === 'jefe' || normalizedCurrentRole === 'manager';
 
     const handleOpenGoalModal = async (rep: any) => {
@@ -110,38 +110,16 @@ const TeamStats = () => {
         const monthStart = new Date(selected.getFullYear(), selected.getMonth(), 1, 0, 0, 0, 0);
         const monthEnd = new Date(selected.getFullYear(), selected.getMonth() + 1, 0, 23, 59, 59, 999);
 
-        // 1. Fetch profiles
         let query = supabase.from('profiles').select('*');
+        const canViewAllTeam = normalizedCurrentRole === 'admin';
 
-        // SECURITY REINFORCEMENT:
-        // Only admin role can bypass the supervisor filter.
-        const userRole = (currentUser?.role || '').toLowerCase();
-        const normalizedRole = userRole === 'manager' ? 'admin' : userRole;
-        const isActuallyAdmin = normalizedRole === 'admin';
-        const isActuallyChief = userRole === 'jefe';
-
-        console.log("TeamStats DEBUG V7:", {
-            email: currentUser?.email,
-            dbRole: currentUser?.role,
-            isActuallyAdmin,
-            isActuallyChief,
-            canViewAll: isActuallyAdmin && !isActuallyChief
-        });
-
-        // Fail-safe: If anything is ambiguous, we restrict to subordinates.
-        let finalCanViewAll = isActuallyAdmin;
-        if (isActuallyChief) finalCanViewAll = false; // Chief ALWAYS restricted
-
-        if (!finalCanViewAll) {
-            console.log("TeamStats: RADICAL FORCED supervisor filter for ID:", currentUser!.id);
+        if (!canViewAllTeam) {
             query = query.eq('supervisor_id', currentUser!.id);
         } else {
-            console.log("TeamStats: Global visibility (Super Admin).");
             query = query.neq('id', currentUser!.id);
         }
 
         const { data: profilesData, error } = await query;
-        console.log("TeamStats Profiles Query Result:", { count: profilesData?.length, error });
 
         if (error) {
             console.error("Error loading team profiles:", error);

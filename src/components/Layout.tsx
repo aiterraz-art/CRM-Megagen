@@ -22,7 +22,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/' },
     ];
 
-    if (effectiveRole !== 'administrativo') {
+    if (effectiveRole !== 'facturador') {
         menuItems.push({ icon: <Stethoscope size={20} />, label: 'Visita en Frío', path: '/cold-visit' });
         menuItems.push({ icon: <MapIcon size={20} />, label: 'Mapa', path: '/map' });
     }
@@ -32,7 +32,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     menuItems.push({ icon: <ShoppingCart size={20} />, label: 'Pedidos', path: '/orders' });
     menuItems.push({ icon: <Trophy size={20} />, label: 'Conversiones', path: '/conversions' });
 
-    if (effectiveRole !== 'administrativo') {
+    if (effectiveRole !== 'facturador') {
         menuItems.push({ icon: <CircleDollarSign size={20} />, label: 'Cobranzas', path: '/collections' });
         menuItems.push({ icon: <LayoutDashboard size={20} className="rotate-90" />, label: 'Embudo', path: '/pipeline' });
         menuItems.push({ icon: <Target size={20} />, label: 'Leads', path: '/lead-pipeline' });
@@ -45,7 +45,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     menuItems.push({ icon: <Package size={20} />, label: 'Inventario', path: '/inventory' });
     menuItems.push({ icon: <Calendar size={20} />, label: 'Agenda', path: '/schedule' });
 
-    if (effectiveRole !== 'seller' && effectiveRole !== 'administrativo') {
+    if (effectiveRole !== 'seller' && effectiveRole !== 'facturador') {
         menuItems.push({ icon: <ClipboardList size={20} />, label: 'Historial', path: '/visits' });
     }
 
@@ -55,7 +55,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         menuItems.push({ icon: <ShoppingCart size={20} />, label: 'Pedidos', path: '/orders' });
         menuItems.push({ icon: <Truck size={20} />, label: 'Ruta', path: '/delivery' });
         menuItems.push({ icon: <Trophy size={20} />, label: 'Conversiones', path: '/conversions' });
-    } else if (isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'administrativo') {
+    } else if (isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'facturador') {
         menuItems.push({ icon: <ShieldCheck size={20} />, label: 'Mi Equipo', path: '/team' });
         menuItems.push({ icon: <React.Fragment><MapIcon size={20} className="text-indigo-400" /></React.Fragment>, label: 'Rutas', path: '/routes' });
     }
@@ -64,7 +64,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         menuItems.push({ icon: <Truck size={20} />, label: 'Estado Entregas', path: '/my-deliveries' });
     }
 
-    if (effectiveRole === 'admin' || effectiveRole === 'administrativo') {
+    if (effectiveRole === 'admin' || effectiveRole === 'facturador') {
         menuItems.push({ icon: <Truck size={20} />, label: 'Despacho', path: '/dispatch' });
     }
 
@@ -153,7 +153,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                                     <option value="" className="text-gray-800">Ver como Admin</option>
                                     <option value="seller" className="text-gray-800">Ver como Vendedor</option>
                                     <option value="jefe" className="text-gray-800">Ver como Jefe</option>
-                                    <option value="administrativo" className="text-gray-800">Ver como Administrativo</option>
+                                    <option value="facturador" className="text-gray-800">Ver como Facturador</option>
                                     <option value="driver" className="text-gray-800">Ver como Repartidor</option>
                                 </select>
                                 {simulatedRole && (

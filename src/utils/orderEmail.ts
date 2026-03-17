@@ -1,7 +1,7 @@
+import { supabase } from '../services/supabase';
 import { sendGmailMessage } from './gmail';
+import { getCompanyConfig } from './companyConfig';
 import { generateOrderPdfFile, type OrderPdfData } from './orderPdf';
-
-export const ORDER_NOTIFICATION_RECIPIENTS = ['soporte@3dental.cl', 'amerino@3dental.cl'];
 
 type SendOrderNotificationEmailInput = {
     order: OrderPdfData;
@@ -12,13 +12,37 @@ type SendOrderNotificationEmailInput = {
 
 const formatMoney = (value: number) => `$${Number(value || 0).toLocaleString('es-CL')}`;
 
+const loadOrderNotificationRecipients = async () => {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('email, role, status')
+        .in('role', ['facturador', 'administrativo'])
+        .eq('status', 'active');
+
+    if (error) throw error;
+
+    const recipients = Array.from(new Set(
+        (data || [])
+            .map((profile) => String(profile.email || '').trim().toLowerCase())
+            .filter(Boolean)
+    ));
+
+    if (recipients.length === 0) {
+        throw new Error('No hay usuarios facturadores activos configurados.');
+    }
+
+    return recipients;
+};
+
 export const sendOrderNotificationEmail = async (input: SendOrderNotificationEmailInput) => {
     const { order, proofAttachment = null, clientId, profileId } = input;
+    const { companyName } = getCompanyConfig();
+    const recipients = await loadOrderNotificationRecipients();
     const orderPdf = await generateOrderPdfFile(order);
     const attachments = proofAttachment ? [orderPdf, proofAttachment] : [orderPdf];
     const subject = `Pedido #${order.folio} - ${order.clientName}`;
     const message = [
-        'Equipo 3Dental,',
+        `Equipo ${companyName},`,
         '',
         `Se genero el pedido #${order.folio}${order.quotationFolio ? ` desde la cotizacion #${order.quotationFolio}` : ''}.`,
         `Cliente: ${order.clientName}`,
@@ -32,7 +56,7 @@ export const sendOrderNotificationEmail = async (input: SendOrderNotificationEma
     ].join('\n');
 
     return sendGmailMessage({
-        to: ORDER_NOTIFICATION_RECIPIENTS.join(','),
+        to: recipients.join(','),
         subject,
         message,
         attachments,

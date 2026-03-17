@@ -52,7 +52,7 @@ const DashboardWrapper = () => {
     const { effectiveRole } = useUser();
     if (effectiveRole === 'driver') return <DriverDashboard />;
     if (effectiveRole === 'seller') return <SellerDashboard />;
-    if (effectiveRole === 'administrativo') return <AdministrativeDashboard />;
+    if (effectiveRole === 'facturador') return <AdministrativeDashboard />;
     return <Dashboard />;
 };
 
@@ -63,10 +63,10 @@ const NonSellerGuard = ({ children }: { children: JSX.Element }) => {
     return children;
 };
 
-const NonAdministrativeGuard = ({ children }: { children: JSX.Element }) => {
+const NonFacturadorGuard = ({ children }: { children: JSX.Element }) => {
     const { effectiveRole, loading } = useUser();
     if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
-    if (effectiveRole === 'administrativo') return <Navigate to="/" replace />;
+    if (effectiveRole === 'facturador') return <Navigate to="/" replace />;
     return children;
 };
 
@@ -196,19 +196,19 @@ function App() {
                             </AuthGuard>
                         ) : <Navigate to="/login" />}>
                             <Route index element={<RoleBasedDashboard />} />
-                            <Route path="cold-visit" element={<NonAdministrativeGuard><ColdVisit /></NonAdministrativeGuard>} />
-                            <Route path="map" element={<NonAdministrativeGuard><MapView /></NonAdministrativeGuard>} />
+                            <Route path="cold-visit" element={<NonFacturadorGuard><ColdVisit /></NonFacturadorGuard>} />
+                            <Route path="map" element={<NonFacturadorGuard><MapView /></NonFacturadorGuard>} />
                             <Route path="visit/:clientId" element={<VisitLog />} />
-                            <Route path="visits" element={<NonAdministrativeGuard><NonSellerGuard><VisitHistory /></NonSellerGuard></NonAdministrativeGuard>} />
+                            <Route path="visits" element={<NonFacturadorGuard><NonSellerGuard><VisitHistory /></NonSellerGuard></NonFacturadorGuard>} />
                             <Route path="schedule" element={<Schedule />} />
                             <Route path="clients" element={<Clients />} />
                             <Route path="quotations" element={<Quotations />} />
                             <Route path="orders" element={<Orders />} />
                             <Route path="conversions" element={<ConversionsRanking />} />
-                            <Route path="routes" element={<NonAdministrativeGuard><SellerRoutes /></NonAdministrativeGuard>} />
+                            <Route path="routes" element={<NonFacturadorGuard><SellerRoutes /></NonFacturadorGuard>} />
                             <Route path="inventory" element={<Inventory />} />
-                            <Route path="team" element={<NonAdministrativeGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonAdministrativeGuard>} />
-                            <Route path="pipeline" element={<NonAdministrativeGuard><Pipeline /></NonAdministrativeGuard>} />
+                            <Route path="team" element={<NonFacturadorGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonFacturadorGuard>} />
+                            <Route path="pipeline" element={<NonFacturadorGuard><Pipeline /></NonFacturadorGuard>} />
                             <Route path="lead-pipeline" element={<LeadModuleGuard><LeadPipeline /></LeadModuleGuard>} />
                             <Route path="meta-leads" element={<MetaLeadsGuard><MetaLeads /></MetaLeadsGuard>} />
                             <Route path="lead-messages" element={<LeadModuleGuard><LeadMessages /></LeadModuleGuard>} />
@@ -216,7 +216,7 @@ function App() {
                             <Route path="delivery" element={<DeliveryRoute />} />
                             <Route path="my-deliveries" element={<MyDeliveries />} />
                             <Route path="operations" element={<OperationsCenter />} />
-                            <Route path="collections" element={<NonAdministrativeGuard><Collections /></NonAdministrativeGuard>} />
+                            <Route path="collections" element={<NonFacturadorGuard><Collections /></NonFacturadorGuard>} />
                             <Route path="settings" element={<Settings />} />
                         </Route>
 

@@ -464,8 +464,6 @@ const ClientsContent = () => {
         // Always try to read from the input DOM value to capture latest typing.
         let finalAddress = (inputRef.current?.value || clientForm.address || '').trim();
 
-        console.log('💾 SAVING CLIENT - Payload Address:', finalAddress);
-
         if (!clientForm.name || !normalizedRut || !clientForm.email || !clientForm.phone || !finalAddress || !clientForm.giro) {
             alert("⚠️ Todos los campos son obligatorios (Nombre, RUT, Email, Teléfono, Dirección, Giro), excepto las Notas.");
             setSubmitting(false);

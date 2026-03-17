@@ -165,8 +165,6 @@ const Dispatch: React.FC = () => {
             setIsDetailsModalOpen(true);
             setSelectedRouteItems(null); // Loading state
 
-            console.log("Fetching details for route:", route.id);
-
             const { data, error } = await supabase
                 .from('route_items')
                 .select(`
@@ -196,7 +194,6 @@ const Dispatch: React.FC = () => {
                 throw error;
             }
 
-            console.log("Fetched items:", data);
             setSelectedRouteItems(data || []);
         } catch (err: any) {
             console.error("Error fetching route details:", err);
@@ -796,9 +793,9 @@ const Dispatch: React.FC = () => {
         return 'bg-blue-100 text-blue-700';
     };
 
-    const canManageDispatch = effectiveRole === 'admin' || effectiveRole === 'administrativo';
+    const canManageDispatch = effectiveRole === 'admin' || effectiveRole === 'facturador';
     if (!canManageDispatch) {
-        return <div className="p-10 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para Admin y Administrativo.</div>;
+        return <div className="p-10 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para Admin y Facturador.</div>;
     }
 
     return (

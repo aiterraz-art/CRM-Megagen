@@ -560,7 +560,7 @@ BEGIN
     FROM (
       SELECT id
       FROM public.profiles
-      WHERE role IS NULL OR LOWER(role) NOT IN ('admin', 'jefe', 'administrativo', 'seller', 'driver')
+      WHERE role IS NULL OR LOWER(role) NOT IN ('admin', 'jefe', 'facturador', 'seller', 'driver')
       LIMIT 10
     ) s;
     PERFORM pg_temp.add_check(

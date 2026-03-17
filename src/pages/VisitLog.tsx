@@ -126,7 +126,6 @@ const VisitLog = () => {
     }, [visitId, visitStartTime]);
 
     const handleCheckIn = async () => {
-        console.log("Attempting check-in...", { clientId, profile });
         if (!clientId || !profile) {
             alert("Error: No se pudo identificar al cliente o al usuario. Intenta recargar la página.");
             return;
@@ -142,7 +141,6 @@ const VisitLog = () => {
             const newVisit = await startVisit(clientId);
 
             if (newVisit) {
-                console.log("Check-in success:", newVisit);
                 setVisitId(newVisit.id);
                 setVisitStartTime(newVisit.check_in_time ? new Date(newVisit.check_in_time) : new Date());
             } else if (activeVisit?.id) {
