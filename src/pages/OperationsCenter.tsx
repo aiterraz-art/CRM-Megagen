@@ -1,8 +1,11 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { read, utils, writeFile } from 'xlsx';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { Activity, AlertTriangle, Bot, CheckCircle2, Clock3, DollarSign, ShieldCheck, Wrench, Upload, Download } from 'lucide-react';
+import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
+import { getApprovalReason, getApprovalRequestedItems, readDiscountApprovalPayload } from '../utils/discountApproval';
+import { buildQuotationPreviewData } from '../utils/quotationPreview';
 
 type TabKey = 'health' | 'automations' | 'sla' | 'approvals' | 'postsale';
 
@@ -208,6 +211,40 @@ const getValueByAliases = (row: Record<string, any>, aliases: string[]) => {
     return null;
 };
 
+const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
+
+const formatMoney = (value: number) => `$${Number(value || 0).toLocaleString('es-CL')}`;
+
+const formatApprovalDate = (value: string | null | undefined) => {
+    const parsed = value ? new Date(value) : null;
+    return parsed && !Number.isNaN(parsed.getTime())
+        ? parsed.toLocaleDateString('es-CL')
+        : 'Sin fecha';
+};
+
+const formatApprovalTime = (value: string | null | undefined) => {
+    const parsed = value ? new Date(value) : null;
+    return parsed && !Number.isNaN(parsed.getTime())
+        ? parsed.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
+        : '--:--';
+};
+
+const resolveProfileName = (profile: any) => {
+    if (!profile) return 'Vendedor no identificado';
+    return profile.full_name || profile.email?.split('@')[0]?.toUpperCase() || profile.email || 'Vendedor no identificado';
+};
+
+const summarizeApprovalProducts = (items: any[]) => {
+    if (!Array.isArray(items) || items.length === 0) return 'Sin detalle de productos';
+    const labels = items
+        .map((item) => String(item?.detail || item?.code || '').trim())
+        .filter(Boolean);
+
+    if (labels.length === 0) return 'Sin detalle de productos';
+    if (labels.length <= 2) return labels.join(', ');
+    return `${labels.slice(0, 2).join(', ')} +${labels.length - 2} más`;
+};
+
 const OperationsCenter = () => {
     const { hasPermission, profile, effectiveRole } = useUser();
     const [activeTab, setActiveTab] = useState<TabKey>('health');
@@ -228,6 +265,7 @@ const OperationsCenter = () => {
     const [slaTemplateKey, setSlaTemplateKey] = useState(SLA_TEMPLATES[0].key);
 
     const [approvals, setApprovals] = useState<any[]>([]);
+    const [selectedApprovalPreview, setSelectedApprovalPreview] = useState<any | null>(null);
     const [tickets, setTickets] = useState<any[]>([]);
     const [commitments, setCommitments] = useState<any[]>([]);
 
@@ -277,13 +315,83 @@ const OperationsCenter = () => {
 
             if (firstError) throw firstError;
 
+            const rawApprovals = approvalsRes.data || [];
+            const quotationIds = Array.from(new Set(rawApprovals
+                .filter((approval: any) => approval?.approval_type === 'extra_discount' && approval?.entity_id)
+                .map((approval: any) => approval.entity_id)));
+
+            const { data: quotationsData, error: quotationsError } = quotationIds.length > 0
+                ? await supabase
+                    .from('quotations')
+                    .select(`
+                        id,
+                        folio,
+                        seller_id,
+                        total_amount,
+                        payment_terms,
+                        comments,
+                        created_at,
+                        items,
+                        clients (id, name, rut, address, zone, purchase_contact, phone, email, giro, comuna, office, credit_days)
+                    `)
+                    .in('id', quotationIds)
+                : { data: [], error: null };
+
+            if (quotationsError) throw quotationsError;
+
+            const requesterIds = rawApprovals.map((approval: any) => approval?.requester_id).filter(Boolean);
+            const quotationSellerIds = (quotationsData || []).map((quotation: any) => quotation?.seller_id).filter(Boolean);
+            const profileIds = Array.from(new Set([...requesterIds, ...quotationSellerIds]));
+
+            const { data: profilesData, error: profilesError } = profileIds.length > 0
+                ? await supabase
+                    .from('profiles')
+                    .select('id, email, full_name')
+                    .in('id', profileIds)
+                : { data: [], error: null };
+
+            if (profilesError) throw profilesError;
+
+            const profilesMap = Object.fromEntries((profilesData || []).map((profileRow: any) => [profileRow.id, profileRow]));
+            const quotationsMap = Object.fromEntries((quotationsData || []).map((quotationRow: any) => [quotationRow.id, {
+                ...quotationRow,
+                client: Array.isArray(quotationRow.clients) ? quotationRow.clients[0] : quotationRow.clients,
+                seller: profilesMap[quotationRow.seller_id] || null
+            }]));
+
+            const approvalsWithContext = rawApprovals.map((approval: any) => {
+                const payload = readDiscountApprovalPayload(approval.payload);
+                const quotation = quotationsMap[approval.entity_id] || null;
+                const requesterProfile = profilesMap[approval.requester_id] || null;
+                const requestedItems = getApprovalRequestedItems(approval, quotation);
+                const sellerName = String(
+                    payload.seller_name
+                    || requesterProfile?.full_name
+                    || requesterProfile?.email?.split('@')[0]?.toUpperCase()
+                    || quotation?.seller?.full_name
+                    || quotation?.seller?.email?.split('@')[0]?.toUpperCase()
+                    || 'Vendedor no identificado'
+                );
+
+                return {
+                    ...approval,
+                    payloadData: payload,
+                    quotation,
+                    requesterProfile,
+                    requestedItems,
+                    requestReason: getApprovalReason(approval),
+                    sellerName,
+                    sellerEmail: String(payload.seller_email || requesterProfile?.email || quotation?.seller?.email || '').trim()
+                };
+            });
+
             setHealth(healthRes.data || null);
             setAlerts(alertsRes.data || []);
             setTimeline(timelineRes.data || []);
             setRules(rulesRes.data || []);
             setSlaPolicies(slaRes.data || []);
             setSlaEvents(slaEventsRes.data || []);
-            setApprovals(approvalsRes.data || []);
+            setApprovals(approvalsWithContext);
             setTickets(ticketsRes.data || []);
             setCommitments(commitmentsRes.data || []);
             setCollectionsRows(collectionsRes.data || []);
@@ -394,6 +502,11 @@ const OperationsCenter = () => {
         }
 
         fetchData();
+    };
+
+    const openApprovalPreview = (approval: any) => {
+        if (approval?.approval_type !== 'extra_discount') return;
+        setSelectedApprovalPreview(approval);
     };
 
     const closeTicket = async (id: string) => {
@@ -793,24 +906,61 @@ const OperationsCenter = () => {
                     <h3 className="font-black mb-3">Solicitudes</h3>
                     <div className="space-y-2">
                         {approvals.map(a => (
-                            <div key={a.id} className="p-3 rounded-xl border">
+                            <div
+                                key={a.id}
+                                onClick={() => openApprovalPreview(a)}
+                                className={`p-4 rounded-xl border transition-all ${a.approval_type === 'extra_discount' ? 'cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/40' : ''}`}
+                            >
                                 <div className="flex justify-between items-start gap-3">
-                                    <div>
-                                        <p className="font-bold text-sm">{a.approval_type}</p>
-                                        <p className="text-xs text-gray-500">{a.module} · {a.status}</p>
+                                    <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <p className="font-bold text-sm">{a.approval_type}</p>
+                                            <span className={`text-[10px] px-2 py-1 rounded-full font-black uppercase tracking-wider ${a.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : a.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                {a.status}
+                                            </span>
+                                        </div>
+                                        <p className="mt-1 text-xs text-gray-500">{a.module} · {formatApprovalDate(a.requested_at)} · {formatApprovalTime(a.requested_at)}</p>
                                         {a.approval_type === 'extra_discount' && (
-                                            <div className="mt-2 text-xs text-gray-600 space-y-1">
-                                                <p><span className="font-bold">Cliente:</span> {a.payload?.client_name || 'N/A'}</p>
-                                                <p><span className="font-bold">Folio:</span> {a.payload?.folio || 'N/A'}</p>
-                                                <p><span className="font-bold">Descuento solicitado:</span> {Number(a.payload?.max_discount_pct || 0).toFixed(2)}% (límite {Number(a.payload?.limit_pct || 5).toFixed(2)}%)</p>
-                                                <p><span className="font-bold">Monto:</span> ${Number(a.payload?.total_amount || 0).toLocaleString('es-CL')}</p>
+                                            <div className="mt-3 text-xs text-gray-600 space-y-2">
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                    <p><span className="font-bold">Vendedor:</span> {a.sellerName}</p>
+                                                    <p><span className="font-bold">Cliente:</span> {a.payloadData?.client_name || a.quotation?.client?.name || 'N/A'}</p>
+                                                    <p><span className="font-bold">Folio:</span> {a.payloadData?.folio || a.quotation?.folio || 'N/A'}</p>
+                                                    <p><span className="font-bold">Monto:</span> {formatMoney(Number(a.payloadData?.total_amount ?? a.quotation?.total_amount ?? 0))}</p>
+                                                    <p className="md:col-span-2"><span className="font-bold">Descuento solicitado:</span> {Number(a.payloadData?.max_discount_pct || 0).toFixed(2)}% (límite {Number(a.payloadData?.limit_pct || 5).toFixed(2)}%)</p>
+                                                </div>
+                                                <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
+                                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Motivo</p>
+                                                    <p className="mt-1 text-sm font-medium text-gray-700">{a.requestReason || 'Sin razón registrada'}</p>
+                                                </div>
+                                                <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
+                                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Productos afectados</p>
+                                                    <p className="mt-1 text-sm font-medium text-gray-700">{summarizeApprovalProducts(a.requestedItems)}</p>
+                                                </div>
+                                                <p className="text-[11px] font-medium text-indigo-600">Pincha la tarjeta para ver la cotización en modo lectura.</p>
                                             </div>
                                         )}
                                     </div>
                                     {a.status === 'pending' && (
                                         <div className="flex gap-2">
-                                            <button onClick={() => approveRequest(a.id, true)} className="text-xs px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700">Aprobar</button>
-                                            <button onClick={() => approveRequest(a.id, false)} className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-700">Rechazar</button>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    approveRequest(a.id, true);
+                                                }}
+                                                className="text-xs px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700"
+                                            >
+                                                Aprobar
+                                            </button>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    approveRequest(a.id, false);
+                                                }}
+                                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-700"
+                                            >
+                                                Rechazar
+                                            </button>
                                         </div>
                                     )}
                                 </div>
@@ -935,6 +1085,67 @@ const OperationsCenter = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {selectedApprovalPreview && (
+                <Suspense fallback={<div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm" />}>
+                    {selectedApprovalPreview.quotation ? (
+                        <QuotationTemplate
+                            data={buildQuotationPreviewData(
+                                selectedApprovalPreview.quotation,
+                                formatPaymentTermsFromCreditDays(getClientCreditDays(selectedApprovalPreview.quotation.client))
+                            )}
+                            readOnly
+                            onClose={() => setSelectedApprovalPreview(null)}
+                        />
+                    ) : (
+                        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                            <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden">
+                                <div className="px-6 py-5 bg-gradient-to-br from-slate-800 to-slate-900 text-white">
+                                    <h3 className="text-lg font-black">Detalle de aprobación</h3>
+                                    <p className="text-white/70 text-sm">No se pudo cargar la cotización asociada.</p>
+                                </div>
+                                <div className="p-6 space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700">
+                                        <p><span className="font-bold">Fecha:</span> {formatApprovalDate(selectedApprovalPreview.requested_at)}</p>
+                                        <p><span className="font-bold">Hora:</span> {formatApprovalTime(selectedApprovalPreview.requested_at)}</p>
+                                        <p><span className="font-bold">Vendedor:</span> {selectedApprovalPreview.sellerName}</p>
+                                        <p><span className="font-bold">Cliente:</span> {selectedApprovalPreview.payloadData?.client_name || 'N/A'}</p>
+                                        <p><span className="font-bold">Folio:</span> {selectedApprovalPreview.payloadData?.folio || 'N/A'}</p>
+                                        <p><span className="font-bold">Monto:</span> {formatMoney(Number(selectedApprovalPreview.payloadData?.total_amount || 0))}</p>
+                                    </div>
+                                    <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                                        <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Motivo del sobre descuento</p>
+                                        <p className="mt-2 text-sm font-medium text-gray-700">{selectedApprovalPreview.requestReason || 'Sin razón registrada'}</p>
+                                    </div>
+                                    <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                                        <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Productos afectados</p>
+                                        <div className="mt-2 space-y-2">
+                                            {selectedApprovalPreview.requestedItems.length > 0 ? selectedApprovalPreview.requestedItems.map((item: any, index: number) => (
+                                                <div key={`${item.code}-${index}`} className="rounded-xl bg-white border border-gray-100 px-3 py-2">
+                                                    <p className="text-sm font-bold text-gray-800">{item.detail || item.code || 'Producto'}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        SKU: {item.code || '-'} · Cantidad: {item.qty} · Desc: {Number(item.discount_pct || 0).toFixed(2)}%
+                                                    </p>
+                                                </div>
+                                            )) : (
+                                                <p className="text-sm text-gray-500">Sin detalle de productos.</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end">
+                                        <button
+                                            onClick={() => setSelectedApprovalPreview(null)}
+                                            className="px-5 py-3 rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all"
+                                        >
+                                            Cerrar
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </Suspense>
             )}
 
             <div className="flex items-center gap-2 text-xs text-gray-500">

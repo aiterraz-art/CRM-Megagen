@@ -9,6 +9,8 @@ import { checkGPSConnection } from '../utils/gps';
 import { queueQuotationLocation } from '../services/locationQueue';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays, getPaymentTermsFromCreditDays } from '../utils/credit';
+import { buildDiscountApprovalRequestedItems, getApprovalReason } from '../utils/discountApproval';
+import { buildQuotationPreviewData } from '../utils/quotationPreview';
 
 const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
 
@@ -76,6 +78,9 @@ const Quotations: React.FC = () => {
     const [isInteractionModalOpen, setIsInteractionModalOpen] = useState(false);
     const [selectedInteractionType, setSelectedInteractionType] = useState<'Presencial' | 'WhatsApp' | 'Teléfono'>('Presencial');
     const [discountApprovalRequested, setDiscountApprovalRequested] = useState(false);
+    const [isApprovalReasonModalOpen, setIsApprovalReasonModalOpen] = useState(false);
+    const [approvalReason, setApprovalReason] = useState('');
+    const [approvalReasonError, setApprovalReasonError] = useState<string | null>(null);
     const [quotationPendingOrder, setQuotationPendingOrder] = useState<any | null>(null);
     const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
     const [paymentProofError, setPaymentProofError] = useState<string | null>(null);
@@ -342,6 +347,8 @@ const Quotations: React.FC = () => {
                     setFormItems(draft.items);
                     setFormComments(draft.comments);
                     setPaymentTerms(draft.paymentTerms);
+                    setDiscountApprovalRequested(Boolean(draft.discountApprovalRequested));
+                    setApprovalReason(String(draft.approvalReason || ''));
                 }
             } catch (e) {
                 console.error("Failed to load draft", e);
@@ -357,14 +364,16 @@ const Quotations: React.FC = () => {
                 client: selectedClient,
                 items: formItems,
                 comments: formComments,
-                paymentTerms: paymentTerms
+                paymentTerms: paymentTerms,
+                discountApprovalRequested,
+                approvalReason
             };
             localStorage.setItem('quotation_draft', JSON.stringify(draft));
         } else if (!isItemModalOpen && !editingQuotation) {
             // Clear draft if closed and not editing
             localStorage.removeItem('quotation_draft');
         }
-    }, [isItemModalOpen, selectedClient, formItems, formComments, paymentTerms, editingQuotation]);
+    }, [isItemModalOpen, selectedClient, formItems, formComments, paymentTerms, editingQuotation, discountApprovalRequested, approvalReason]);
 
     useEffect(() => {
         if (!selectedClient?.id || availableClients.length === 0) return;
@@ -401,6 +410,8 @@ const Quotations: React.FC = () => {
         setManualLocation(null);
         setEditingQuotation(null); // Ensure we are NOT in edit mode
         setDiscountApprovalRequested(false);
+        setApprovalReason('');
+        setApprovalReasonError(null);
     };
 
     const handleEditQuotation = (q: any) => {
@@ -425,6 +436,8 @@ const Quotations: React.FC = () => {
         setPaymentTerms(getPaymentTermsFromCreditDays(getClientCreditDays(q.client)));
         setCreateError(null);
         setDiscountApprovalRequested(q.discount_approval?.status === 'pending');
+        setApprovalReason(getApprovalReason(q.discount_approval));
+        setApprovalReasonError(null);
         setIsItemModalOpen(true);
     };
 
@@ -666,6 +679,10 @@ const Quotations: React.FC = () => {
             setCreateError(`Si el precio neto manual supera ${SELLER_MAX_DISCOUNT_PCT}% de descuento del precio de sistema, debes usar "Pedir autorización".`);
             return;
         }
+        if (shouldCreateApprovalRequest && !approvalReason.trim()) {
+            setCreateError('Debes indicar la razón del sobre descuento antes de solicitar autorización.');
+            return;
+        }
 
         setSubmitting(true);
         setCreateError(null);
@@ -709,6 +726,9 @@ const Quotations: React.FC = () => {
             const netAmount = calculatedItems.reduce((sum, item) => sum + item.total, 0);
             const tax = Math.round(netAmount * 0.19);
             const grandTotal = netAmount + tax;
+            const requestedItems = buildDiscountApprovalRequestedItems(calculatedItems, SELLER_MAX_DISCOUNT_PCT);
+            const sellerName = profile.full_name || profile.email?.split('@')[0]?.toUpperCase() || 'Vendedor';
+            const trimmedApprovalReason = approvalReason.trim();
             const shouldStartAsSent =
                 !shouldCreateApprovalRequest
                 && (selectedInteractionType === 'WhatsApp' || selectedInteractionType === 'Teléfono');
@@ -742,7 +762,11 @@ const Quotations: React.FC = () => {
                                 client_name: selectedClient?.name || null,
                                 max_discount_pct: Number(maxDiscountPct.toFixed(2)),
                                 limit_pct: SELLER_MAX_DISCOUNT_PCT,
-                                total_amount: grandTotal
+                                total_amount: grandTotal,
+                                request_reason: trimmedApprovalReason,
+                                seller_name: sellerName,
+                                seller_email: profile.email || null,
+                                requested_items: requestedItems
                             },
                             status: 'pending'
                         } as any)
@@ -791,7 +815,11 @@ const Quotations: React.FC = () => {
                                 client_name: selectedClient?.name || null,
                                 max_discount_pct: Number(maxDiscountPct.toFixed(2)),
                                 limit_pct: SELLER_MAX_DISCOUNT_PCT,
-                                total_amount: grandTotal
+                                total_amount: grandTotal,
+                                request_reason: trimmedApprovalReason,
+                                seller_name: sellerName,
+                                seller_email: profile.email || null,
+                                requested_items: requestedItems
                             },
                             status: 'pending'
                         } as any)
@@ -832,6 +860,9 @@ const Quotations: React.FC = () => {
             setCreateError(null);
             setEditingQuotation(null);
             setDiscountApprovalRequested(false);
+            setApprovalReason('');
+            setApprovalReasonError(null);
+            setIsApprovalReasonModalOpen(false);
             localStorage.removeItem('quotation_draft'); // Clear draft
             fetchQuotations();
 
@@ -1380,25 +1411,10 @@ const Quotations: React.FC = () => {
 
                             return (
                         <QuotationTemplate
-                            data={{
-                                folio: selectedForTemplate.folio,
-                                date: new Date(selectedForTemplate.created_at).toLocaleDateString(),
-                                expiryDate: new Date(new Date(selectedForTemplate.created_at).getTime() + 15 * 24 * 60 * 60 * 1000).toLocaleDateString(), // +15 days
-                                clientName: selectedForTemplate.client_name,
-                                clientRut: selectedForTemplate.client?.rut || 'Sin RUT',
-                                clientAddress: selectedForTemplate.client?.address || selectedForTemplate.client?.comuna || 'Sin Dirección',
-                                clientCity: selectedForTemplate.client?.zone || 'Santiago',
-                                clientComuna: selectedForTemplate.client?.comuna || '',
-                                clientGiro: selectedForTemplate.client?.giro || '',
-                                clientPhone: selectedForTemplate.client_phone,
-                                clientEmail: selectedForTemplate.client_email,
-                                clientContact: selectedForTemplate.client_contact,
-                                paymentTerms: formatPaymentTermsFromCreditDays(getClientCreditDays(selectedForTemplate.client)),
-                                sellerName: selectedForTemplate.seller_name,
-                                sellerEmail: selectedForTemplate.seller_email,
-                                items: selectedForTemplate.items || [],
-                                comments: selectedForTemplate.comments
-                            }}
+                            data={buildQuotationPreviewData(
+                                selectedForTemplate,
+                                formatPaymentTermsFromCreditDays(getClientCreditDays(selectedForTemplate.client))
+                            )}
                             onMarkedAsSent={async () => {
                                 await markQuotationAsSent(selectedForTemplate.id);
                             }}
@@ -1413,6 +1429,83 @@ const Quotations: React.FC = () => {
             }
 
             {/* Client Selector Modal */}
+            {
+                isApprovalReasonModalOpen && (
+                    <div className="fixed inset-0 z-[2050] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+                        <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
+                            <div className="p-6 bg-gradient-to-br from-amber-500 to-orange-600 text-white flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-bold text-lg">Razón del sobre descuento</h3>
+                                    <p className="text-white/80 text-sm">Este motivo se enviará a aprobación.</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setIsApprovalReasonModalOpen(false);
+                                        setApprovalReasonError(null);
+                                    }}
+                                    className="p-2 hover:bg-white/20 rounded-full transition-all"
+                                >
+                                    <XIcon size={20} />
+                                </button>
+                            </div>
+
+                            <div className="p-6 space-y-4">
+                                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-medium text-amber-900">
+                                    Describe por qué esta cotización necesita un descuento superior al {SELLER_MAX_DISCOUNT_PCT}% permitido para vendedor.
+                                </div>
+
+                                <textarea
+                                    value={approvalReason}
+                                    onChange={(e) => {
+                                        setApprovalReason(e.target.value);
+                                        if (approvalReasonError) setApprovalReasonError(null);
+                                    }}
+                                    placeholder="Ej: negociación por volumen, cierre de oportunidad, ajuste comercial aprobado con cliente clave..."
+                                    className="w-full min-h-[140px] rounded-2xl border border-gray-200 px-4 py-3 text-sm font-medium text-gray-700 outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+                                    autoFocus
+                                />
+
+                                {approvalReasonError && (
+                                    <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                                        {approvalReasonError}
+                                    </div>
+                                )}
+
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsApprovalReasonModalOpen(false);
+                                            setApprovalReasonError(null);
+                                        }}
+                                        className="flex-1 px-4 py-3 rounded-2xl border border-gray-200 text-gray-600 font-bold hover:bg-gray-50 transition-all"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!approvalReason.trim()) {
+                                                setApprovalReasonError('Debes escribir la razón del sobre descuento.');
+                                                return;
+                                            }
+                                            setDiscountApprovalRequested(true);
+                                            setApprovalReason(approvalReason.trim());
+                                            setApprovalReasonError(null);
+                                            setCreateError(null);
+                                            setIsApprovalReasonModalOpen(false);
+                                        }}
+                                        className="flex-1 px-4 py-3 rounded-2xl bg-amber-600 text-white font-bold hover:bg-amber-700 transition-all"
+                                    >
+                                        Guardar motivo
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
             {
                 isClientModalOpen && (
                     <div className="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1866,6 +1959,12 @@ const Quotations: React.FC = () => {
                                                 Supera el {SELLER_MAX_DISCOUNT_PCT}%. Debes solicitar autorización para guardar.
                                             </p>
                                         )}
+                                        {isSellerRole && discountApprovalRequested && approvalReason.trim() && (
+                                            <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+                                                <p className="text-[10px] uppercase tracking-widest font-black text-amber-500">Motivo registrado</p>
+                                                <p className="mt-1 text-xs font-medium text-amber-800 line-clamp-3">{approvalReason.trim()}</p>
+                                            </div>
+                                        )}
                                         {isSellerRole && formMaxDiscountPct <= SELLER_MAX_DISCOUNT_PCT && (
                                             <p className="mt-2 text-xs font-medium text-gray-500">
                                                 Dentro del límite permitido para vendedor.
@@ -1955,10 +2054,13 @@ const Quotations: React.FC = () => {
                                 <div className="w-full md:w-auto flex gap-2">
                                     {isSellerRole && formMaxDiscountPct > SELLER_MAX_DISCOUNT_PCT && (
                                         <button
-                                            onClick={() => setDiscountApprovalRequested(true)}
+                                            onClick={() => {
+                                                setApprovalReasonError(null);
+                                                setIsApprovalReasonModalOpen(true);
+                                            }}
                                             className={`w-full md:w-auto px-6 py-3 md:py-4 rounded-2xl font-bold transition-all border ${discountApprovalRequested ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'}`}
                                         >
-                                            {discountApprovalRequested ? 'Autorización solicitada' : 'Pedir autorización'}
+                                            {discountApprovalRequested ? 'Editar motivo autorización' : 'Pedir autorización'}
                                         </button>
                                     )}
                                     <button
