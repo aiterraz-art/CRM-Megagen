@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, X } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 
@@ -31,7 +31,6 @@ export default function PushSubscriptionManager() {
     const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
     const [pushState, setPushState] = useState<PushState>('idle');
     const [message, setMessage] = useState('');
-    const [dismissed, setDismissed] = useState(false);
     const canReceivePush = Boolean(profile?.id && realRole);
 
     const environmentState = useMemo(() => {
@@ -141,7 +140,6 @@ export default function PushSubscriptionManager() {
             await upsertSubscription(subscription);
             setPushState('ready');
             setMessage('');
-            setDismissed(true);
         } catch (error: any) {
             console.warn('Push subscription setup error:', error?.message || error);
             setPushState('error');
@@ -156,7 +154,29 @@ export default function PushSubscriptionManager() {
         void syncSubscription(false);
     }, [canReceivePush, profile?.id]);
 
-    if (!canReceivePush || !profile?.id || dismissed || pushState === 'ready' || pushState === 'idle') {
+    useEffect(() => {
+        if (!canReceivePush || !profile?.id) return;
+
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                void syncSubscription(false);
+            }
+        };
+
+        const handleFocus = () => {
+            void syncSubscription(false);
+        };
+
+        window.addEventListener('focus', handleFocus);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            window.removeEventListener('focus', handleFocus);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [canReceivePush, profile?.id, environmentState.supported]);
+
+    if (!canReceivePush || !profile?.id || pushState === 'ready' || pushState === 'idle') {
         return null;
     }
 
@@ -165,26 +185,18 @@ export default function PushSubscriptionManager() {
     return (
         <div className="fixed bottom-4 left-4 right-4 z-[120] lg:left-auto lg:right-6 lg:w-[380px]">
             <div className="rounded-3xl bg-white/95 backdrop-blur-xl border border-gray-200 shadow-2xl p-4">
-                <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                        <Bell size={18} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-3">
-                            <div>
+                    <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                            <Bell size={18} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                        <div className="flex items-start gap-3">
+                            <div className="flex-1 min-w-0">
                                 <p className="text-sm font-black text-gray-900">Notificaciones push</p>
                                 <p className="text-xs text-gray-500 font-medium mt-1">
                                     {message || 'Activa avisos en segundo plano para aprobaciones y alertas.'}
                                 </p>
                             </div>
-                            <button
-                                type="button"
-                                onClick={() => setDismissed(true)}
-                                className="p-1.5 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-                                aria-label="Cerrar aviso de notificaciones"
-                            >
-                                <X size={16} />
-                            </button>
                         </div>
 
                         {showActionButton && (
