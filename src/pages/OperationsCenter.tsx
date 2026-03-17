@@ -711,6 +711,97 @@ const OperationsCenter = () => {
         return { docs, outstanding, overdue };
     }, [collectionsRows]);
 
+    const pendingApprovals = useMemo(
+        () => approvals.filter((approval) => approval.status === 'pending'),
+        [approvals]
+    );
+
+    const approvedQuotationApprovals = useMemo(
+        () => approvals
+            .filter((approval) => approval.approval_type === 'extra_discount' && approval.status === 'approved')
+            .sort((a, b) => new Date(b.decided_at || b.requested_at || 0).getTime() - new Date(a.decided_at || a.requested_at || 0).getTime()),
+        [approvals]
+    );
+
+    const otherApprovalHistory = useMemo(
+        () => approvals
+            .filter((approval) => approval.status !== 'pending' && !(approval.approval_type === 'extra_discount' && approval.status === 'approved'))
+            .sort((a, b) => new Date(b.decided_at || b.requested_at || 0).getTime() - new Date(a.decided_at || a.requested_at || 0).getTime()),
+        [approvals]
+    );
+
+    const renderApprovalCard = (approval: any, options?: { archived?: boolean }) => {
+        const archived = Boolean(options?.archived);
+        const isDiscountApproval = approval.approval_type === 'extra_discount';
+
+        return (
+            <div
+                key={approval.id}
+                onClick={() => openApprovalPreview(approval)}
+                className={`p-4 rounded-xl border transition-all ${isDiscountApproval ? 'cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/40' : ''} ${archived ? 'bg-emerald-50/40 border-emerald-100' : 'bg-white'}`}
+            >
+                <div className="flex justify-between items-start gap-3">
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-bold text-sm">{approval.approval_type}</p>
+                            <span className={`text-[10px] px-2 py-1 rounded-full font-black uppercase tracking-wider ${approval.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : approval.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {approval.status}
+                            </span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">{approval.module} · {formatApprovalDate(approval.requested_at)} · {formatApprovalTime(approval.requested_at)}</p>
+                        {archived && (
+                            <p className="mt-1 text-[11px] font-medium text-emerald-700">
+                                Archivada el {formatApprovalDate(approval.decided_at)} a las {formatApprovalTime(approval.decided_at)}
+                            </p>
+                        )}
+                        {isDiscountApproval && (
+                            <div className="mt-3 text-xs text-gray-600 space-y-2">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    <p><span className="font-bold">Vendedor:</span> {approval.sellerName}</p>
+                                    <p><span className="font-bold">Cliente:</span> {approval.payloadData?.client_name || approval.quotation?.client?.name || 'N/A'}</p>
+                                    <p><span className="font-bold">Folio:</span> {approval.payloadData?.folio || approval.quotation?.folio || 'N/A'}</p>
+                                    <p><span className="font-bold">Monto:</span> {formatMoney(Number(approval.payloadData?.total_amount ?? approval.quotation?.total_amount ?? 0))}</p>
+                                    <p className="md:col-span-2"><span className="font-bold">Descuento solicitado:</span> {Number(approval.payloadData?.max_discount_pct || 0).toFixed(2)}% (límite {Number(approval.payloadData?.limit_pct || 5).toFixed(2)}%)</p>
+                                </div>
+                                <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Motivo</p>
+                                    <p className="mt-1 text-sm font-medium text-gray-700">{approval.requestReason || 'Sin razón registrada'}</p>
+                                </div>
+                                <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Productos afectados</p>
+                                    <p className="mt-1 text-sm font-medium text-gray-700">{summarizeApprovalProducts(approval.requestedItems)}</p>
+                                </div>
+                                <p className="text-[11px] font-medium text-indigo-600">Pincha la tarjeta para ver la cotización en modo lectura.</p>
+                            </div>
+                        )}
+                    </div>
+                    {!archived && approval.status === 'pending' && (
+                        <div className="flex gap-2">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    approveRequest(approval.id, true);
+                                }}
+                                className="text-xs px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700"
+                            >
+                                Aprobar
+                            </button>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    approveRequest(approval.id, false);
+                                }}
+                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-700"
+                            >
+                                Rechazar
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
     if (!(effectiveRole === 'admin' || effectiveRole === 'jefe')) {
         return <div className="p-10 text-center font-bold">Acceso denegado</div>;
     }
@@ -902,72 +993,60 @@ const OperationsCenter = () => {
             )}
 
             {activeTab === 'approvals' && (
-                <div className="bg-white border rounded-2xl p-4">
-                    <h3 className="font-black mb-3">Solicitudes</h3>
-                    <div className="space-y-2">
-                        {approvals.map(a => (
-                            <div
-                                key={a.id}
-                                onClick={() => openApprovalPreview(a)}
-                                className={`p-4 rounded-xl border transition-all ${a.approval_type === 'extra_discount' ? 'cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/40' : ''}`}
-                            >
-                                <div className="flex justify-between items-start gap-3">
-                                    <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <p className="font-bold text-sm">{a.approval_type}</p>
-                                            <span className={`text-[10px] px-2 py-1 rounded-full font-black uppercase tracking-wider ${a.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : a.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                {a.status}
-                                            </span>
-                                        </div>
-                                        <p className="mt-1 text-xs text-gray-500">{a.module} · {formatApprovalDate(a.requested_at)} · {formatApprovalTime(a.requested_at)}</p>
-                                        {a.approval_type === 'extra_discount' && (
-                                            <div className="mt-3 text-xs text-gray-600 space-y-2">
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                    <p><span className="font-bold">Vendedor:</span> {a.sellerName}</p>
-                                                    <p><span className="font-bold">Cliente:</span> {a.payloadData?.client_name || a.quotation?.client?.name || 'N/A'}</p>
-                                                    <p><span className="font-bold">Folio:</span> {a.payloadData?.folio || a.quotation?.folio || 'N/A'}</p>
-                                                    <p><span className="font-bold">Monto:</span> {formatMoney(Number(a.payloadData?.total_amount ?? a.quotation?.total_amount ?? 0))}</p>
-                                                    <p className="md:col-span-2"><span className="font-bold">Descuento solicitado:</span> {Number(a.payloadData?.max_discount_pct || 0).toFixed(2)}% (límite {Number(a.payloadData?.limit_pct || 5).toFixed(2)}%)</p>
-                                                </div>
-                                                <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
-                                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Motivo</p>
-                                                    <p className="mt-1 text-sm font-medium text-gray-700">{a.requestReason || 'Sin razón registrada'}</p>
-                                                </div>
-                                                <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
-                                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Productos afectados</p>
-                                                    <p className="mt-1 text-sm font-medium text-gray-700">{summarizeApprovalProducts(a.requestedItems)}</p>
-                                                </div>
-                                                <p className="text-[11px] font-medium text-indigo-600">Pincha la tarjeta para ver la cotización en modo lectura.</p>
-                                            </div>
-                                        )}
-                                    </div>
-                                    {a.status === 'pending' && (
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    approveRequest(a.id, true);
-                                                }}
-                                                className="text-xs px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700"
-                                            >
-                                                Aprobar
-                                            </button>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    approveRequest(a.id, false);
-                                                }}
-                                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-700"
-                                            >
-                                                Rechazar
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
+                <div className="space-y-4">
+                    <div className="bg-white border rounded-2xl p-4">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                            <div>
+                                <h3 className="font-black">Solicitudes pendientes</h3>
+                                <p className="text-xs text-gray-500">Requieren acción inmediata del equipo.</p>
                             </div>
-                        ))}
-                        {approvals.length === 0 && <p className="text-sm text-gray-500">No hay solicitudes.</p>}
+                            <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-black uppercase tracking-wider">
+                                {pendingApprovals.length}
+                            </span>
+                        </div>
+                        <div className="space-y-2">
+                            {pendingApprovals.map((approval) => renderApprovalCard(approval))}
+                            {pendingApprovals.length === 0 && <p className="text-sm text-gray-500">No hay solicitudes pendientes.</p>}
+                        </div>
                     </div>
+
+                    <div className="bg-white border rounded-2xl p-4">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                            <div>
+                                <h3 className="font-black">Cotizaciones aprobadas</h3>
+                                <p className="text-xs text-gray-500">Archivo de descuentos aprobados con acceso a la cotización en solo lectura.</p>
+                            </div>
+                            <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-black uppercase tracking-wider">
+                                {approvedQuotationApprovals.length}
+                            </span>
+                        </div>
+                        <div className="space-y-2">
+                            {approvedQuotationApprovals.map((approval) => renderApprovalCard(approval, { archived: true }))}
+                            {approvedQuotationApprovals.length === 0 && <p className="text-sm text-gray-500">Aún no hay cotizaciones aprobadas archivadas.</p>}
+                        </div>
+                    </div>
+
+                    {otherApprovalHistory.length > 0 && (
+                        <div className="bg-white border rounded-2xl p-4">
+                            <div className="flex items-center justify-between gap-3 mb-3">
+                                <div>
+                                    <h3 className="font-black">Historial resuelto</h3>
+                                    <p className="text-xs text-gray-500">Solicitudes rechazadas u otras resoluciones del módulo.</p>
+                                </div>
+                                <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-black uppercase tracking-wider">
+                                    {otherApprovalHistory.length}
+                                </span>
+                            </div>
+                            <div className="space-y-2">
+                                {otherApprovalHistory.map((approval) => renderApprovalCard(approval))}
+                            </div>
+                        </div>
+                    )}
+                    {approvals.length === 0 && (
+                        <div className="bg-white border rounded-2xl p-4">
+                            <p className="text-sm text-gray-500">No hay solicitudes.</p>
+                        </div>
+                    )}
                 </div>
             )}
 
