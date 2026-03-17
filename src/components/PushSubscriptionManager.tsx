@@ -32,7 +32,7 @@ export default function PushSubscriptionManager() {
     const [pushState, setPushState] = useState<PushState>('idle');
     const [message, setMessage] = useState('');
     const [dismissed, setDismissed] = useState(false);
-    const canReceivePush = realRole === 'admin' || realRole === 'jefe';
+    const canReceivePush = Boolean(profile?.id && realRole);
 
     const environmentState = useMemo(() => {
         const hasBrowserSupport =

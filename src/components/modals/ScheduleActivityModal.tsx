@@ -153,6 +153,7 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
 
             // 3. Sync to Google Calendar (Organizer Mode + Attendee Injection)
             let googleSyncNote = '';
+            let pushSyncNote = '';
             try {
                 const sessionEmail = (session.user.email || '').trim().toLowerCase();
                 if (!sessionEmail) {
@@ -201,12 +202,42 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                 googleSyncNote = ' (Actividad creada, pero Google falló)';
             }
 
+            try {
+                const assignedBy = session.user.user_metadata?.full_name || session.user.email || 'Tu jefatura';
+                const formattedDate = dueDateTime.toLocaleDateString('es-CL', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
+                const formattedTime = dueDateTime.toLocaleTimeString('es-CL', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                const { error: pushError } = await supabase.functions.invoke('send-meeting-push', {
+                    body: {
+                        title: 'Nueva reunión agendada',
+                        body: `${assignedBy} agendó "${formData.title}" para el ${formattedDate} a las ${formattedTime}.`,
+                        url: '/schedule',
+                        icon: import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png',
+                    }
+                });
+
+                if (pushError) {
+                    console.warn('No se pudo disparar push de reunión:', pushError.message);
+                    pushSyncNote = ' (Actividad creada, pero push falló)';
+                }
+            } catch (pushError: any) {
+                console.warn('Error inesperado enviando push de reunión:', pushError?.message || pushError);
+                pushSyncNote = ' (Actividad creada, pero push falló)';
+            }
+
             onSaved();
             onClose();
             // Reset crucial fields
             setInviteAll(false);
             setFormData(p => ({ ...p, assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [], time: '09:00', endTime: '10:00', title: '', notes: '' }));
-            alert(`Actividad asignada correctamente.${googleSyncNote}`);
+            alert(`Actividad asignada correctamente.${googleSyncNote}${pushSyncNote}`);
 
         } catch (error: any) {
             console.error("Error creating activity:", error);
