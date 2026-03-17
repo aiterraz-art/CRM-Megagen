@@ -1253,106 +1253,109 @@ const Quotations: React.FC = () => {
                                 )}
                             </div>
 
-                            <div className="pt-3 flex items-center gap-2 mt-auto">
+                            <div className="pt-3 mt-auto space-y-2">
                                 <button
                                     onClick={() => setSelectedForTemplate(q)}
-                                    className="flex-1 bg-gray-900 text-white py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center hover:bg-indigo-700 hover:shadow-indigo-100"
+                                    className="w-full bg-gray-900 text-white py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center hover:bg-indigo-700 hover:shadow-indigo-100"
                                 >
                                     <Eye size={12} className="mr-1.5" />
                                     Ver Documento
                                 </button>
-
-                                <button
-                                    onClick={() => openQuoteViaWhatsApp(q)}
-                                    disabled={!hasWhatsappTarget || hasPendingDiscountBlock}
-                                    className={`px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasWhatsappTarget || hasPendingDiscountBlock
-                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                                            : 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-600 hover:text-white'
-                                        }`}
-                                    title={
-                                        hasPendingDiscountBlock
-                                            ? 'Cotización bloqueada por aprobación de descuento'
-                                            : hasWhatsappTarget
-                                                ? 'Enviar por WhatsApp'
-                                                : 'Cliente sin celular válido'
-                                    }
-                                >
-                                    <MessageSquare size={12} className="mr-1" />
-                                    WSP
-                                </button>
-
-                                <button
-                                    onClick={() => openQuoteViaEmail(q)}
-                                    disabled={!hasEmailTarget || hasPendingDiscountBlock}
-                                    className={`px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasEmailTarget || hasPendingDiscountBlock
-                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                                            : 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-600 hover:text-white'
-                                        }`}
-                                    title={
-                                        hasPendingDiscountBlock
-                                            ? 'Cotización bloqueada por aprobación de descuento'
-                                            : hasEmailTarget
-                                                ? 'Enviar por Correo'
-                                                : 'Cliente sin correo'
-                                    }
-                                >
-                                    <Mail size={12} className="mr-1" />
-                                    Correo
-                                </button>
-
-                                {q.status !== 'approved' && (
+                                <div className="flex flex-wrap gap-2">
                                     <button
-                                        onClick={() => handleConvertToOrder(q)}
-                                        disabled={submitting || q.status === 'rejected' || hasPendingDiscountBlock || !canConvertOrder}
-                                        className={`px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || q.status === 'rejected' || hasPendingDiscountBlock || !canConvertOrder
-                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                                            : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
+                                        onClick={() => openQuoteViaWhatsApp(q)}
+                                        disabled={!hasWhatsappTarget || hasPendingDiscountBlock}
+                                        className={`flex-1 min-w-[78px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasWhatsappTarget || hasPendingDiscountBlock
+                                                ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                                : 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-600 hover:text-white'
                                             }`}
-                                        title={canConvertOrder ? 'Convertir en Pedido' : 'Solo el vendedor dueño puede convertir y enviar el correo'}
+                                        title={
+                                            hasPendingDiscountBlock
+                                                ? 'Cotización bloqueada por aprobación de descuento'
+                                                : hasWhatsappTarget
+                                                    ? 'Enviar por WhatsApp'
+                                                    : 'Cliente sin celular válido'
+                                        }
                                     >
-                                        <ShoppingBag size={12} className="mr-1" />
-                                        {q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}
+                                        <MessageSquare size={12} className="mr-1" />
+                                        WSP
                                     </button>
-                                )}
 
-                                <div className="flex gap-1">
+                                    <button
+                                        onClick={() => openQuoteViaEmail(q)}
+                                        disabled={!hasEmailTarget || hasPendingDiscountBlock}
+                                        className={`flex-1 min-w-[86px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasEmailTarget || hasPendingDiscountBlock
+                                                ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                                : 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-600 hover:text-white'
+                                            }`}
+                                        title={
+                                            hasPendingDiscountBlock
+                                                ? 'Cotización bloqueada por aprobación de descuento'
+                                                : hasEmailTarget
+                                                    ? 'Enviar por Correo'
+                                                    : 'Cliente sin correo'
+                                        }
+                                    >
+                                        <Mail size={12} className="mr-1" />
+                                        Correo
+                                    </button>
+
+                                    {q.status !== 'approved' && (
+                                        <button
+                                            onClick={() => handleConvertToOrder(q)}
+                                            disabled={submitting || q.status === 'rejected' || hasPendingDiscountBlock || !canConvertOrder}
+                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || q.status === 'rejected' || hasPendingDiscountBlock || !canConvertOrder
+                                                ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                                : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
+                                                }`}
+                                            title={canConvertOrder ? 'Convertir en Pedido' : 'Solo el vendedor dueño puede convertir y enviar el correo'}
+                                        >
+                                            <ShoppingBag size={12} className="mr-1" />
+                                            {q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2">
                                     {q.discount_approval?.status && (
                                         <span className={`px-1.5 py-1 rounded-lg text-[8px] font-black uppercase border ${q.discount_approval.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-100' : q.discount_approval.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
                                             Desc. {q.discount_approval.status === 'pending' ? 'Pendiente' : q.discount_approval.status === 'approved' ? 'Aprobado' : 'Rechazado'}
                                         </span>
                                     )}
-                                    {q.location && (
-                                        <button
-                                            onClick={() => setSelectedLocation(q)}
-                                            className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
-                                            title="Ver Ubicación"
-                                        >
-                                            <MapPin size={14} />
-                                        </button>
-                                    )}
-                                    {(isSupervisor || q.seller_id === profile?.id) && (
-                                        <>
+                                    <div className="flex items-center gap-1 ml-auto">
+                                        {q.location && (
                                             <button
-                                                onClick={() => handleEditQuotation(q)}
-                                                className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-amber-600 hover:bg-amber-50 transition-all"
-                                                title="Editar"
+                                                onClick={() => setSelectedLocation(q)}
+                                                className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                                                title="Ver Ubicación"
                                             >
-                                                <Edit2 size={14} />
+                                                <MapPin size={14} />
                                             </button>
-                                            <button
-                                                onClick={() => handleDeleteQuotation(q.id)}
-                                                disabled={isDeleting === q.id}
-                                                className={`p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-red-600 hover:bg-red-50 transition-all ${isDeleting === q.id ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                                title="Eliminar"
-                                            >
-                                                {isDeleting === q.id ? (
-                                                    <div className="w-4 h-4 border-2 border-red-600 border-t-transparent animate-spin rounded-full"></div>
-                                                ) : (
-                                                    <Trash2 size={14} />
-                                                )}
-                                            </button>
-                                        </>
-                                    )}
+                                        )}
+                                        {(isSupervisor || q.seller_id === profile?.id) && (
+                                            <>
+                                                <button
+                                                    onClick={() => handleEditQuotation(q)}
+                                                    className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-amber-600 hover:bg-amber-50 transition-all"
+                                                    title="Editar"
+                                                >
+                                                    <Edit2 size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteQuotation(q.id)}
+                                                    disabled={isDeleting === q.id}
+                                                    className={`p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-red-600 hover:bg-red-50 transition-all ${isDeleting === q.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    title="Eliminar"
+                                                >
+                                                    {isDeleting === q.id ? (
+                                                        <div className="w-4 h-4 border-2 border-red-600 border-t-transparent animate-spin rounded-full"></div>
+                                                    ) : (
+                                                        <Trash2 size={14} />
+                                                    )}
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>
