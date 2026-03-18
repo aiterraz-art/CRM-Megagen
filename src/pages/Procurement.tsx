@@ -98,6 +98,8 @@ const SHIPMENT_STATUS_STYLES: Record<ShipmentStatus, string> = {
 
 const createEmptyRequestForm = () => ({
     productId: '',
+    manualSku: '',
+    manualProductName: '',
     requestedQty: 1,
     reasonType: 'low_stock' as RequestReason,
     priority: 'normal' as RequestPriority,
@@ -219,6 +221,7 @@ const Procurement: React.FC = () => {
     const [requestForm, setRequestForm] = useState(createEmptyRequestForm);
     const [shipmentForm, setShipmentForm] = useState(createEmptyShipmentForm);
     const [requestProductSearch, setRequestProductSearch] = useState('');
+    const [showRequestSuggestions, setShowRequestSuggestions] = useState(false);
     const [shipmentPasteInput, setShipmentPasteInput] = useState('');
     const [requestManagementForm, setRequestManagementForm] = useState({
         status: 'pending' as RequestStatus,
@@ -238,6 +241,10 @@ const Procurement: React.FC = () => {
             return sku.includes(term) || name.includes(term);
         });
     }, [inventory, requestProductSearch]);
+    const requestSuggestions = useMemo(
+        () => filteredInventoryForRequest.slice(0, 8),
+        [filteredInventoryForRequest]
+    );
 
     const fetchProcurementData = async () => {
         setLoading(true);
@@ -288,6 +295,8 @@ const Procurement: React.FC = () => {
             setEditingRequest(null);
             setRequestForm({
                 productId: state.prefillProduct.id,
+                manualSku: '',
+                manualProductName: '',
                 requestedQty: 1,
                 reasonType: (state.prefillProduct.stock_qty || 0) <= 0 ? 'no_stock' : 'low_stock',
                 priority: (state.prefillProduct.stock_qty || 0) <= 0 ? 'high' : 'normal',
@@ -295,6 +304,7 @@ const Procurement: React.FC = () => {
                 requestNote: ''
             });
             setRequestProductSearch(`${state.prefillProduct.sku || ''} ${state.prefillProduct.name}`.trim());
+            setShowRequestSuggestions(false);
             setShowRequestModal(true);
         }
 
@@ -341,6 +351,7 @@ const Procurement: React.FC = () => {
         setEditingRequest(null);
         setRequestForm(createEmptyRequestForm());
         setRequestProductSearch('');
+        setShowRequestSuggestions(false);
         setShowRequestModal(true);
     };
 
@@ -348,13 +359,16 @@ const Procurement: React.FC = () => {
         setEditingRequest(request);
         setRequestForm({
             productId: request.product_id || '',
+            manualSku: request.product_id ? '' : (request.sku_snapshot || ''),
+            manualProductName: request.product_id ? '' : request.product_name_snapshot,
             requestedQty: request.requested_qty,
             reasonType: request.reason_type as RequestReason,
             priority: request.priority as RequestPriority,
             neededByDate: request.needed_by_date || '',
             requestNote: request.request_note || ''
         });
-        setRequestProductSearch(`${request.sku_snapshot || ''} ${request.product_name_snapshot}`.trim());
+        setRequestProductSearch(request.product_id ? `${request.sku_snapshot || ''} ${request.product_name_snapshot}`.trim() : '');
+        setShowRequestSuggestions(false);
         setShowRequestModal(true);
     };
 
@@ -398,9 +412,12 @@ const Procurement: React.FC = () => {
             return;
         }
 
-        const product = inventoryById.get(requestForm.productId);
-        if (!product) {
-            alert('Debes seleccionar un producto válido.');
+        const product = requestForm.productId ? inventoryById.get(requestForm.productId) : null;
+        const manualProductName = requestForm.manualProductName.trim();
+        const manualSku = requestForm.manualSku.trim();
+
+        if (!product && !manualProductName) {
+            alert('Debes seleccionar un producto sugerido o escribir un producto fuera de inventario.');
             return;
         }
 
@@ -412,10 +429,10 @@ const Procurement: React.FC = () => {
         setSavingRequest(true);
         try {
             const payload: Database['public']['Tables']['product_requests']['Insert'] = {
-                product_id: product.id,
-                sku_snapshot: product.sku || 'SIN-SKU',
-                product_name_snapshot: product.name,
-                current_stock_snapshot: product.stock_qty || 0,
+                product_id: product?.id || null,
+                sku_snapshot: (product?.sku || manualSku || 'SIN-SKU').trim(),
+                product_name_snapshot: (product?.name || manualProductName).trim(),
+                current_stock_snapshot: product?.stock_qty || 0,
                 requested_qty: Math.trunc(requestForm.requestedQty),
                 reason_type: requestForm.reasonType,
                 priority: requestForm.priority,
@@ -440,6 +457,8 @@ const Procurement: React.FC = () => {
             setShowRequestModal(false);
             setEditingRequest(null);
             setRequestForm(createEmptyRequestForm());
+            setRequestProductSearch('');
+            setShowRequestSuggestions(false);
             await fetchProcurementData();
         } catch (error: any) {
             console.error('Error saving product request:', error);
@@ -1180,35 +1199,104 @@ const Procurement: React.FC = () => {
                                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                     <input
                                         value={requestProductSearch}
-                                        onChange={(event) => setRequestProductSearch(event.target.value)}
+                                        onFocus={() => setShowRequestSuggestions(true)}
+                                        onBlur={() => window.setTimeout(() => setShowRequestSuggestions(false), 120)}
+                                        onChange={(event) => {
+                                            setRequestProductSearch(event.target.value);
+                                            setShowRequestSuggestions(true);
+                                            if (requestForm.productId) {
+                                                setRequestForm((current) => ({ ...current, productId: '' }));
+                                            }
+                                        }}
                                         placeholder="Busca por SKU o nombre..."
                                         className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
                                     />
                                 </div>
-                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Producto</label>
-                                <select
-                                    value={requestForm.productId}
-                                    onChange={(event) => {
-                                        const nextProductId = event.target.value;
-                                        const selectedProduct = inventoryById.get(nextProductId);
-                                        setRequestForm((current) => ({ ...current, productId: nextProductId }));
-                                        if (selectedProduct) {
-                                            setRequestProductSearch(`${selectedProduct.sku || ''} ${selectedProduct.name}`.trim());
-                                        }
-                                    }}
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
-                                    required
-                                >
-                                    <option value="">Selecciona un producto</option>
-                                    {filteredInventoryForRequest.map((item) => (
-                                        <option key={item.id} value={item.id}>
-                                            {(item.sku || 'SIN-SKU')} · {item.name} · Stock {item.stock_qty || 0}
-                                        </option>
-                                    ))}
-                                </select>
+                                {showRequestSuggestions && requestProductSearch.trim() && (
+                                    <div className="mb-3 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
+                                        {requestSuggestions.length > 0 ? (
+                                            requestSuggestions.map((item) => (
+                                                <button
+                                                    key={item.id}
+                                                    type="button"
+                                                    onMouseDown={(event) => {
+                                                        event.preventDefault();
+                                                        setRequestForm((current) => ({
+                                                            ...current,
+                                                            productId: item.id,
+                                                            manualSku: '',
+                                                            manualProductName: ''
+                                                        }));
+                                                        setRequestProductSearch(`${item.sku || ''} ${item.name}`.trim());
+                                                        setShowRequestSuggestions(false);
+                                                    }}
+                                                    className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50"
+                                                >
+                                                    <div>
+                                                        <p className="font-black text-slate-900">{item.name}</p>
+                                                        <p className="text-xs font-bold uppercase tracking-widest text-slate-400">{item.sku || 'SIN-SKU'}</p>
+                                                    </div>
+                                                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                                                        Stock {item.stock_qty || 0}
+                                                    </span>
+                                                </button>
+                                            ))
+                                        ) : (
+                                            <div className="px-4 py-4 text-sm font-medium text-slate-500">
+                                                No hay coincidencias inmediatas en inventario.
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {requestForm.productId && inventoryById.get(requestForm.productId) && (
+                                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Producto seleccionado</p>
+                                        <p className="mt-1 font-black text-slate-900">{inventoryById.get(requestForm.productId)?.name}</p>
+                                        <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-500">
+                                            {inventoryById.get(requestForm.productId)?.sku || 'SIN-SKU'} · Stock {inventoryById.get(requestForm.productId)?.stock_qty || 0}
+                                        </p>
+                                    </div>
+                                )}
+
                                 <p className="mt-2 text-xs text-slate-400">
                                     {filteredInventoryForRequest.length} producto(s) encontrados por SKU o nombre.
                                 </p>
+                            </div>
+
+                            <div className="rounded-[2rem] border border-dashed border-slate-200 bg-slate-50/70 p-5">
+                                <div className="mb-4">
+                                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400">Producto fuera de inventario</p>
+                                    <h4 className="text-lg font-black text-slate-900">Solicitar algo que aún no existe en el sistema</h4>
+                                </div>
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                    <div>
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">SKU solicitado</label>
+                                        <input
+                                            value={requestForm.manualSku}
+                                            onChange={(event) => setRequestForm((current) => ({
+                                                ...current,
+                                                productId: '',
+                                                manualSku: event.target.value
+                                            }))}
+                                            placeholder="Opcional"
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Nombre del producto</label>
+                                        <input
+                                            value={requestForm.manualProductName}
+                                            onChange={(event) => setRequestForm((current) => ({
+                                                ...current,
+                                                productId: '',
+                                                manualProductName: event.target.value
+                                            }))}
+                                            placeholder="Requerido solo si no está en inventario"
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
