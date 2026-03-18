@@ -1180,187 +1180,194 @@ const Procurement: React.FC = () => {
             )}
 
             {showRequestModal && (
-                <div className="fixed inset-0 z-[220] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowRequestModal(false)}>
-                    <div className="w-full max-w-2xl rounded-[2rem] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-                        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+                <div className="fixed inset-0 z-[220] overflow-y-auto bg-black/60 p-4 backdrop-blur-sm" onClick={() => setShowRequestModal(false)}>
+                    <div className="flex min-h-full items-start justify-center py-6 sm:py-8">
+                    <div
+                        className="rounded-[2rem] bg-white shadow-2xl max-h-[80vh] overflow-hidden"
+                        style={{ width: 'min(100%, 540px)' }}
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
                             <div>
                                 <p className="text-[11px] font-black uppercase tracking-[0.3em] text-indigo-500">{editingRequest ? 'Editar' : 'Nueva'}</p>
-                                <h3 className="text-2xl font-black text-slate-900">Solicitud de producto</h3>
+                                <h3 className="text-xl font-black text-slate-900 sm:text-2xl">Solicitud de producto</h3>
                             </div>
                             <button onClick={() => setShowRequestModal(false)} className="rounded-2xl bg-slate-100 p-3 text-slate-500 transition-all hover:bg-slate-200">
                                 <X size={18} />
                             </button>
                         </div>
 
-                        <form onSubmit={handleSaveRequest} className="space-y-5 p-6">
-                            <div>
-                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Buscar producto</label>
-                                <div className="relative mb-3">
-                                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                    <input
-                                        value={requestProductSearch}
-                                        onFocus={() => setShowRequestSuggestions(true)}
-                                        onBlur={() => window.setTimeout(() => setShowRequestSuggestions(false), 120)}
-                                        onChange={(event) => {
-                                            setRequestProductSearch(event.target.value);
-                                            setShowRequestSuggestions(true);
-                                            if (requestForm.productId) {
-                                                setRequestForm((current) => ({ ...current, productId: '' }));
-                                            }
-                                        }}
-                                        placeholder="Busca por SKU o nombre..."
-                                        className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
-                                    />
-                                </div>
-                                {showRequestSuggestions && requestProductSearch.trim() && (
-                                    <div className="mb-3 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
-                                        {requestSuggestions.length > 0 ? (
-                                            requestSuggestions.map((item) => (
-                                                <button
-                                                    key={item.id}
-                                                    type="button"
-                                                    onMouseDown={(event) => {
-                                                        event.preventDefault();
-                                                        setRequestForm((current) => ({
-                                                            ...current,
-                                                            productId: item.id,
-                                                            manualSku: '',
-                                                            manualProductName: ''
-                                                        }));
-                                                        setRequestProductSearch(`${item.sku || ''} ${item.name}`.trim());
-                                                        setShowRequestSuggestions(false);
-                                                    }}
-                                                    className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50"
-                                                >
-                                                    <div>
-                                                        <p className="font-black text-slate-900">{item.name}</p>
-                                                        <p className="text-xs font-bold uppercase tracking-widest text-slate-400">{item.sku || 'SIN-SKU'}</p>
-                                                    </div>
-                                                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
-                                                        Stock {item.stock_qty || 0}
-                                                    </span>
-                                                </button>
-                                            ))
-                                        ) : (
-                                            <div className="px-4 py-4 text-sm font-medium text-slate-500">
-                                                No hay coincidencias inmediatas en inventario.
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {requestForm.productId && inventoryById.get(requestForm.productId) && (
-                                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
-                                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Producto seleccionado</p>
-                                        <p className="mt-1 font-black text-slate-900">{inventoryById.get(requestForm.productId)?.name}</p>
-                                        <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-500">
-                                            {inventoryById.get(requestForm.productId)?.sku || 'SIN-SKU'} · Stock {inventoryById.get(requestForm.productId)?.stock_qty || 0}
-                                        </p>
-                                    </div>
-                                )}
-
-                                <p className="mt-2 text-xs text-slate-400">
-                                    {filteredInventoryForRequest.length} producto(s) encontrados por SKU o nombre.
-                                </p>
-                            </div>
-
-                            <div className="rounded-[2rem] border border-dashed border-slate-200 bg-slate-50/70 p-5">
-                                <div className="mb-4">
-                                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400">Producto fuera de inventario</p>
-                                    <h4 className="text-lg font-black text-slate-900">Solicitar algo que aún no existe en el sistema</h4>
-                                </div>
-                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                    <div>
-                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">SKU solicitado</label>
+                        <form onSubmit={handleSaveRequest} className="flex max-h-[calc(80vh-80px)] flex-col">
+                            <div className="space-y-4 overflow-y-auto px-5 py-4">
+                                <div>
+                                    <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Buscar producto</label>
+                                    <div className="relative mb-3">
+                                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                         <input
-                                            value={requestForm.manualSku}
-                                            onChange={(event) => setRequestForm((current) => ({
-                                                ...current,
-                                                productId: '',
-                                                manualSku: event.target.value
-                                            }))}
-                                            placeholder="Opcional"
-                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
+                                            value={requestProductSearch}
+                                            onFocus={() => setShowRequestSuggestions(true)}
+                                            onBlur={() => window.setTimeout(() => setShowRequestSuggestions(false), 120)}
+                                            onChange={(event) => {
+                                                setRequestProductSearch(event.target.value);
+                                                setShowRequestSuggestions(true);
+                                                if (requestForm.productId) {
+                                                    setRequestForm((current) => ({ ...current, productId: '' }));
+                                                }
+                                            }}
+                                            placeholder="Busca por SKU o nombre..."
+                                            className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
+                                        />
+                                    </div>
+                                    {showRequestSuggestions && requestProductSearch.trim() && (
+                                        <div className="mb-3 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
+                                            {requestSuggestions.length > 0 ? (
+                                                requestSuggestions.map((item) => (
+                                                    <button
+                                                        key={item.id}
+                                                        type="button"
+                                                        onMouseDown={(event) => {
+                                                            event.preventDefault();
+                                                            setRequestForm((current) => ({
+                                                                ...current,
+                                                                productId: item.id,
+                                                                manualSku: '',
+                                                                manualProductName: ''
+                                                            }));
+                                                            setRequestProductSearch(`${item.sku || ''} ${item.name}`.trim());
+                                                            setShowRequestSuggestions(false);
+                                                        }}
+                                                        className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50"
+                                                    >
+                                                        <div>
+                                                            <p className="font-black text-slate-900">{item.name}</p>
+                                                            <p className="text-xs font-bold uppercase tracking-widest text-slate-400">{item.sku || 'SIN-SKU'}</p>
+                                                        </div>
+                                                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                                                            Stock {item.stock_qty || 0}
+                                                        </span>
+                                                    </button>
+                                                ))
+                                            ) : (
+                                                <div className="px-4 py-4 text-sm font-medium text-slate-500">
+                                                    No hay coincidencias inmediatas en inventario.
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {requestForm.productId && inventoryById.get(requestForm.productId) && (
+                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Producto seleccionado</p>
+                                            <p className="mt-1 font-black text-slate-900">{inventoryById.get(requestForm.productId)?.name}</p>
+                                            <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-500">
+                                                {inventoryById.get(requestForm.productId)?.sku || 'SIN-SKU'} · Stock {inventoryById.get(requestForm.productId)?.stock_qty || 0}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    <p className="mt-2 text-xs text-slate-400">
+                                        {filteredInventoryForRequest.length} producto(s) encontrados por SKU o nombre.
+                                    </p>
+                                </div>
+
+                                <div className="rounded-[2rem] border border-dashed border-slate-200 bg-slate-50/70 p-4">
+                                    <div className="mb-3">
+                                        <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400">Producto fuera de inventario</p>
+                                        <h4 className="text-base font-black text-slate-900 sm:text-lg">Solicitar algo que aún no existe en el sistema</h4>
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-4">
+                                        <div>
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">SKU solicitado</label>
+                                            <input
+                                                value={requestForm.manualSku}
+                                                onChange={(event) => setRequestForm((current) => ({
+                                                    ...current,
+                                                    productId: '',
+                                                    manualSku: event.target.value
+                                                }))}
+                                                placeholder="Opcional"
+                                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Nombre del producto</label>
+                                            <input
+                                                value={requestForm.manualProductName}
+                                                onChange={(event) => setRequestForm((current) => ({
+                                                    ...current,
+                                                    productId: '',
+                                                    manualProductName: event.target.value
+                                                }))}
+                                                placeholder="Requerido solo si no está en inventario"
+                                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4">
+                                    <div>
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Cantidad Solicitada</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            value={requestForm.requestedQty}
+                                            onChange={(event) => setRequestForm((current) => ({ ...current, requestedQty: Math.max(1, Number(event.target.value || 1)) }))}
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
+                                            required
                                         />
                                     </div>
                                     <div>
-                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Nombre del producto</label>
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Fecha Necesaria</label>
                                         <input
-                                            value={requestForm.manualProductName}
-                                            onChange={(event) => setRequestForm((current) => ({
-                                                ...current,
-                                                productId: '',
-                                                manualProductName: event.target.value
-                                            }))}
-                                            placeholder="Requerido solo si no está en inventario"
-                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
+                                            type="date"
+                                            value={requestForm.neededByDate}
+                                            onChange={(event) => setRequestForm((current) => ({ ...current, neededByDate: event.target.value }))}
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
                                         />
                                     </div>
                                 </div>
-                            </div>
 
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div className="grid grid-cols-1 gap-4">
+                                    <div>
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Motivo</label>
+                                        <select
+                                            value={requestForm.reasonType}
+                                            onChange={(event) => setRequestForm((current) => ({ ...current, reasonType: event.target.value as RequestReason }))}
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
+                                        >
+                                            {Object.entries(REQUEST_REASON_LABELS).map(([value, label]) => (
+                                                <option key={value} value={value}>{label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Prioridad</label>
+                                        <select
+                                            value={requestForm.priority}
+                                            onChange={(event) => setRequestForm((current) => ({ ...current, priority: event.target.value as RequestPriority }))}
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
+                                        >
+                                            {Object.entries(REQUEST_PRIORITY_LABELS).map(([value, label]) => (
+                                                <option key={value} value={value}>{label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
                                 <div>
-                                    <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Cantidad Solicitada</label>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        value={requestForm.requestedQty}
-                                        onChange={(event) => setRequestForm((current) => ({ ...current, requestedQty: Math.max(1, Number(event.target.value || 1)) }))}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
-                                        required
+                                    <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Contexto Comercial</label>
+                                    <textarea
+                                        value={requestForm.requestNote}
+                                        onChange={(event) => setRequestForm((current) => ({ ...current, requestNote: event.target.value }))}
+                                        rows={4}
+                                        placeholder="Explica por qué necesitas este producto, volumen esperado o cliente asociado."
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
                                     />
                                 </div>
-                                <div>
-                                    <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Fecha Necesaria</label>
-                                    <input
-                                        type="date"
-                                        value={requestForm.neededByDate}
-                                        onChange={(event) => setRequestForm((current) => ({ ...current, neededByDate: event.target.value }))}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
-                                    />
-                                </div>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                <div>
-                                    <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Motivo</label>
-                                    <select
-                                        value={requestForm.reasonType}
-                                        onChange={(event) => setRequestForm((current) => ({ ...current, reasonType: event.target.value as RequestReason }))}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
-                                    >
-                                        {Object.entries(REQUEST_REASON_LABELS).map(([value, label]) => (
-                                            <option key={value} value={value}>{label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Prioridad</label>
-                                    <select
-                                        value={requestForm.priority}
-                                        onChange={(event) => setRequestForm((current) => ({ ...current, priority: event.target.value as RequestPriority }))}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
-                                    >
-                                        {Object.entries(REQUEST_PRIORITY_LABELS).map(([value, label]) => (
-                                            <option key={value} value={value}>{label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Contexto Comercial</label>
-                                <textarea
-                                    value={requestForm.requestNote}
-                                    onChange={(event) => setRequestForm((current) => ({ ...current, requestNote: event.target.value }))}
-                                    rows={4}
-                                    placeholder="Explica por qué necesitas este producto, volumen esperado o cliente asociado."
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
-                                />
-                            </div>
-
-                            <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
+                            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:justify-end">
                                 <button type="button" onClick={() => setShowRequestModal(false)} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">
                                     Cancelar
                                 </button>
@@ -1369,6 +1376,7 @@ const Procurement: React.FC = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
                     </div>
                 </div>
             )}

@@ -11,6 +11,8 @@ import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays, getPaymentTermsFromCreditDays } from '../utils/credit';
 import { buildDiscountApprovalRequestedItems, getApprovalReason } from '../utils/discountApproval';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
+import { sendQuotationEmail } from '../utils/quotationEmail';
+import { generateQuotationPdfFile } from '../utils/quotationPdf';
 
 const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
 
@@ -186,12 +188,55 @@ const Quotations: React.FC = () => {
             return;
         }
 
+        const previewData = buildQuotationPreviewData(
+            quote,
+            formatPaymentTermsFromCreditDays(getClientCreditDays(quote?.client))
+        );
         const subject = `Cotización Folio Nº ${quote?.folio || ''} - ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}`;
-        const body = `Hola ${quote?.client_contact || 'cliente'},\n\nTe comparto la cotización Folio Nº ${quote?.folio || ''}.\nTotal: ${formatMoney(Number(quote?.total_amount || 0))}\nVendedor: ${quote?.seller_name || 'Vendedor'}\n\nAdjunta el PDF formal desde el CRM para completar el envío.`;
-        const mailto = `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        window.open(mailto, '_blank', 'noopener,noreferrer');
-        await markQuotationAsSent(quote.id);
-    }, [markQuotationAsSent]);
+        const shareText = [
+            `Hola ${quote?.client_contact || 'cliente'},`,
+            '',
+            `Te comparto la cotización Folio Nº ${quote?.folio || ''}.`,
+            `Total: ${formatMoney(Number(quote?.total_amount || 0))}`,
+            `Vendedor: ${quote?.seller_name || 'Vendedor'}`,
+            '',
+            'Adjunto encontrarás el PDF formal de la cotización.',
+            '',
+            'Quedo atento(a) a tus comentarios.'
+        ].join('\n');
+
+        try {
+            const quotationPdf = await generateQuotationPdfFile(previewData);
+            if (navigator.canShare && navigator.canShare({ files: [quotationPdf] })) {
+                try {
+                    await navigator.share({
+                        files: [quotationPdf],
+                        title: subject,
+                        text: shareText
+                    });
+                    await markQuotationAsSent(quote.id);
+                    return;
+                } catch (shareError: any) {
+                    if (shareError?.name === 'AbortError') {
+                        return;
+                    }
+                }
+            }
+
+            await sendQuotationEmail({
+                quotation: previewData,
+                recipient,
+                contactName: quote?.client_contact,
+                clientId: quote?.client?.id || null,
+                profileId: profile?.id || undefined,
+                pdfAttachment: quotationPdf
+            });
+            await markQuotationAsSent(quote.id);
+            alert('Correo enviado correctamente con el PDF adjunto.');
+        } catch (error: any) {
+            alert(error?.message || 'No se pudo enviar el correo con la cotización adjunta.');
+        }
+    }, [markQuotationAsSent, profile?.id]);
 
     const fetchQuotations = useCallback(async () => {
         setLoading(true);
@@ -1418,6 +1463,7 @@ const Quotations: React.FC = () => {
                                 selectedForTemplate,
                                 formatPaymentTermsFromCreditDays(getClientCreditDays(selectedForTemplate.client))
                             )}
+                            onSendEmail={() => openQuoteViaEmail(selectedForTemplate)}
                             onMarkedAsSent={async () => {
                                 await markQuotationAsSent(selectedForTemplate.id);
                             }}

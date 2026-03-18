@@ -1,6 +1,7 @@
 import React from 'react';
 import { Printer, Download, X, Share2, Loader2, MessageSquare, Mail } from 'lucide-react';
 import type { QuotationPreviewData, QuotationPreviewItem } from '../utils/quotationPreview';
+import { sendQuotationEmail } from '../utils/quotationEmail';
 
 interface Props {
     data: QuotationPreviewData;
@@ -8,10 +9,11 @@ interface Props {
     canShareAndDownload?: boolean;
     shareBlockReason?: string;
     onMarkedAsSent?: (action: 'share' | 'download') => Promise<void> | void;
+    onSendEmail?: () => Promise<void> | void;
     readOnly?: boolean;
 }
 
-const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload = true, shareBlockReason, onMarkedAsSent, readOnly = false }) => {
+const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload = true, shareBlockReason, onMarkedAsSent, onSendEmail, readOnly = false }) => {
     const contentRef = React.useRef<HTMLDivElement>(null);
     const viewportRef = React.useRef<HTMLDivElement>(null);
     const [generatingPdf, setGeneratingPdf] = React.useState(false);
@@ -181,16 +183,30 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
             alert('Esta cotización debe estar aprobada para poder enviarse.');
             return;
         }
+        if (onSendEmail) {
+            setGeneratingPdf(true);
+            try {
+                await onSendEmail();
+            } finally {
+                setGeneratingPdf(false);
+            }
+            return;
+        }
         const recipient = String(data.clientEmail || '').trim();
         if (!recipient) {
             alert('El cliente no tiene email registrado.');
             return;
         }
-        const subject = `Cotización Folio Nº ${data.folio} - ${import.meta.env.VITE_COMPANY_NAME || 'Megagen Chile'}`;
-        const body = `${buildQuoteMessage()}\n\nAdjunta el PDF de la cotización para enviar el documento formal.`;
-        const mailto = `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        window.open(mailto, '_blank', 'noopener,noreferrer');
-        await markAsSentSafely('share');
+        try {
+            await sendQuotationEmail({
+                quotation: data,
+                recipient
+            });
+            await markAsSentSafely('share');
+            alert('Correo enviado correctamente con el PDF adjunto.');
+        } catch (error: any) {
+            alert(error?.message || 'No se pudo enviar el correo con la cotización adjunta.');
+        }
     };
 
     const handleShare = async () => {
@@ -298,12 +314,68 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                 onClick={(e) => e.stopPropagation()} // Prevent close on content click
             >
 
-                {/* Actions Header (Not part of print) */}
-                <div className="bg-gray-100 p-4 border-b flex justify-between items-center print:hidden">
-                    <h3 className="font-bold text-gray-700">Visualización de Cotización</h3>
+                <div className="border-b bg-gray-100 print:hidden md:hidden">
+                    <div className="flex items-center justify-between gap-3 px-4 py-4">
+                        <h3 className="text-sm font-bold text-gray-700">Visualización de Cotización</h3>
+                        <button onClick={onClose} className="shrink-0 rounded-full p-2 text-gray-400 transition-all hover:bg-gray-200">
+                            <X size={20} />
+                        </button>
+                    </div>
+                </div>
 
-                    <div className="flex items-center space-x-4">
-                        <div className="flex items-center gap-1 bg-white border rounded-lg px-2 py-1 print:hidden">
+                <div className="hidden border-b bg-gray-100 print:hidden md:block">
+                    <div className="flex items-center justify-between gap-3 px-4 pt-4">
+                        <h3 className="text-base font-bold text-gray-700">Visualización de Cotización</h3>
+                        <button onClick={onClose} className="shrink-0 rounded-full p-2 text-gray-400 transition-all hover:bg-gray-200">
+                            <X size={20} />
+                        </button>
+                    </div>
+
+                    <div className="space-y-3 px-4 pb-4 pt-3">
+                        {!readOnly && (
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    onClick={handleSendWhatsApp}
+                                    disabled={!canShareAndDownload || generatingPdf || !normalizePhoneForWhatsapp(data.clientPhone || '')}
+                                    className="flex shrink-0 items-center rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                    title={normalizePhoneForWhatsapp(data.clientPhone || '') ? 'Enviar por WhatsApp' : 'Cliente sin celular válido'}
+                                >
+                                    <MessageSquare size={16} className="mr-2" /> WhatsApp
+                                </button>
+                                <button
+                                    onClick={handleSendEmail}
+                                    disabled={!canShareAndDownload || generatingPdf || !String(data.clientEmail || '').trim()}
+                                    className="flex shrink-0 items-center rounded-lg bg-sky-600 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    title={String(data.clientEmail || '').trim() ? 'Enviar por correo' : 'Cliente sin correo'}
+                                >
+                                    <Mail size={16} className="mr-2" /> Correo
+                                </button>
+                                <button
+                                    onClick={handleShare}
+                                    disabled={!canShareAndDownload || generatingPdf}
+                                    className="flex shrink-0 items-center rounded-lg bg-green-500 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    <Share2 size={16} className="mr-2" /> Compartir
+                                </button>
+                                <button onClick={() => window.print()} className="flex shrink-0 items-center rounded-lg border bg-white px-4 py-2 text-sm font-bold transition-all hover:bg-gray-50">
+                                    <Printer size={16} className="mr-2" /> Imprimir
+                                </button>
+                                <button
+                                    onClick={handleDownloadPDF}
+                                    disabled={generatingPdf || !canShareAndDownload}
+                                    className="flex shrink-0 items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {generatingPdf ? (
+                                        <Loader2 size={16} className="mr-2 animate-spin" />
+                                    ) : (
+                                        <Download size={16} className="mr-2" />
+                                    )}
+                                    PDF
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="flex items-center gap-1 overflow-x-auto rounded-lg border bg-white px-2 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                             <button
                                 onClick={() => setZoomMultiplier((prev) => clamp(prev / 1.1, 0.2, 6))}
                                 className="px-2 py-1 text-sm font-black text-gray-600 hover:bg-gray-100 rounded"
@@ -311,7 +383,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                             >
                                 -
                             </button>
-                            <span className="text-xs font-black text-gray-500 min-w-[52px] text-center">{zoomPercent}%</span>
+                            <span className="min-w-[52px] text-center text-xs font-black text-gray-500">{zoomPercent}%</span>
                             <button
                                 onClick={() => setZoomMultiplier((prev) => clamp(prev * 1.1, 0.2, 6))}
                                 className="px-2 py-1 text-sm font-black text-gray-600 hover:bg-gray-100 rounded"
@@ -334,51 +406,6 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                                 100%
                             </button>
                         </div>
-                        {!readOnly && (
-                            <>
-                                <button
-                                    onClick={handleSendWhatsApp}
-                                    disabled={!canShareAndDownload || generatingPdf || !normalizePhoneForWhatsapp(data.clientPhone || '')}
-                                    className="flex items-center px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-bold hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title={normalizePhoneForWhatsapp(data.clientPhone || '') ? 'Enviar por WhatsApp' : 'Cliente sin celular válido'}
-                                >
-                                    <MessageSquare size={16} className="mr-2" /> WhatsApp
-                                </button>
-                                <button
-                                    onClick={handleSendEmail}
-                                    disabled={!canShareAndDownload || generatingPdf || !String(data.clientEmail || '').trim()}
-                                    className="flex items-center px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-bold hover:bg-sky-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title={String(data.clientEmail || '').trim() ? 'Enviar por correo' : 'Cliente sin correo'}
-                                >
-                                    <Mail size={16} className="mr-2" /> Correo
-                                </button>
-                                <button
-                                    onClick={handleShare}
-                                    disabled={!canShareAndDownload || generatingPdf}
-                                    className="flex items-center px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <Share2 size={16} className="mr-2" /> Compartir
-                                </button>
-                                <button onClick={() => window.print()} className="flex items-center px-4 py-2 bg-white border rounded-lg text-sm font-bold hover:bg-gray-50 transition-all">
-                                    <Printer size={16} className="mr-2" /> Imprimir
-                                </button>
-                                <button
-                                    onClick={handleDownloadPDF}
-                                    disabled={generatingPdf || !canShareAndDownload}
-                                    className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {generatingPdf ? (
-                                        <Loader2 size={16} className="mr-2 animate-spin" />
-                                    ) : (
-                                        <Download size={16} className="mr-2" />
-                                    )}
-                                    PDF
-                                </button>
-                            </>
-                        )}
-                        <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-all text-gray-400">
-                            <X size={20} />
-                        </button>
                     </div>
                 </div>
                 {!readOnly && !canShareAndDownload && (
@@ -602,11 +629,51 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                                 <span className="text-gray-400 font-light not-italic text-xs ml-1 uppercase">
                                     {import.meta.env.VITE_COMPANY_NAME?.split(' ').slice(1).join(' ') || 'Chile'}
                                 </span>
-                            </div>
-                        </div>
                         </div>
                     </div>
                 </div>
+
+                {!readOnly && (
+                    <div className="grid shrink-0 grid-cols-2 gap-2 border-t bg-white p-3 print:hidden md:hidden">
+                        <button
+                            onClick={handleSendWhatsApp}
+                            disabled={!canShareAndDownload || generatingPdf || !normalizePhoneForWhatsapp(data.clientPhone || '')}
+                            className="flex min-h-[42px] items-center justify-center rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white transition-all hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={normalizePhoneForWhatsapp(data.clientPhone || '') ? 'Enviar por WhatsApp' : 'Cliente sin celular válido'}
+                        >
+                            <MessageSquare size={16} className="mr-2" /> WhatsApp
+                        </button>
+                        <button
+                            onClick={handleSendEmail}
+                            disabled={!canShareAndDownload || generatingPdf || !String(data.clientEmail || '').trim()}
+                            className="flex min-h-[42px] items-center justify-center rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white transition-all hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={String(data.clientEmail || '').trim() ? 'Enviar por correo' : 'Cliente sin correo'}
+                        >
+                            <Mail size={16} className="mr-2" /> Correo
+                        </button>
+                        <button
+                            onClick={handleShare}
+                            disabled={!canShareAndDownload || generatingPdf}
+                            className="flex min-h-[42px] items-center justify-center rounded-lg bg-green-500 px-3 py-2 text-xs font-bold text-white transition-all hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            <Share2 size={16} className="mr-2" /> Compartir
+                        </button>
+                        <button
+                            onClick={handleDownloadPDF}
+                            disabled={generatingPdf || !canShareAndDownload}
+                            className="flex min-h-[42px] items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {generatingPdf ? (
+                                <Loader2 size={16} className="mr-2 animate-spin" />
+                            ) : (
+                                <Download size={16} className="mr-2" />
+                            )}
+                            PDF
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
 
             </div>
         </div>
