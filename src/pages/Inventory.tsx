@@ -16,6 +16,7 @@ const Inventory = () => {
     const canManageInventory = !isSellerReadOnly && hasPermission('MANAGE_INVENTORY');
     const canUploadInventory = !isSellerReadOnly && hasPermission('UPLOAD_EXCEL');
     const canRequestProducts = hasPermission('REQUEST_PRODUCTS');
+    const canDownloadCatalog = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canShowActions = canManageInventory || canRequestProducts;
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [search, setSearch] = useState('');
@@ -161,6 +162,26 @@ const Inventory = () => {
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, 'Precios');
         XLSX.writeFile(workbook, 'plantilla_importador_precios.xlsx');
+    };
+
+    const downloadProductCatalog = () => {
+        if (items.length === 0) {
+            alert('No hay productos cargados para exportar.');
+            return;
+        }
+
+        const rows = items.map((item) => ({
+            SKU: item.sku || '',
+            'Nombre del Producto': item.name || '',
+            'Precio Neto de Venta': Number(item.price || 0)
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(rows, {
+            header: ['SKU', 'Nombre del Producto', 'Precio Neto de Venta']
+        });
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Productos');
+        XLSX.writeFile(workbook, 'inventario_productos_precios.xlsx');
     };
 
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -379,8 +400,19 @@ const Inventory = () => {
                         onChange={(e) => setSearch(e.target.value)}
                     />
                 </div>
-                {canUploadInventory && (
-                    <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                    {canDownloadCatalog && (
+                        <button
+                            onClick={downloadProductCatalog}
+                            disabled={loading || items.length === 0}
+                            className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-slate-700 font-bold hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
+                        >
+                            <Download size={18} className="mr-2" />
+                            Descargar Lista
+                        </button>
+                    )}
+                    {canUploadInventory && (
+                        <>
                         <button
                             onClick={() => handleImportClick('stock')}
                             disabled={isImporting}
@@ -428,17 +460,18 @@ const Inventory = () => {
                             <Plus size={18} className="mr-2" />
                             Nuevo Producto
                         </button>
-                    </div>
-                )}
-                {!canUploadInventory && canRequestProducts && (
-                    <button
-                        onClick={() => navigate('/procurement', { state: { activeTab: 'requests' } })}
-                        className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-indigo-600 font-bold hover:bg-gray-50 transition-all shadow-sm"
-                    >
-                        <ClipboardList size={18} className="mr-2" />
-                        Ver Solicitudes de Compra
-                    </button>
-                )}
+                        </>
+                    )}
+                    {!canUploadInventory && canRequestProducts && (
+                        <button
+                            onClick={() => navigate('/procurement', { state: { activeTab: 'requests' } })}
+                            className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-indigo-600 font-bold hover:bg-gray-50 transition-all shadow-sm"
+                        >
+                            <ClipboardList size={18} className="mr-2" />
+                            Ver Solicitudes de Compra
+                        </button>
+                    )}
+                </div>
             </div>
 
             <div>
