@@ -44,6 +44,8 @@ type ProcurementLocationState = {
 type ShipmentItemFormRow = {
     localId: string;
     productId: string;
+    skuSnapshot: string;
+    productNameSnapshot: string;
     qty: number;
 };
 
@@ -110,7 +112,7 @@ const createEmptyShipmentForm = () => ({
     etaDate: '',
     status: 'in_transit' as ShipmentStatus,
     notes: '',
-    items: [{ localId: crypto.randomUUID(), productId: '', qty: 1 }] as ShipmentItemFormRow[]
+    items: [{ localId: crypto.randomUUID(), productId: '', skuSnapshot: '', productNameSnapshot: '', qty: 1 }] as ShipmentItemFormRow[]
 });
 
 const formatDate = (value?: string | null) => {
@@ -213,6 +215,8 @@ const Procurement: React.FC = () => {
     const [requestToManage, setRequestToManage] = useState<ProductRequestRow | null>(null);
     const [requestForm, setRequestForm] = useState(createEmptyRequestForm);
     const [shipmentForm, setShipmentForm] = useState(createEmptyShipmentForm);
+    const [requestProductSearch, setRequestProductSearch] = useState('');
+    const [shipmentPasteInput, setShipmentPasteInput] = useState('');
     const [requestManagementForm, setRequestManagementForm] = useState({
         status: 'pending' as RequestStatus,
         linkedShipmentId: '',
@@ -222,6 +226,15 @@ const Procurement: React.FC = () => {
     const profilesById = useMemo(() => new Map(profiles.map((row) => [row.id, row])), [profiles]);
     const shipmentsById = useMemo(() => new Map(shipments.map((row) => [row.id, row])), [shipments]);
     const inventoryById = useMemo(() => new Map(inventory.map((row) => [row.id, row])), [inventory]);
+    const filteredInventoryForRequest = useMemo(() => {
+        const term = requestProductSearch.trim().toLowerCase();
+        if (!term) return inventory;
+        return inventory.filter((item) => {
+            const sku = (item.sku || '').toLowerCase();
+            const name = (item.name || '').toLowerCase();
+            return sku.includes(term) || name.includes(term);
+        });
+    }, [inventory, requestProductSearch]);
 
     const fetchProcurementData = async () => {
         setLoading(true);
@@ -278,6 +291,7 @@ const Procurement: React.FC = () => {
                 neededByDate: '',
                 requestNote: ''
             });
+            setRequestProductSearch(`${state.prefillProduct.sku || ''} ${state.prefillProduct.name}`.trim());
             setShowRequestModal(true);
         }
 
@@ -323,6 +337,7 @@ const Procurement: React.FC = () => {
     const openCreateRequestModal = () => {
         setEditingRequest(null);
         setRequestForm(createEmptyRequestForm());
+        setRequestProductSearch('');
         setShowRequestModal(true);
     };
 
@@ -336,6 +351,7 @@ const Procurement: React.FC = () => {
             neededByDate: request.needed_by_date || '',
             requestNote: request.request_note || ''
         });
+        setRequestProductSearch(`${request.sku_snapshot || ''} ${request.product_name_snapshot}`.trim());
         setShowRequestModal(true);
     };
 
@@ -346,6 +362,8 @@ const Procurement: React.FC = () => {
                 .map((item) => ({
                     localId: item.id,
                     productId: item.product_id || '',
+                    skuSnapshot: item.sku_snapshot || '',
+                    productNameSnapshot: item.product_name_snapshot || '',
                     qty: item.qty
                 }));
 
@@ -359,12 +377,13 @@ const Procurement: React.FC = () => {
                 etaDate: shipment.eta_date || '',
                 status: shipment.status as ShipmentStatus,
                 notes: shipment.notes || '',
-                items: existingItems.length > 0 ? existingItems : [{ localId: crypto.randomUUID(), productId: '', qty: 1 }]
+                items: existingItems.length > 0 ? existingItems : [{ localId: crypto.randomUUID(), productId: '', skuSnapshot: '', productNameSnapshot: '', qty: 1 }]
             });
         } else {
             setEditingShipment(null);
             setShipmentForm(createEmptyShipmentForm());
         }
+        setShipmentPasteInput('');
         setShowShipmentModal(true);
     };
 
@@ -445,6 +464,74 @@ const Procurement: React.FC = () => {
         }
     };
 
+    const handleApplyShipmentPaste = () => {
+        const lines = shipmentPasteInput
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+
+        if (lines.length === 0) {
+            alert('Pega al menos una línea con productos.');
+            return;
+        }
+
+        const parsedRows: ShipmentItemFormRow[] = [];
+
+        for (const line of lines) {
+            const parts = line
+                .split(/\t|;|,/)
+                .map((part) => part.trim())
+                .filter((part) => part !== '');
+
+            if (parts.length < 2) {
+                continue;
+            }
+
+            let skuSnapshot = '';
+            let productNameSnapshot = '';
+            let qty = 1;
+
+            if (parts.length >= 3) {
+                skuSnapshot = parts[0];
+                productNameSnapshot = parts[1];
+                qty = Math.max(1, Number(parts[2] || 1));
+            } else {
+                productNameSnapshot = parts[0];
+                qty = Math.max(1, Number(parts[1] || 1));
+            }
+
+            if (!productNameSnapshot) continue;
+
+            const matchedInventory = inventory.find((item) => {
+                const sku = (item.sku || '').toLowerCase();
+                const name = (item.name || '').toLowerCase();
+                return (
+                    (!!skuSnapshot && sku === skuSnapshot.toLowerCase()) ||
+                    name === productNameSnapshot.toLowerCase()
+                );
+            });
+
+            parsedRows.push({
+                localId: crypto.randomUUID(),
+                productId: matchedInventory?.id || '',
+                skuSnapshot: matchedInventory?.sku || skuSnapshot,
+                productNameSnapshot: matchedInventory?.name || productNameSnapshot,
+                qty: Number.isFinite(qty) ? qty : 1
+            });
+        }
+
+        if (parsedRows.length === 0) {
+            alert('No se pudieron interpretar las líneas pegadas. Usa formato SKU, Producto, Cantidad o Producto, Cantidad.');
+            return;
+        }
+
+        setShipmentForm((current) => ({
+            ...current,
+            items: [...current.items.filter((item) => item.productId || item.skuSnapshot || item.productNameSnapshot), ...parsedRows]
+        }));
+        setShipmentPasteInput('');
+    };
+
     const handleSaveShipment = async (event: React.FormEvent) => {
         event.preventDefault();
 
@@ -453,14 +540,12 @@ const Procurement: React.FC = () => {
             return;
         }
 
-        const validItems = shipmentForm.items.filter((item) => item.productId && item.qty > 0);
+        const validItems = shipmentForm.items.filter((item) => {
+            const hasReference = item.productId || item.skuSnapshot.trim() || item.productNameSnapshot.trim();
+            return hasReference && item.qty > 0;
+        });
         if (!shipmentForm.supplierName.trim() || !shipmentForm.originCountry.trim() || !shipmentForm.originCity.trim()) {
             alert('Proveedor, país y ciudad de origen son obligatorios.');
-            return;
-        }
-
-        if (validItems.length === 0) {
-            alert('Debes agregar al menos un producto a la importación.');
             return;
         }
 
@@ -507,24 +592,27 @@ const Procurement: React.FC = () => {
             }
 
             const itemsPayload: Database['public']['Tables']['inbound_shipment_items']['Insert'][] = validItems.map((item) => {
-                const inventoryItem = inventoryById.get(item.productId);
+                const inventoryItem = item.productId ? inventoryById.get(item.productId) : null;
                 return {
                     shipment_id: shipmentId,
                     product_id: inventoryItem?.id || null,
-                    sku_snapshot: inventoryItem?.sku || 'SIN-SKU',
-                    product_name_snapshot: inventoryItem?.name || 'Producto sin nombre',
+                    sku_snapshot: (inventoryItem?.sku || item.skuSnapshot || 'SIN-SKU').trim(),
+                    product_name_snapshot: (inventoryItem?.name || item.productNameSnapshot || 'Producto sin nombre').trim(),
                     qty: Math.trunc(item.qty)
                 };
             });
 
-            const { error: insertItemsError } = await supabase
-                .from('inbound_shipment_items')
-                .insert(itemsPayload);
-            if (insertItemsError) throw insertItemsError;
+            if (itemsPayload.length > 0) {
+                const { error: insertItemsError } = await supabase
+                    .from('inbound_shipment_items')
+                    .insert(itemsPayload);
+                if (insertItemsError) throw insertItemsError;
+            }
 
             setShowShipmentModal(false);
             setEditingShipment(null);
             setShipmentForm(createEmptyShipmentForm());
+            setShipmentPasteInput('');
             await fetchProcurementData();
         } catch (error: any) {
             console.error('Error saving inbound shipment:', error);
@@ -1020,20 +1108,40 @@ const Procurement: React.FC = () => {
 
                         <form onSubmit={handleSaveRequest} className="space-y-5 p-6">
                             <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Buscar producto</label>
+                                <div className="relative mb-3">
+                                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <input
+                                        value={requestProductSearch}
+                                        onChange={(event) => setRequestProductSearch(event.target.value)}
+                                        placeholder="Busca por SKU o nombre..."
+                                        className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 font-medium text-slate-700 outline-none transition-all focus:border-indigo-300"
+                                    />
+                                </div>
                                 <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Producto</label>
                                 <select
                                     value={requestForm.productId}
-                                    onChange={(event) => setRequestForm((current) => ({ ...current, productId: event.target.value }))}
+                                    onChange={(event) => {
+                                        const nextProductId = event.target.value;
+                                        const selectedProduct = inventoryById.get(nextProductId);
+                                        setRequestForm((current) => ({ ...current, productId: nextProductId }));
+                                        if (selectedProduct) {
+                                            setRequestProductSearch(`${selectedProduct.sku || ''} ${selectedProduct.name}`.trim());
+                                        }
+                                    }}
                                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
                                     required
                                 >
                                     <option value="">Selecciona un producto</option>
-                                    {inventory.map((item) => (
+                                    {filteredInventoryForRequest.map((item) => (
                                         <option key={item.id} value={item.id}>
                                             {(item.sku || 'SIN-SKU')} · {item.name} · Stock {item.stock_qty || 0}
                                         </option>
                                     ))}
                                 </select>
+                                <p className="mt-2 text-xs text-slate-400">
+                                    {filteredInventoryForRequest.length} producto(s) encontrados por SKU o nombre.
+                                </p>
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -1220,32 +1328,82 @@ const Procurement: React.FC = () => {
                                         </div>
                                         <button
                                             type="button"
-                                            onClick={() => setShipmentForm((current) => ({ ...current, items: [...current.items, { localId: crypto.randomUUID(), productId: '', qty: 1 }] }))}
+                                            onClick={() => setShipmentForm((current) => ({ ...current, items: [...current.items, { localId: crypto.randomUUID(), productId: '', skuSnapshot: '', productNameSnapshot: '', qty: 1 }] }))}
                                             className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-800"
                                         >
                                             Agregar producto
                                         </button>
                                     </div>
 
+                                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4">
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Pegar listado rápido</label>
+                                        <textarea
+                                            rows={4}
+                                            value={shipmentPasteInput}
+                                            onChange={(event) => setShipmentPasteInput(event.target.value)}
+                                            placeholder={'Una línea por producto.\nFormato: SKU, Producto, Cantidad\nO bien: Producto, Cantidad'}
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none focus:border-indigo-300"
+                                        />
+                                        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <p className="text-xs text-slate-500">
+                                                Puedes guardar la importación sin productos y completar el detalle después.
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={handleApplyShipmentPaste}
+                                                className="rounded-2xl border border-slate-200 bg-slate-900 px-4 py-2 text-xs font-black text-white"
+                                            >
+                                                Cargar listado pegado
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     <div className="space-y-3">
                                         {shipmentForm.items.map((item, index) => (
-                                            <div key={item.localId} className="grid grid-cols-1 gap-3 rounded-2xl bg-white p-4 md:grid-cols-[1.6fr_0.5fr_auto]">
+                                            <div key={item.localId} className="grid grid-cols-1 gap-3 rounded-2xl bg-white p-4 md:grid-cols-[1.2fr_0.8fr_1.2fr_0.5fr_auto]">
                                                 <select
                                                     value={item.productId}
                                                     onChange={(event) => {
                                                         const nextItems = [...shipmentForm.items];
-                                                        nextItems[index] = { ...nextItems[index], productId: event.target.value };
+                                                        const nextProductId = event.target.value;
+                                                        const selectedProduct = inventoryById.get(nextProductId);
+                                                        nextItems[index] = {
+                                                            ...nextItems[index],
+                                                            productId: nextProductId,
+                                                            skuSnapshot: selectedProduct?.sku || nextItems[index].skuSnapshot,
+                                                            productNameSnapshot: selectedProduct?.name || nextItems[index].productNameSnapshot
+                                                        };
                                                         setShipmentForm((current) => ({ ...current, items: nextItems }));
                                                     }}
                                                     className="rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
                                                 >
-                                                    <option value="">Selecciona producto</option>
+                                                    <option value="">Tomar desde inventario (opcional)</option>
                                                     {inventory.map((inventoryItem) => (
                                                         <option key={inventoryItem.id} value={inventoryItem.id}>
                                                             {(inventoryItem.sku || 'SIN-SKU')} · {inventoryItem.name}
                                                         </option>
                                                     ))}
                                                 </select>
+                                                <input
+                                                    value={item.skuSnapshot}
+                                                    onChange={(event) => {
+                                                        const nextItems = [...shipmentForm.items];
+                                                        nextItems[index] = { ...nextItems[index], skuSnapshot: event.target.value };
+                                                        setShipmentForm((current) => ({ ...current, items: nextItems }));
+                                                    }}
+                                                    placeholder="SKU (opcional)"
+                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
+                                                />
+                                                <input
+                                                    value={item.productNameSnapshot}
+                                                    onChange={(event) => {
+                                                        const nextItems = [...shipmentForm.items];
+                                                        nextItems[index] = { ...nextItems[index], productNameSnapshot: event.target.value };
+                                                        setShipmentForm((current) => ({ ...current, items: nextItems }));
+                                                    }}
+                                                    placeholder="Nombre del producto"
+                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
+                                                />
                                                 <input
                                                     type="number"
                                                     min={1}
