@@ -190,7 +190,7 @@ const Procurement: React.FC = () => {
     const canRequestProducts = hasPermission('REQUEST_PRODUCTS');
     const canManageProcurement = hasPermission('MANAGE_PROCUREMENT');
 
-    const [activeTab, setActiveTab] = useState<ProcurementTab>('requests');
+    const [activeTab, setActiveTab] = useState<ProcurementTab>('shipments');
     const [loading, setLoading] = useState(true);
     const [savingRequest, setSavingRequest] = useState(false);
     const [savingShipment, setSavingShipment] = useState(false);
@@ -675,16 +675,16 @@ const Procurement: React.FC = () => {
             <div className="rounded-3xl border border-slate-200 bg-white p-2 shadow-sm">
                 <div className="grid grid-cols-2 gap-2">
                     <button
-                        onClick={() => setActiveTab('requests')}
-                        className={`rounded-2xl px-4 py-3 text-sm font-black transition-all ${activeTab === 'requests' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
-                    >
-                        Solicitudes de Productos
-                    </button>
-                    <button
                         onClick={() => setActiveTab('shipments')}
                         className={`rounded-2xl px-4 py-3 text-sm font-black transition-all ${activeTab === 'shipments' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
                     >
                         Importaciones en Tránsito
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('requests')}
+                        className={`rounded-2xl px-4 py-3 text-sm font-black transition-all ${activeTab === 'requests' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                    >
+                        Solicitudes de Productos
                     </button>
                 </div>
             </div>
