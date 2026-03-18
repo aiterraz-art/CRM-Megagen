@@ -189,10 +189,11 @@ const ShipmentProgressTrack: React.FC<{ shipment: ShipmentRow }> = ({ shipment }
 const Procurement: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { profile, hasPermission } = useUser();
+    const { profile, hasPermission, effectiveRole } = useUser();
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
     const canRequestProducts = hasPermission('REQUEST_PRODUCTS');
     const canManageProcurement = hasPermission('MANAGE_PROCUREMENT');
+    const isAdmin = effectiveRole === 'admin';
 
     const [activeTab, setActiveTab] = useState<ProcurementTab>('shipments');
     const [loading, setLoading] = useState(true);
@@ -699,6 +700,31 @@ const Procurement: React.FC = () => {
         }
     };
 
+    const handleMarkShipmentReceived = async (shipment: ShipmentRow) => {
+        if (!isAdmin) return;
+
+        const confirmed = window.confirm(`¿Marcar ${shipment.supplier_name} como importación recibida?`);
+        if (!confirmed) return;
+
+        try {
+            const { error } = await supabase
+                .from('inbound_shipments')
+                .update({ status: 'received' })
+                .eq('id', shipment.id);
+
+            if (error) throw error;
+
+            if (selectedShipment?.id === shipment.id) {
+                setSelectedShipment({ ...shipment, status: 'received' });
+            }
+
+            await fetchProcurementData();
+        } catch (error: any) {
+            console.error('Error marking shipment received:', error);
+            alert(`Error marcando importación recibida: ${error.message}`);
+        }
+    };
+
     const shipmentDetailItems = useMemo(() => {
         if (!selectedShipment) return [];
         return shipmentItems.filter((item) => item.shipment_id === selectedShipment.id);
@@ -1066,9 +1092,23 @@ const Procurement: React.FC = () => {
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center justify-between">
-                                                    <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-black uppercase tracking-wide ${SHIPMENT_STATUS_STYLES[shipment.status as ShipmentStatus]}`}>
-                                                        {SHIPMENT_STATUS_LABELS[shipment.status as ShipmentStatus]}
-                                                    </span>
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-black uppercase tracking-wide ${SHIPMENT_STATUS_STYLES[shipment.status as ShipmentStatus]}`}>
+                                                            {SHIPMENT_STATUS_LABELS[shipment.status as ShipmentStatus]}
+                                                        </span>
+                                                        {isAdmin && shipment.status !== 'received' && shipment.status !== 'in_warehouse' && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    void handleMarkShipmentReceived(shipment);
+                                                                }}
+                                                                className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-700 transition-all hover:bg-emerald-100"
+                                                            >
+                                                                Marcar Recibida
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                     <span className="text-xs font-black uppercase tracking-widest text-slate-400 group-hover:text-slate-600">
                                                         Ver detalle
                                                     </span>
