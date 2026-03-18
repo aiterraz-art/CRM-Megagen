@@ -85,13 +85,15 @@ const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
 const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
     in_transit: 'En Tránsito',
     arrived_chile: 'Llegó a Chile',
-    received: 'Recibida'
+    received: 'Recibida',
+    in_warehouse: 'En Bodega'
 };
 
 const SHIPMENT_STATUS_STYLES: Record<ShipmentStatus, string> = {
     in_transit: 'bg-sky-50 text-sky-700 border-sky-200',
     arrived_chile: 'bg-amber-50 text-amber-700 border-amber-200',
-    received: 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    received: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    in_warehouse: 'bg-slate-900 text-white border-slate-900'
 };
 
 const createEmptyRequestForm = () => ({
@@ -149,7 +151,7 @@ const getShipmentProgress = (shipment: ShipmentRow) => {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0.5;
 
     const now = Date.now();
-    if (shipment.status === 'received') return 1;
+    if (shipment.status === 'received' || shipment.status === 'in_warehouse') return 1;
     if (shipment.status === 'arrived_chile') return 0.9;
 
     return Math.min(1, Math.max(0, (now - start) / (end - start)));
@@ -299,12 +301,12 @@ const Procurement: React.FC = () => {
     }, [location.pathname, location.state, navigate]);
 
     const activeShipments = useMemo(
-        () => shipments.filter((shipment) => shipment.status !== 'received'),
+        () => shipments.filter((shipment) => shipment.status !== 'in_warehouse'),
         [shipments]
     );
 
-    const receivedShipments = useMemo(
-        () => shipments.filter((shipment) => shipment.status === 'received'),
+    const closedShipments = useMemo(
+        () => shipments.filter((shipment) => shipment.status === 'in_warehouse'),
         [shipments]
     );
 
@@ -669,6 +671,31 @@ const Procurement: React.FC = () => {
             alert(`Error actualizando solicitud: ${error.message}`);
         } finally {
             setManagingRequest(false);
+        }
+    };
+
+    const handleMarkShipmentInWarehouse = async (shipment: ShipmentRow) => {
+        if (!canManageProcurement) return;
+
+        const confirmed = window.confirm(`¿Marcar ${shipment.supplier_name} como importación en bodega y cerrar el flujo?`);
+        if (!confirmed) return;
+
+        try {
+            const { error } = await supabase
+                .from('inbound_shipments')
+                .update({ status: 'in_warehouse' })
+                .eq('id', shipment.id);
+
+            if (error) throw error;
+
+            if (selectedShipment?.id === shipment.id) {
+                setSelectedShipment({ ...shipment, status: 'in_warehouse' });
+            }
+
+            await fetchProcurementData();
+        } catch (error: any) {
+            console.error('Error marking shipment in warehouse:', error);
+            alert(`Error marcando importación en bodega: ${error.message}`);
         }
     };
 
@@ -1061,10 +1088,10 @@ const Procurement: React.FC = () => {
                             </div>
 
                             <div>
-                                <h2 className="text-2xl font-black text-slate-900">Historial de recibidas</h2>
-                                <p className="text-slate-500 font-medium mb-4">Registro cerrado de importaciones ya recibidas, sin mover stock automáticamente.</p>
+                                <h2 className="text-2xl font-black text-slate-900">Historial cerrado</h2>
+                                <p className="text-slate-500 font-medium mb-4">Importaciones que ya fueron marcadas en bodega y cerraron su flujo, sin mover stock automáticamente.</p>
                                 <div className="space-y-3">
-                                    {receivedShipments.map((shipment) => (
+                                    {closedShipments.map((shipment) => (
                                         <button
                                             key={shipment.id}
                                             onClick={() => setSelectedShipment(shipment)}
@@ -1081,9 +1108,9 @@ const Procurement: React.FC = () => {
                                             </div>
                                         </button>
                                     ))}
-                                    {receivedShipments.length === 0 && (
+                                    {closedShipments.length === 0 && (
                                         <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-8 text-center text-sm font-medium text-slate-500">
-                                            Todavía no hay importaciones marcadas como recibidas.
+                                            Todavía no hay importaciones marcadas en bodega.
                                         </div>
                                     )}
                                 </div>
@@ -1450,6 +1477,14 @@ const Procurement: React.FC = () => {
                                 <h3 className="text-2xl font-black text-slate-900">{selectedShipment.supplier_name}</h3>
                             </div>
                             <div className="flex items-center gap-3">
+                                {canManageProcurement && selectedShipment.status === 'received' && (
+                                    <button
+                                        onClick={() => handleMarkShipmentInWarehouse(selectedShipment)}
+                                        className="rounded-2xl bg-slate-900 px-4 py-2 text-xs font-black text-white"
+                                    >
+                                        Marcar en Bodega
+                                    </button>
+                                )}
                                 {canManageProcurement && (
                                     <button
                                         onClick={() => {
