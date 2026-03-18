@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Printer, Download, X, Share2, Loader2, MessageSquare, Mail } from 'lucide-react';
 import type { QuotationPreviewData, QuotationPreviewItem } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
@@ -304,13 +305,13 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
     const effectiveScale = clamp(previewScale * zoomMultiplier, 0.2, 3);
     const zoomPercent = Math.round(effectiveScale * 100);
 
-    return (
+    const modalContent = (
         <div
             className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-2 md:p-3 overflow-y-auto cursor-pointer"
             onClick={onClose} // Close on backdrop click
         >
             <div
-                className="bg-white w-[96vw] max-w-[1700px] shadow-2xl rounded-lg flex flex-col h-[98vh] overflow-hidden animate-in fade-in zoom-in duration-300 cursor-default"
+                className="relative bg-white w-[96vw] max-w-[1700px] shadow-2xl rounded-lg flex min-h-0 flex-col h-[100dvh] max-h-[100dvh] overflow-hidden animate-in fade-in zoom-in duration-300 cursor-default md:h-[98vh] md:max-h-[98vh]"
                 onClick={(e) => e.stopPropagation()} // Prevent close on content click
             >
 
@@ -417,7 +418,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                 {/* Contenedor con escalado dinámico */}
                 <div
                     ref={viewportRef}
-                    className="w-full flex-1 flex items-center justify-center overflow-auto bg-gray-50 p-1"
+                    className="min-h-0 w-full flex-1 overflow-auto bg-gray-50 p-1 pb-24 flex items-start justify-start md:items-center md:justify-center md:pb-1"
                 >
                     <div
                         style={{
@@ -629,12 +630,14 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                                 <span className="text-gray-400 font-light not-italic text-xs ml-1 uppercase">
                                     {import.meta.env.VITE_COMPANY_NAME?.split(' ').slice(1).join(' ') || 'Chile'}
                                 </span>
+                            </div>
                         </div>
                     </div>
                 </div>
+                </div>
 
                 {!readOnly && (
-                    <div className="grid shrink-0 grid-cols-2 gap-2 border-t bg-white p-3 print:hidden md:hidden">
+                    <div className="absolute inset-x-0 bottom-0 z-30 grid grid-cols-2 gap-2 border-t bg-white p-3 pb-[calc(env(safe-area-inset-bottom)+12px)] shadow-[0_-8px_24px_rgba(15,23,42,0.12)] print:hidden md:hidden">
                         <button
                             onClick={handleSendWhatsApp}
                             disabled={!canShareAndDownload || generatingPdf || !normalizePhoneForWhatsapp(data.clientPhone || '')}
@@ -674,10 +677,13 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                 )}
             </div>
         </div>
-
-            </div>
-        </div>
     );
+
+    if (typeof document === 'undefined') {
+        return modalContent;
+    }
+
+    return createPortal(modalContent, document.body);
 };
 
 export default QuotationTemplate;
