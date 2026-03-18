@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel } from 'lucide-react';
+import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -12,72 +12,279 @@ interface LayoutProps {
     title?: string;
 }
 
+type MenuGroupId = 'comercial' | 'prospection' | 'procurement' | 'logistics' | 'management';
+
+type MenuContext = {
+    effectiveRole: string | null | undefined;
+    isSupervisor: boolean;
+    canViewProcurement: boolean;
+};
+
+type MenuEntry = {
+    id: string;
+    label: string;
+    path: string;
+    icon: React.ReactNode;
+    group: MenuGroupId | null;
+    isPinned?: boolean;
+    visibleWhen: (context: MenuContext) => boolean;
+};
+
+type MenuGroup = {
+    id: MenuGroupId;
+    label: string;
+};
+
+const menuGroups: MenuGroup[] = [
+    { id: 'comercial', label: 'Comercial' },
+    { id: 'prospection', label: 'Prospección' },
+    { id: 'procurement', label: 'Abastecimiento' },
+    { id: 'logistics', label: 'Logística' },
+    { id: 'management', label: 'Gestión' },
+];
+
+const allMenuEntries: MenuEntry[] = [
+    {
+        id: 'dashboard',
+        label: 'Dashboard',
+        path: '/',
+        icon: <LayoutDashboard size={20} />,
+        group: null,
+        isPinned: true,
+        visibleWhen: () => true,
+    },
+    {
+        id: 'schedule',
+        label: 'Agenda',
+        path: '/schedule',
+        icon: <Calendar size={20} />,
+        group: null,
+        isPinned: true,
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+    },
+    {
+        id: 'clients',
+        label: 'Clientes',
+        path: '/clients',
+        icon: <Users size={20} />,
+        group: 'comercial',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+    },
+    {
+        id: 'quotations',
+        label: 'Cotizaciones',
+        path: '/quotations',
+        icon: <ShoppingBag size={20} />,
+        group: 'comercial',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+    },
+    {
+        id: 'orders',
+        label: 'Pedidos',
+        path: '/orders',
+        icon: <ShoppingCart size={20} />,
+        group: 'comercial',
+        visibleWhen: () => true,
+    },
+    {
+        id: 'conversions',
+        label: 'Conversiones',
+        path: '/conversions',
+        icon: <Trophy size={20} />,
+        group: 'comercial',
+        visibleWhen: () => true,
+    },
+    {
+        id: 'collections',
+        label: 'Cobranzas',
+        path: '/collections',
+        icon: <CircleDollarSign size={20} />,
+        group: 'comercial',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'cold-visit',
+        label: 'Visita en Frío',
+        path: '/cold-visit',
+        icon: <Stethoscope size={20} />,
+        group: 'prospection',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'map',
+        label: 'Mapa',
+        path: '/map',
+        icon: <MapIcon size={20} />,
+        group: 'prospection',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'visits',
+        label: 'Historial',
+        path: '/visits',
+        icon: <ClipboardList size={20} />,
+        group: 'prospection',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'seller' && effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'pipeline',
+        label: 'Embudo',
+        path: '/pipeline',
+        icon: <LayoutDashboard size={20} className="rotate-90" />,
+        group: 'prospection',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'lead-pipeline',
+        label: 'Leads',
+        path: '/lead-pipeline',
+        icon: <Target size={20} />,
+        group: 'prospection',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'meta-leads',
+        label: 'Meta Leads',
+        path: '/meta-leads',
+        icon: <Megaphone size={20} />,
+        group: 'prospection',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'seller',
+    },
+    {
+        id: 'lead-messages',
+        label: 'Mensajes',
+        path: '/lead-messages',
+        icon: <MessageSquare size={20} />,
+        group: 'prospection',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'inventory',
+        label: 'Inventario',
+        path: '/inventory',
+        icon: <Package size={20} />,
+        group: 'procurement',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+    },
+    {
+        id: 'procurement',
+        label: 'Compras',
+        path: '/procurement',
+        icon: <ShipWheel size={20} />,
+        group: 'procurement',
+        visibleWhen: ({ effectiveRole, canViewProcurement }) => effectiveRole !== 'driver' && canViewProcurement,
+    },
+    {
+        id: 'dispatch',
+        label: 'Despacho',
+        path: '/dispatch',
+        icon: <Truck size={20} />,
+        group: 'logistics',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'facturador',
+    },
+    {
+        id: 'delivery',
+        label: 'Ruta',
+        path: '/delivery',
+        icon: <Truck size={20} />,
+        group: 'logistics',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'driver',
+    },
+    {
+        id: 'routes',
+        label: 'Rutas',
+        path: '/routes',
+        icon: <MapIcon size={20} className="text-indigo-400" />,
+        group: 'logistics',
+        visibleWhen: ({ effectiveRole, isSupervisor }) => isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'my-deliveries',
+        label: 'Estado Entregas',
+        path: '/my-deliveries',
+        icon: <Truck size={20} />,
+        group: 'logistics',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'seller',
+    },
+    {
+        id: 'operations',
+        label: 'Operaciones',
+        path: '/operations',
+        icon: <ActivitySquare size={20} />,
+        group: 'management',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'jefe',
+    },
+    {
+        id: 'team',
+        label: 'Mi Equipo',
+        path: '/team',
+        icon: <ShieldCheck size={20} />,
+        group: 'management',
+        visibleWhen: ({ effectiveRole, isSupervisor }) => isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+    },
+    {
+        id: 'settings',
+        label: 'Configuración',
+        path: '/settings',
+        icon: <Settings size={20} />,
+        group: 'management',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin',
+    },
+];
+
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const location = useLocation();
     const navigate = useNavigate();
     const { profile, isSupervisor, effectiveRole, realRole, simulatedRole, setSimulatedRole, hasPermission } = useUser();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [openGroupId, setOpenGroupId] = useState<MenuGroupId | null>(null);
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
 
-    const menuItems = [
-        { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/' },
-    ];
+    const menuContext = useMemo(
+        () => ({
+            effectiveRole,
+            isSupervisor,
+            canViewProcurement,
+        }),
+        [effectiveRole, isSupervisor, canViewProcurement]
+    );
 
-    if (effectiveRole !== 'facturador') {
-        menuItems.push({ icon: <Stethoscope size={20} />, label: 'Visita en Frío', path: '/cold-visit' });
-        menuItems.push({ icon: <MapIcon size={20} />, label: 'Mapa', path: '/map' });
-    }
+    const visibleMenuEntries = useMemo(
+        () => allMenuEntries.filter((entry) => entry.visibleWhen(menuContext)),
+        [menuContext]
+    );
 
-    menuItems.push({ icon: <Users size={20} />, label: 'Clientes', path: '/clients' });
-    menuItems.push({ icon: <ShoppingBag size={20} />, label: 'Cotizaciones', path: '/quotations' });
-    menuItems.push({ icon: <ShoppingCart size={20} />, label: 'Pedidos', path: '/orders' });
-    menuItems.push({ icon: <Trophy size={20} />, label: 'Conversiones', path: '/conversions' });
+    const pinnedItems = useMemo(
+        () => visibleMenuEntries.filter((entry) => entry.isPinned),
+        [visibleMenuEntries]
+    );
 
-    if (effectiveRole !== 'facturador') {
-        menuItems.push({ icon: <CircleDollarSign size={20} />, label: 'Cobranzas', path: '/collections' });
-        menuItems.push({ icon: <LayoutDashboard size={20} className="rotate-90" />, label: 'Embudo', path: '/pipeline' });
-        menuItems.push({ icon: <Target size={20} />, label: 'Leads', path: '/lead-pipeline' });
-        if (effectiveRole === 'admin' || effectiveRole === 'seller') {
-            menuItems.push({ icon: <Megaphone size={20} />, label: 'Meta Leads', path: '/meta-leads' });
-        }
-        menuItems.push({ icon: <MessageSquare size={20} />, label: 'Mensajes', path: '/lead-messages' });
-    }
+    const groupedItems = useMemo(
+        () => visibleMenuEntries.filter((entry) => !entry.isPinned && entry.group),
+        [visibleMenuEntries]
+    );
 
-    menuItems.push({ icon: <Package size={20} />, label: 'Inventario', path: '/inventory' });
-    if (canViewProcurement) {
-        menuItems.push({ icon: <ShipWheel size={20} />, label: 'Compras', path: '/procurement' });
-    }
-    menuItems.push({ icon: <Calendar size={20} />, label: 'Agenda', path: '/schedule' });
+    const visibleGroups = useMemo(
+        () =>
+            menuGroups
+                .map((group) => ({
+                    ...group,
+                    items: groupedItems.filter((entry) => entry.group === group.id),
+                }))
+                .filter((group) => group.items.length > 0),
+        [groupedItems]
+    );
 
-    if (effectiveRole !== 'seller' && effectiveRole !== 'facturador') {
-        menuItems.push({ icon: <ClipboardList size={20} />, label: 'Historial', path: '/visits' });
-    }
+    const activeMenuEntry = useMemo(
+        () => visibleMenuEntries.find((entry) => entry.path === location.pathname) || null,
+        [visibleMenuEntries, location.pathname]
+    );
 
-    if (effectiveRole === 'driver') {
-        menuItems.length = 0;
-        menuItems.push({ icon: <LayoutDashboard size={20} />, label: 'Mi Panel', path: '/' });
-        menuItems.push({ icon: <ShoppingCart size={20} />, label: 'Pedidos', path: '/orders' });
-        menuItems.push({ icon: <Truck size={20} />, label: 'Ruta', path: '/delivery' });
-        menuItems.push({ icon: <Trophy size={20} />, label: 'Conversiones', path: '/conversions' });
-    } else if (isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'facturador') {
-        menuItems.push({ icon: <ShieldCheck size={20} />, label: 'Mi Equipo', path: '/team' });
-        menuItems.push({ icon: <React.Fragment><MapIcon size={20} className="text-indigo-400" /></React.Fragment>, label: 'Rutas', path: '/routes' });
-    }
+    const defaultOpenGroupId = activeMenuEntry?.group ?? visibleGroups[0]?.id ?? null;
 
-    if (effectiveRole === 'seller') {
-        menuItems.push({ icon: <Truck size={20} />, label: 'Estado Entregas', path: '/my-deliveries' });
-    }
-
-    if (effectiveRole === 'admin' || effectiveRole === 'facturador') {
-        menuItems.push({ icon: <Truck size={20} />, label: 'Despacho', path: '/dispatch' });
-    }
-
-    if (effectiveRole === 'admin') {
-        menuItems.push({ icon: <Settings size={20} />, label: 'Configuración', path: '/settings' });
-    }
-    if (effectiveRole === 'admin' || effectiveRole === 'jefe') {
-        menuItems.push({ icon: <ActivitySquare size={20} />, label: 'Operaciones', path: '/operations' });
-    }
+    useEffect(() => {
+        setOpenGroupId(defaultOpenGroupId);
+    }, [defaultOpenGroupId]);
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
@@ -85,6 +292,29 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     };
 
     const closeMenu = () => setIsMobileMenuOpen(false);
+
+    const toggleGroup = (groupId: MenuGroupId) => {
+        setOpenGroupId((current) => (current === groupId ? null : groupId));
+    };
+
+    const renderMenuItem = (item: MenuEntry, nested = false) => {
+        const isActive = location.pathname === item.path;
+
+        return (
+            <Link
+                key={item.path}
+                to={item.path}
+                onClick={closeMenu}
+                className={`premium-sidebar-item ${isActive ? 'active' : ''} ${nested ? 'ml-4 py-2.5 pr-3 pl-4 text-sm rounded-xl' : ''}`}
+            >
+                <span className="relative z-10 shrink-0">{item.icon}</span>
+                <span className="font-bold relative z-10 truncate">{item.label}</span>
+                {isActive && (
+                    <div className="ml-auto w-1.5 h-6 bg-white rounded-full shrink-0"></div>
+                )}
+            </Link>
+        );
+    };
 
     return (
         <div className="flex h-full max-w-full bg-premium-bg overflow-hidden font-outfit">
@@ -115,21 +345,40 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                         </button>
                     </div>
 
-                    <nav className="space-y-2">
-                        {menuItems.map((item) => (
-                            <Link
-                                key={item.path}
-                                to={item.path}
-                                onClick={closeMenu}
-                                className={`premium-sidebar-item ${location.pathname === item.path ? 'active' : ''}`}
-                            >
-                                <span className="relative z-10">{item.icon}</span>
-                                <span className="font-bold relative z-10">{item.label}</span>
-                                {location.pathname === item.path && (
-                                    <div className="ml-auto w-1.5 h-6 bg-white rounded-full"></div>
-                                )}
-                            </Link>
-                        ))}
+                    <nav className="space-y-3">
+                        <div className="space-y-2">
+                            {pinnedItems.map((item) => renderMenuItem(item))}
+                        </div>
+
+                        {visibleGroups.length > 0 && (
+                            <div className="pt-4 border-t border-white/10 space-y-2">
+                                {visibleGroups.map((group) => {
+                                    const isOpen = openGroupId === group.id;
+                                    const isGroupActive = group.items.some((item) => item.path === location.pathname);
+
+                                    return (
+                                        <div key={group.id} className="rounded-[1.4rem] bg-white/5 border border-white/10 overflow-hidden">
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleGroup(group.id)}
+                                                className={`w-full flex items-center justify-between px-4 py-3 text-left transition-all ${isGroupActive ? 'text-white bg-white/10' : 'text-white/80 hover:text-white hover:bg-white/5'}`}
+                                            >
+                                                <span className="font-black uppercase tracking-[0.18em] text-[11px]">{group.label}</span>
+                                                <ChevronDown
+                                                    size={16}
+                                                    className={`transition-transform ${isOpen ? 'rotate-180 text-white' : 'text-white/60'}`}
+                                                />
+                                            </button>
+                                            {isOpen && (
+                                                <div className="px-2 pb-2 space-y-1">
+                                                    {group.items.map((item) => renderMenuItem(item, true))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </nav>
 
 
