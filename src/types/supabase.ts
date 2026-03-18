@@ -87,27 +87,162 @@ export interface Database {
             inventory: {
                 Row: {
                     category: string | null
+                    created_at: string | null
                     demo_available: boolean | null
                     id: string
                     name: string
                     price: number | null
+                    sku: string | null
                     stock_qty: number | null
                 }
                 Insert: {
                     category?: string | null
+                    created_at?: string | null
                     demo_available?: boolean | null
                     id?: string
                     name: string
                     price?: number | null
+                    sku?: string | null
                     stock_qty?: number | null
                 }
                 Update: {
                     category?: string | null
+                    created_at?: string | null
                     demo_available?: boolean | null
                     id?: string
                     name?: string
                     price?: number | null
+                    sku?: string | null
                     stock_qty?: number | null
+                }
+            }
+            inbound_shipments: {
+                Row: {
+                    created_at: string
+                    created_by: string
+                    departure_date: string | null
+                    eta_date: string | null
+                    id: string
+                    notes: string | null
+                    origin_city: string
+                    origin_country: string
+                    status: string
+                    supplier_name: string
+                    transport_mode: string
+                    updated_at: string
+                }
+                Insert: {
+                    created_at?: string
+                    created_by: string
+                    departure_date?: string | null
+                    eta_date?: string | null
+                    id?: string
+                    notes?: string | null
+                    origin_city: string
+                    origin_country: string
+                    status?: string
+                    supplier_name: string
+                    transport_mode: string
+                    updated_at?: string
+                }
+                Update: {
+                    created_at?: string
+                    created_by?: string
+                    departure_date?: string | null
+                    eta_date?: string | null
+                    id?: string
+                    notes?: string | null
+                    origin_city?: string
+                    origin_country?: string
+                    status?: string
+                    supplier_name?: string
+                    transport_mode?: string
+                    updated_at?: string
+                }
+            }
+            inbound_shipment_items: {
+                Row: {
+                    id: string
+                    product_id: string | null
+                    product_name_snapshot: string
+                    qty: number
+                    shipment_id: string
+                    sku_snapshot: string
+                }
+                Insert: {
+                    id?: string
+                    product_id?: string | null
+                    product_name_snapshot: string
+                    qty: number
+                    shipment_id: string
+                    sku_snapshot: string
+                }
+                Update: {
+                    id?: string
+                    product_id?: string | null
+                    product_name_snapshot?: string
+                    qty?: number
+                    shipment_id?: string
+                    sku_snapshot?: string
+                }
+            }
+            product_requests: {
+                Row: {
+                    closed_at: string | null
+                    created_at: string
+                    current_stock_snapshot: number
+                    id: string
+                    linked_shipment_id: string | null
+                    manager_note: string | null
+                    needed_by_date: string | null
+                    priority: string
+                    product_id: string | null
+                    product_name_snapshot: string
+                    reason_type: string
+                    request_note: string | null
+                    requested_qty: number
+                    requester_id: string
+                    sku_snapshot: string
+                    status: string
+                    updated_at: string
+                }
+                Insert: {
+                    closed_at?: string | null
+                    created_at?: string
+                    current_stock_snapshot?: number
+                    id?: string
+                    linked_shipment_id?: string | null
+                    manager_note?: string | null
+                    needed_by_date?: string | null
+                    priority?: string
+                    product_id?: string | null
+                    product_name_snapshot: string
+                    reason_type: string
+                    request_note?: string | null
+                    requested_qty: number
+                    requester_id: string
+                    sku_snapshot: string
+                    status?: string
+                    updated_at?: string
+                }
+                Update: {
+                    closed_at?: string | null
+                    created_at?: string
+                    current_stock_snapshot?: number
+                    id?: string
+                    linked_shipment_id?: string | null
+                    manager_note?: string | null
+                    needed_by_date?: string | null
+                    priority?: string
+                    product_id?: string | null
+                    product_name_snapshot?: string
+                    reason_type?: string
+                    request_note?: string | null
+                    requested_qty?: number
+                    requester_id?: string
+                    sku_snapshot?: string
+                    status?: string
+                    updated_at?: string
                 }
             }
             profiles: {

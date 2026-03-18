@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { Search, Filter, Package, Plus, AlertTriangle, TrendingUp, History, ChevronRight, FileSpreadsheet, MoreVertical, Download } from 'lucide-react';
+import { Search, Package, Plus, AlertTriangle, TrendingUp, History, FileSpreadsheet, Download, ClipboardList } from 'lucide-react';
 import { Database } from '../types/supabase';
 import * as XLSX from 'xlsx';
 
@@ -9,10 +10,13 @@ type InventoryItem = Database['public']['Tables']['inventory']['Row'] & { sku?: 
 type ImportType = 'stock' | 'pricing';
 
 const Inventory = () => {
+    const navigate = useNavigate();
     const { hasPermission, effectiveRole } = useUser();
     const isSellerReadOnly = effectiveRole === 'seller';
     const canManageInventory = !isSellerReadOnly && hasPermission('MANAGE_INVENTORY');
     const canUploadInventory = !isSellerReadOnly && hasPermission('UPLOAD_EXCEL');
+    const canRequestProducts = hasPermission('REQUEST_PRODUCTS');
+    const canShowActions = canManageInventory || canRequestProducts;
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(true);
@@ -426,6 +430,15 @@ const Inventory = () => {
                         </button>
                     </div>
                 )}
+                {!canUploadInventory && canRequestProducts && (
+                    <button
+                        onClick={() => navigate('/procurement', { state: { activeTab: 'requests' } })}
+                        className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-indigo-600 font-bold hover:bg-gray-50 transition-all shadow-sm"
+                    >
+                        <ClipboardList size={18} className="mr-2" />
+                        Ver Solicitudes de Compra
+                    </button>
+                )}
             </div>
 
             <div>
@@ -448,7 +461,7 @@ const Inventory = () => {
                                 <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">SKU</th>
                                 <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Stock</th>
                                 {!isSellerReadOnly && <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Precio</th>}
-                                {canManageInventory && <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Acciones</th>}
+                                {canShowActions && <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Acciones</th>}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
@@ -478,19 +491,38 @@ const Inventory = () => {
                                             ${item.price?.toLocaleString()}
                                         </td>
                                     )}
-                                    {canManageInventory && (
+                                    {canShowActions && (
                                         <td className="px-6 py-5 text-right">
                                             <div className="flex justify-end gap-2">
-                                                <button
-                                                    onClick={() => fetchHistory(item)}
-                                                    className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                                                    title="Ver Historial"
-                                                >
-                                                    <History size={18} />
-                                                </button>
-                                                <button className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
-                                                    <ChevronRight size={18} />
-                                                </button>
+                                                {canManageInventory && (
+                                                    <button
+                                                        onClick={() => fetchHistory(item)}
+                                                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                                        title="Ver Historial"
+                                                    >
+                                                        <History size={18} />
+                                                    </button>
+                                                )}
+                                                {canRequestProducts && (
+                                                    <button
+                                                        onClick={() => navigate('/procurement', {
+                                                            state: {
+                                                                activeTab: 'requests',
+                                                                openRequestModal: true,
+                                                                prefillProduct: {
+                                                                    id: item.id,
+                                                                    sku: item.sku || null,
+                                                                    name: item.name,
+                                                                    stock_qty: item.stock_qty || 0
+                                                                }
+                                                            }
+                                                        })}
+                                                        className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-indigo-700 transition-all hover:bg-indigo-100"
+                                                        title="Solicitar producto"
+                                                    >
+                                                        Solicitar
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     )}

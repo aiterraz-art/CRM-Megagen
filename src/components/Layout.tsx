@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone } from 'lucide-react';
+import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -15,8 +15,9 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { profile, isSupervisor, effectiveRole, realRole, simulatedRole, setSimulatedRole } = useUser();
+    const { profile, isSupervisor, effectiveRole, realRole, simulatedRole, setSimulatedRole, hasPermission } = useUser();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
 
     const menuItems = [
         { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/' },
@@ -43,6 +44,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
 
     menuItems.push({ icon: <Package size={20} />, label: 'Inventario', path: '/inventory' });
+    if (canViewProcurement) {
+        menuItems.push({ icon: <ShipWheel size={20} />, label: 'Compras', path: '/procurement' });
+    }
     menuItems.push({ icon: <Calendar size={20} />, label: 'Agenda', path: '/schedule' });
 
     if (effectiveRole !== 'seller' && effectiveRole !== 'facturador') {

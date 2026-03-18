@@ -41,6 +41,7 @@ const OperationsCenter = loadable(() => import('./pages/OperationsCenter'));
 const Collections = loadable(() => import('./pages/Collections'));
 const MyDeliveries = loadable(() => import('./pages/MyDeliveries'));
 const ConversionsRanking = loadable(() => import('./pages/ConversionsRanking'));
+const Procurement = loadable(() => import('./pages/Procurement'));
 
 const ScreenLoader = () => (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -83,6 +84,15 @@ const MetaLeadsGuard = ({ children }: { children: JSX.Element }) => {
     const { effectiveRole, loading } = useUser();
     if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
     if (!(effectiveRole === 'admin' || effectiveRole === 'seller')) {
+        return <Navigate to="/" replace />;
+    }
+    return children;
+};
+
+const PermissionGuard = ({ permission, children }: { permission: string; children: JSX.Element }) => {
+    const { hasPermission, loading } = useUser();
+    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
+    if (!hasPermission(permission)) {
         return <Navigate to="/" replace />;
     }
     return children;
@@ -207,6 +217,7 @@ function App() {
                             <Route path="conversions" element={<ConversionsRanking />} />
                             <Route path="routes" element={<NonFacturadorGuard><SellerRoutes /></NonFacturadorGuard>} />
                             <Route path="inventory" element={<Inventory />} />
+                            <Route path="procurement" element={<PermissionGuard permission="VIEW_PROCUREMENT"><Procurement /></PermissionGuard>} />
                             <Route path="team" element={<NonFacturadorGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonFacturadorGuard>} />
                             <Route path="pipeline" element={<NonFacturadorGuard><Pipeline /></NonFacturadorGuard>} />
                             <Route path="lead-pipeline" element={<LeadModuleGuard><LeadPipeline /></LeadModuleGuard>} />

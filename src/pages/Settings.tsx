@@ -12,10 +12,10 @@ type InvitePayload = {
 };
 
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-    admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS'],
-    jefe: ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS'],
+    admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT'],
+    jefe: ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT'],
     facturador: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS'],
-    seller: ['VIEW_METAS'],
+    seller: ['VIEW_METAS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS'],
     driver: ['EXECUTE_DELIVERY']
 };
 
@@ -78,7 +78,10 @@ const Settings: React.FC = () => {
         { key: 'MANAGE_APPROVALS', label: 'Gestionar Aprobaciones', desc: 'Resolver solicitudes de autorización y descuentos.' },
         { key: 'MANAGE_POSTSALE', label: 'Gestionar Postventa', desc: 'Administrar flujos y seguimiento de postventa.' },
         { key: 'MANAGE_COLLECTIONS', label: 'Gestionar Cobranzas', desc: 'Subir y administrar información de cobranzas.' },
-        { key: 'VIEW_TEAM_CALENDARS', label: 'Calendarios del Equipo', desc: 'Permite ver Google Calendar de otros vendedores compartidos por Workspace.' }
+        { key: 'VIEW_TEAM_CALENDARS', label: 'Calendarios del Equipo', desc: 'Permite ver Google Calendar de otros vendedores compartidos por Workspace.' },
+        { key: 'VIEW_PROCUREMENT', label: 'Ver Compras', desc: 'Acceso al módulo de solicitudes de productos e importaciones en tránsito.' },
+        { key: 'REQUEST_PRODUCTS', label: 'Solicitar Productos', desc: 'Permite crear solicitudes de compra o reposición.' },
+        { key: 'MANAGE_PROCUREMENT', label: 'Gestionar Compras', desc: 'Permite administrar solicitudes, importaciones y vínculos con embarques.' }
     ];
 
     useEffect(() => {
