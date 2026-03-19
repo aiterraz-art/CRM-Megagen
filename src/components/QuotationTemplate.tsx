@@ -33,6 +33,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                 import('html2canvas'),
                 import('jspdf')
             ]);
+            const renderScale = Math.min(Math.max(window.devicePixelRatio || 1, 3), 4);
             const captureWidth = 1000;
             const sourceNode = contentRef.current;
             const sandbox = document.createElement('div');
@@ -71,7 +72,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
             );
 
             const canvas = await html2canvas(clonedNode, {
-                scale: 2,
+                scale: renderScale,
                 useCORS: true,
                 backgroundColor: '#ffffff',
                 windowWidth: captureWidth,
@@ -80,7 +81,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
 
             document.body.removeChild(sandbox);
 
-            const imgData = canvas.toDataURL('image/jpeg', 0.95);
+            const imgData = canvas.toDataURL('image/png');
             const imgWidth = 210;
             const imgHeight = (canvas.height * imgWidth) / canvas.width;
             const pdf = new jsPDF({
@@ -90,7 +91,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                 compress: true
             });
 
-            pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
+            pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
             return pdf.output('blob');
         } catch (error) {
             console.error('Error generating PDF blob from preview:', error);

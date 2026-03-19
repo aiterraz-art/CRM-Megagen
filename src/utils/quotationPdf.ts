@@ -26,6 +26,7 @@ export const generateQuotationPdfBlob = async (data: QuotationPreviewData): Prom
         import('html2canvas'),
         import('jspdf')
     ]);
+    const renderScale = Math.min(Math.max(window.devicePixelRatio || 1, 3), 4);
 
     const sandbox = document.createElement('div');
     sandbox.style.position = 'fixed';
@@ -52,14 +53,14 @@ export const generateQuotationPdfBlob = async (data: QuotationPreviewData): Prom
         await waitForImages(mountNode);
 
         const canvas = await html2canvas(mountNode, {
-            scale: 2,
+            scale: renderScale,
             useCORS: true,
             backgroundColor: '#ffffff',
             windowWidth: 1000,
             width: 1000
         });
 
-        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+        const imgData = canvas.toDataURL('image/png');
         const imgWidth = 210;
         const imgHeight = (canvas.height * imgWidth) / canvas.width;
         const pdf = new jsPDF({
@@ -69,7 +70,7 @@ export const generateQuotationPdfBlob = async (data: QuotationPreviewData): Prom
             compress: true
         });
 
-        pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
+        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
         return pdf.output('blob');
     } finally {
         root.unmount();
