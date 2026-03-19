@@ -176,7 +176,7 @@ const Quotations: React.FC = () => {
         await markQuotationAsSent(quote.id);
     }, [markQuotationAsSent, normalizePhoneForWhatsapp]);
 
-    const openQuoteViaEmail = useCallback(async (quote: any) => {
+    const openQuoteViaEmail = useCallback(async (quote: any, pdfAttachment?: File | null) => {
         if (quote?.discount_approval?.status === 'pending' || quote?.discount_approval?.status === 'rejected') {
             alert('Esta cotización no se puede enviar hasta resolver la aprobación de descuento.');
             return;
@@ -206,7 +206,7 @@ const Quotations: React.FC = () => {
         ].join('\n');
 
         try {
-            const quotationPdf = await generateQuotationPdfFile(previewData);
+            const quotationPdf = pdfAttachment || await generateQuotationPdfFile(previewData);
             if (navigator.canShare && navigator.canShare({ files: [quotationPdf] })) {
                 try {
                     await navigator.share({
@@ -1463,7 +1463,7 @@ const Quotations: React.FC = () => {
                                 selectedForTemplate,
                                 formatPaymentTermsFromCreditDays(getClientCreditDays(selectedForTemplate.client))
                             )}
-                            onSendEmail={() => openQuoteViaEmail(selectedForTemplate)}
+                            onSendEmail={(pdfAttachment) => openQuoteViaEmail(selectedForTemplate, pdfAttachment)}
                             onMarkedAsSent={async () => {
                                 await markQuotationAsSent(selectedForTemplate.id);
                             }}

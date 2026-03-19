@@ -4,7 +4,6 @@ import { Printer, Download, X, Share2, Loader2, MessageSquare, Mail } from 'luci
 import type { QuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import QuotationDocumentContent, { buildQuotationDocumentViewModel } from './QuotationDocumentContent';
-import { generateQuotationPdfBlob } from '../utils/quotationPdf';
 
 interface Props {
     data: QuotationPreviewData;
@@ -12,7 +11,7 @@ interface Props {
     canShareAndDownload?: boolean;
     shareBlockReason?: string;
     onMarkedAsSent?: (action: 'share' | 'download') => Promise<void> | void;
-    onSendEmail?: () => Promise<void> | void;
+    onSendEmail?: (pdfAttachment?: File) => Promise<void> | void;
     readOnly?: boolean;
 }
 
@@ -25,6 +24,79 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
     const [zoomMultiplier, setZoomMultiplier] = React.useState(1);
     const viewModel = React.useMemo(() => buildQuotationDocumentViewModel(data), [data]);
     const { companyName, items, total } = viewModel;
+
+    const generateCurrentPreviewPdfBlob = React.useCallback(async (): Promise<Blob | null> => {
+        if (!contentRef.current) return null;
+
+        try {
+            const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                import('html2canvas'),
+                import('jspdf')
+            ]);
+            const captureWidth = 1000;
+            const sourceNode = contentRef.current;
+            const sandbox = document.createElement('div');
+            sandbox.style.position = 'fixed';
+            sandbox.style.left = '-20000px';
+            sandbox.style.top = '0';
+            sandbox.style.width = `${captureWidth}px`;
+            sandbox.style.background = '#ffffff';
+            sandbox.style.padding = '0';
+            sandbox.style.zIndex = '-1';
+
+            const clonedNode = sourceNode.cloneNode(true) as HTMLDivElement;
+            clonedNode.style.position = 'static';
+            clonedNode.style.left = '0';
+            clonedNode.style.top = '0';
+            clonedNode.style.transform = 'none';
+            clonedNode.style.transformOrigin = 'top left';
+            clonedNode.style.width = `${captureWidth}px`;
+            clonedNode.style.margin = '0';
+            clonedNode.style.padding = '';
+            clonedNode.style.boxSizing = 'border-box';
+            clonedNode.style.background = '#ffffff';
+
+            sandbox.appendChild(clonedNode);
+            document.body.appendChild(sandbox);
+
+            const images = Array.from(clonedNode.querySelectorAll('img'));
+            await Promise.all(
+                images.map((image) => {
+                    if (image.complete) return Promise.resolve();
+                    return new Promise<void>((resolve) => {
+                        image.onload = () => resolve();
+                        image.onerror = () => resolve();
+                    });
+                })
+            );
+
+            const canvas = await html2canvas(clonedNode, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                windowWidth: captureWidth,
+                width: captureWidth
+            });
+
+            document.body.removeChild(sandbox);
+
+            const imgData = canvas.toDataURL('image/jpeg', 0.95);
+            const imgWidth = 210;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            const pdf = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: [imgWidth, imgHeight],
+                compress: true
+            });
+
+            pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
+            return pdf.output('blob');
+        } catch (error) {
+            console.error('Error generating PDF blob from preview:', error);
+            return null;
+        }
+    }, []);
 
     const normalizePhoneForWhatsapp = (raw: string): string | null => {
         const digits = raw.replace(/\D/g, '');
@@ -70,7 +142,12 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
         if (onSendEmail) {
             setGeneratingPdf(true);
             try {
-                await onSendEmail();
+                const pdfBlob = await generateCurrentPreviewPdfBlob();
+                if (!pdfBlob) {
+                    throw new Error('No se pudo generar el PDF actual de la cotización.');
+                }
+                const pdfFile = new File([pdfBlob], `Cotizacion_Folio_${data.folio}.pdf`, { type: 'application/pdf' });
+                await onSendEmail(pdfFile);
             } finally {
                 setGeneratingPdf(false);
             }
@@ -101,7 +178,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
         setGeneratingPdf(true);
         try {
             let shared = false;
-            const pdfBlob = await generateQuotationPdfBlob(data);
+            const pdfBlob = await generateCurrentPreviewPdfBlob();
             if (!pdfBlob) return;
 
             const file = new File([pdfBlob], `Cotizacion_${data.folio}.pdf`, { type: 'application/pdf' });
@@ -136,7 +213,7 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
         }
         setGeneratingPdf(true);
         try {
-            const pdfBlob = await generateQuotationPdfBlob(data);
+            const pdfBlob = await generateCurrentPreviewPdfBlob();
             if (pdfBlob) {
                 const url = URL.createObjectURL(pdfBlob);
                 const link = document.createElement('a');
