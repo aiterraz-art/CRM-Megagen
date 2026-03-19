@@ -43,6 +43,51 @@ const Inventory = () => {
 
     const normalizeSku = (value: any) => String(value || '').trim().toUpperCase();
 
+    const parseImportedPrice = (value: any) => {
+        if (typeof value === 'number') {
+            return Number.isFinite(value) ? Math.max(0, value) : NaN;
+        }
+
+        const raw = String(value ?? '').trim();
+        if (!raw) return NaN;
+
+        const cleaned = raw
+            .replace(/\s+/g, '')
+            .replace(/[^\d,.-]/g, '');
+
+        if (!cleaned) return NaN;
+
+        if (/^-?\d+$/.test(cleaned)) {
+            return Math.max(0, Number(cleaned));
+        }
+
+        const lastDot = cleaned.lastIndexOf('.');
+        const lastComma = cleaned.lastIndexOf(',');
+        const lastSeparator = Math.max(lastDot, lastComma);
+
+        if (lastSeparator >= 0) {
+            const decimals = cleaned.length - lastSeparator - 1;
+
+            if (decimals === 0 || decimals === 3) {
+                const integerLike = Number(cleaned.replace(/[.,]/g, ''));
+                return Number.isFinite(integerLike) ? Math.max(0, integerLike) : NaN;
+            }
+
+            const normalized =
+                lastComma > lastDot
+                    ? cleaned.replace(/\./g, '').replace(',', '.')
+                    : cleaned.replace(/,/g, '');
+
+            const decimalLike = Number(normalized);
+            if (Number.isFinite(decimalLike)) {
+                return Math.max(0, decimalLike);
+            }
+        }
+
+        const digitsOnly = Number(cleaned.replace(/[^\d-]/g, ''));
+        return Number.isFinite(digitsOnly) ? Math.max(0, digitsOnly) : NaN;
+    };
+
     const getValueByAliases = (row: Record<string, any>, aliases: string[]) => {
         const normalizedAliases = aliases.map(normalizeHeader);
         const entries = Object.entries(row);
@@ -250,7 +295,7 @@ const Inventory = () => {
                     .map((row) => {
                         const sku = normalizeSku(getValueByExactAliases(row, expectedSkuHeaders));
                         const rawPrice = getValueByExactAliases(row, expectedPriceHeaders);
-                        const price = Number(rawPrice);
+                        const price = parseImportedPrice(rawPrice);
                         return {
                             sku,
                             price: Number.isFinite(price) ? Math.max(0, price) : NaN
