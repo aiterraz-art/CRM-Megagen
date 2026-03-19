@@ -116,6 +116,115 @@ export interface Database {
                     stock_qty?: number | null
                 }
             }
+            loan_kits: {
+                Row: {
+                    created_at: string
+                    created_by: string
+                    id: string
+                    kit_name: string
+                    kit_number: string
+                    notes: string | null
+                    status: string
+                    updated_at: string
+                }
+                Insert: {
+                    created_at?: string
+                    created_by: string
+                    id?: string
+                    kit_name: string
+                    kit_number: string
+                    notes?: string | null
+                    status?: string
+                    updated_at?: string
+                }
+                Update: {
+                    created_at?: string
+                    created_by?: string
+                    id?: string
+                    kit_name?: string
+                    kit_number?: string
+                    notes?: string | null
+                    status?: string
+                    updated_at?: string
+                }
+            }
+            kit_loan_requests: {
+                Row: {
+                    cancelled_at: string | null
+                    client_id: string
+                    client_name_snapshot: string
+                    delivered_at: string | null
+                    delivered_by: string | null
+                    delivery_address_snapshot: string
+                    delivery_lat_snapshot: number
+                    delivery_lng_snapshot: number
+                    delivery_note: string | null
+                    due_at: string | null
+                    id: string
+                    kit_id: string
+                    kit_name_snapshot: string
+                    kit_number_snapshot: string
+                    request_note: string | null
+                    requested_at: string
+                    requested_days: number
+                    requester_id: string
+                    return_note: string | null
+                    returned_at: string | null
+                    returned_by: string | null
+                    status: string
+                    updated_at: string
+                }
+                Insert: {
+                    cancelled_at?: string | null
+                    client_id: string
+                    client_name_snapshot: string
+                    delivered_at?: string | null
+                    delivered_by?: string | null
+                    delivery_address_snapshot: string
+                    delivery_lat_snapshot: number
+                    delivery_lng_snapshot: number
+                    delivery_note?: string | null
+                    due_at?: string | null
+                    id?: string
+                    kit_id: string
+                    kit_name_snapshot: string
+                    kit_number_snapshot: string
+                    request_note?: string | null
+                    requested_at?: string
+                    requested_days: number
+                    requester_id: string
+                    return_note?: string | null
+                    returned_at?: string | null
+                    returned_by?: string | null
+                    status?: string
+                    updated_at?: string
+                }
+                Update: {
+                    cancelled_at?: string | null
+                    client_id?: string
+                    client_name_snapshot?: string
+                    delivered_at?: string | null
+                    delivered_by?: string | null
+                    delivery_address_snapshot?: string
+                    delivery_lat_snapshot?: number
+                    delivery_lng_snapshot?: number
+                    delivery_note?: string | null
+                    due_at?: string | null
+                    id?: string
+                    kit_id?: string
+                    kit_name_snapshot?: string
+                    kit_number_snapshot?: string
+                    request_note?: string | null
+                    requested_at?: string
+                    requested_days?: number
+                    requester_id?: string
+                    return_note?: string | null
+                    returned_at?: string | null
+                    returned_by?: string | null
+                    status?: string
+                    updated_at?: string
+                }
+            }
             inbound_shipments: {
                 Row: {
                     created_at: string

@@ -18,6 +18,7 @@ type MenuContext = {
     effectiveRole: string | null | undefined;
     isSupervisor: boolean;
     canViewProcurement: boolean;
+    canViewKitLoans: boolean;
 };
 
 type MenuEntry = {
@@ -183,6 +184,14 @@ const allMenuEntries: MenuEntry[] = [
         visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'facturador',
     },
     {
+        id: 'kit-loans',
+        label: 'Kits',
+        path: '/kit-loans',
+        icon: <Package size={20} />,
+        group: 'logistics',
+        visibleWhen: ({ effectiveRole, canViewKitLoans }) => effectiveRole !== 'driver' && canViewKitLoans,
+    },
+    {
         id: 'delivery',
         label: 'Ruta',
         path: '/delivery',
@@ -239,14 +248,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [openGroupId, setOpenGroupId] = useState<MenuGroupId | null>(null);
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
+    const canViewKitLoans = hasPermission('VIEW_KIT_LOANS');
 
     const menuContext = useMemo(
         () => ({
             effectiveRole,
             isSupervisor,
             canViewProcurement,
+            canViewKitLoans,
         }),
-        [effectiveRole, isSupervisor, canViewProcurement]
+        [effectiveRole, isSupervisor, canViewProcurement, canViewKitLoans]
     );
 
     const visibleMenuEntries = useMemo(
