@@ -462,6 +462,159 @@ export interface Database {
                     created_at?: string
                 }
             }
+            dispatch_import_batches: {
+                Row: {
+                    id: string
+                    file_name: string
+                    uploaded_by: string
+                    row_count: number
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    file_name: string
+                    uploaded_by: string
+                    row_count: number
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    file_name?: string
+                    uploaded_by?: string
+                    row_count?: number
+                    created_at?: string
+                }
+            }
+            dispatch_queue_items: {
+                Row: {
+                    id: string
+                    batch_id: string
+                    order_id: string
+                    client_id: string
+                    seller_id: string | null
+                    route_id: string | null
+                    assigned_driver_id: string | null
+                    invoice_number: string
+                    client_rut_input: string
+                    client_rut_normalized: string
+                    order_folio_input: string
+                    client_name_snapshot: string
+                    client_address_snapshot: string | null
+                    client_comuna_snapshot: string | null
+                    client_office_snapshot: string | null
+                    client_phone_snapshot: string | null
+                    client_lat_snapshot: number | null
+                    client_lng_snapshot: number | null
+                    seller_name_snapshot: string | null
+                    seller_email_snapshot: string | null
+                    order_total_snapshot: number | null
+                    status: string
+                    imported_at: string
+                    routed_at: string | null
+                    delivered_at: string | null
+                    cancelled_at: string | null
+                    notes: string | null
+                }
+                Insert: {
+                    id?: string
+                    batch_id: string
+                    order_id: string
+                    client_id: string
+                    seller_id?: string | null
+                    route_id?: string | null
+                    assigned_driver_id?: string | null
+                    invoice_number: string
+                    client_rut_input: string
+                    client_rut_normalized: string
+                    order_folio_input: string
+                    client_name_snapshot: string
+                    client_address_snapshot?: string | null
+                    client_comuna_snapshot?: string | null
+                    client_office_snapshot?: string | null
+                    client_phone_snapshot?: string | null
+                    client_lat_snapshot?: number | null
+                    client_lng_snapshot?: number | null
+                    seller_name_snapshot?: string | null
+                    seller_email_snapshot?: string | null
+                    order_total_snapshot?: number | null
+                    status?: string
+                    imported_at?: string
+                    routed_at?: string | null
+                    delivered_at?: string | null
+                    cancelled_at?: string | null
+                    notes?: string | null
+                }
+                Update: {
+                    id?: string
+                    batch_id?: string
+                    order_id?: string
+                    client_id?: string
+                    seller_id?: string | null
+                    route_id?: string | null
+                    assigned_driver_id?: string | null
+                    invoice_number?: string
+                    client_rut_input?: string
+                    client_rut_normalized?: string
+                    order_folio_input?: string
+                    client_name_snapshot?: string
+                    client_address_snapshot?: string | null
+                    client_comuna_snapshot?: string | null
+                    client_office_snapshot?: string | null
+                    client_phone_snapshot?: string | null
+                    client_lat_snapshot?: number | null
+                    client_lng_snapshot?: number | null
+                    seller_name_snapshot?: string | null
+                    seller_email_snapshot?: string | null
+                    order_total_snapshot?: number | null
+                    status?: string
+                    imported_at?: string
+                    routed_at?: string | null
+                    delivered_at?: string | null
+                    cancelled_at?: string | null
+                    notes?: string | null
+                }
+            }
+            route_items: {
+                Row: {
+                    id: string
+                    route_id: string | null
+                    order_id: string | null
+                    sequence_order: number
+                    status: string
+                    notes: string | null
+                    proof_photo_url: string | null
+                    delivered_at: string | null
+                    delivered_lat: number | null
+                    delivered_lng: number | null
+                    created_at: string
+                }
+                Insert: {
+                    id?: string
+                    route_id?: string | null
+                    order_id?: string | null
+                    sequence_order?: number
+                    status?: string
+                    notes?: string | null
+                    proof_photo_url?: string | null
+                    delivered_at?: string | null
+                    delivered_lat?: number | null
+                    delivered_lng?: number | null
+                    created_at?: string
+                }
+                Update: {
+                    id?: string
+                    route_id?: string | null
+                    order_id?: string | null
+                    sequence_order?: number
+                    status?: string
+                    notes?: string | null
+                    proof_photo_url?: string | null
+                    delivered_at?: string | null
+                    delivered_lat?: number | null
+                    delivered_lng?: number | null
+                    created_at?: string
+                }
+            }
             orders: {
                 Row: {
                     client_id: string | null
