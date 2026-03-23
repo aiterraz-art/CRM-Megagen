@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, RefreshCw, Search, ShoppingCart, Send } from 'lucide-react';
+import { Eye, FileText, RefreshCw, Search, ShoppingCart, Send } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
+import PaymentProofPreviewModal from '../components/modals/PaymentProofPreviewModal';
 
 type OrderStatusFilter = 'all' | 'completed' | 'cancelled';
 type DeliveryStatusFilter = 'all' | 'pending' | 'out_for_delivery' | 'delivered';
@@ -24,6 +25,9 @@ type EnrichedOrder = {
     user_id: string | null;
     payment_email_status: string | null;
     payment_email_error: string | null;
+    payment_proof_path: string | null;
+    payment_proof_name: string | null;
+    payment_proof_mime_type: string | null;
 };
 
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString('es-CL')}`;
@@ -67,6 +71,11 @@ const Orders = () => {
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<DeliveryStatusFilter>('all');
     const [viewMode, setViewMode] = useState<ViewMode>('all');
     const [resendingOrderId, setResendingOrderId] = useState<string | null>(null);
+    const [selectedProofOrder, setSelectedProofOrder] = useState<EnrichedOrder | null>(null);
+    const [proofPreviewState, setProofPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+    const [proofFile, setProofFile] = useState<File | null>(null);
+    const [proofBlobUrl, setProofBlobUrl] = useState<string | null>(null);
+    const [proofError, setProofError] = useState<string | null>(null);
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewAll = useMemo(
@@ -80,7 +89,7 @@ const Orders = () => {
         try {
             let query = supabase
                 .from('orders')
-                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, total_amount, created_at, payment_email_status, payment_email_error')
+                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, total_amount, created_at, payment_email_status, payment_email_error, payment_proof_path, payment_proof_name, payment_proof_mime_type')
                 .not('quotation_id', 'is', null)
                 .order('created_at', { ascending: false });
 
@@ -142,7 +151,10 @@ const Orders = () => {
                     created_at: order.created_at ?? null,
                     user_id: order.user_id ?? null,
                     payment_email_status: order.payment_email_status ?? null,
-                    payment_email_error: order.payment_email_error ?? null
+                    payment_email_error: order.payment_email_error ?? null,
+                    payment_proof_path: order.payment_proof_path ?? null,
+                    payment_proof_name: order.payment_proof_name ?? null,
+                    payment_proof_mime_type: order.payment_proof_mime_type ?? null
                 };
             });
 
@@ -162,6 +174,89 @@ const Orders = () => {
             fetchOrders();
         }
     }, [fetchOrders, profile?.id]);
+
+    const cleanupProofPreview = useCallback(() => {
+        if (proofBlobUrl) {
+            URL.revokeObjectURL(proofBlobUrl);
+        }
+        setProofBlobUrl(null);
+        setProofFile(null);
+        setProofError(null);
+        setProofPreviewState('idle');
+    }, [proofBlobUrl]);
+
+    useEffect(() => {
+        return () => {
+            if (proofBlobUrl) {
+                URL.revokeObjectURL(proofBlobUrl);
+            }
+        };
+    }, [proofBlobUrl]);
+
+    const closeProofPreview = useCallback(() => {
+        cleanupProofPreview();
+        setSelectedProofOrder(null);
+    }, [cleanupProofPreview]);
+
+    const downloadProofFile = useCallback((file: File | null) => {
+        if (!file) return;
+        const url = URL.createObjectURL(file);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = file.name || 'comprobante_pago';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }, []);
+
+    const loadProofForOrder = useCallback(async (order: EnrichedOrder) => {
+        if (!order.payment_proof_path) {
+            setProofPreviewState('error');
+            setProofError('Este pedido no tiene un comprobante de pago guardado.');
+            return;
+        }
+
+        setProofPreviewState('loading');
+        setProofError(null);
+
+        try {
+            const { data, error } = await supabase.storage
+                .from(PAYMENT_PROOFS_BUCKET)
+                .download(order.payment_proof_path);
+
+            if (error) throw error;
+
+            if (proofBlobUrl) {
+                URL.revokeObjectURL(proofBlobUrl);
+            }
+
+            const file = new File(
+                [data],
+                order.payment_proof_name || 'comprobante_pago',
+                { type: order.payment_proof_mime_type || data.type || 'application/octet-stream' }
+            );
+            const blobUrl = URL.createObjectURL(file);
+            setProofFile(file);
+            setProofBlobUrl(blobUrl);
+            setProofPreviewState('ready');
+        } catch (error: any) {
+            console.error('Error loading payment proof:', error);
+            setProofFile(null);
+            setProofBlobUrl(null);
+            setProofPreviewState('error');
+            setProofError(error?.message || 'No se pudo descargar el comprobante.');
+        }
+    }, [proofBlobUrl]);
+
+    const openPaymentProofPreview = useCallback(async (order: EnrichedOrder) => {
+        setSelectedProofOrder(order);
+        setProofFile(null);
+        setProofBlobUrl(null);
+        setProofError(null);
+        setProofPreviewState('idle');
+        await loadProofForOrder(order);
+    }, [loadProofForOrder]);
 
     const updateOrderEmailStatus = useCallback(async (orderId: string, status: 'sent' | 'failed', errorMessage?: string | null) => {
         const payload: any = {
@@ -488,24 +583,36 @@ const Orders = () => {
                                         <td className="px-4 py-3 text-right font-black text-gray-900">{formatMoney(order.total_amount)}</td>
                                         <td className="px-4 py-3 font-medium text-gray-500">{formatDate(order.created_at)}</td>
                                         <td className="px-4 py-3">
-                                            {(order.user_id === profile?.id && (order.payment_email_status === 'pending' || order.payment_email_status === 'failed')) ? (
-                                                <button
-                                                    onClick={() => handleResendOrderEmail(order)}
-                                                    disabled={resendingOrderId === order.id}
-                                                    className="inline-flex items-center px-3 py-2 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-wider hover:bg-indigo-700 transition-all disabled:opacity-50"
-                                                >
-                                                    {resendingOrderId === order.id ? (
-                                                        <div className="w-4 h-4 border-2 border-white border-t-transparent animate-spin rounded-full" />
-                                                    ) : (
-                                                        <>
-                                                            <Send size={14} className="mr-2" />
-                                                            Reenviar
-                                                        </>
-                                                    )}
-                                                </button>
-                                            ) : (
-                                                <span className="text-xs text-gray-400 font-medium">-</span>
-                                            )}
+                                            <div className="flex flex-col items-start gap-2">
+                                                {order.payment_proof_path ? (
+                                                    <button
+                                                        onClick={() => openPaymentProofPreview(order)}
+                                                        className="inline-flex items-center px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-[11px] font-black uppercase tracking-wider hover:bg-gray-50 transition-all"
+                                                    >
+                                                        <Eye size={14} className="mr-2" />
+                                                        Ver comprobante
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400 font-medium">Sin comprobante</span>
+                                                )}
+
+                                                {(order.user_id === profile?.id && (order.payment_email_status === 'pending' || order.payment_email_status === 'failed')) ? (
+                                                    <button
+                                                        onClick={() => handleResendOrderEmail(order)}
+                                                        disabled={resendingOrderId === order.id}
+                                                        className="inline-flex items-center px-3 py-2 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-wider hover:bg-indigo-700 transition-all disabled:opacity-50"
+                                                    >
+                                                        {resendingOrderId === order.id ? (
+                                                            <div className="w-4 h-4 border-2 border-white border-t-transparent animate-spin rounded-full" />
+                                                        ) : (
+                                                            <>
+                                                                <Send size={14} className="mr-2" />
+                                                                Reenviar
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                ) : null}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -514,6 +621,25 @@ const Orders = () => {
                     </div>
                 )}
             </div>
+
+            <PaymentProofPreviewModal
+                isOpen={Boolean(selectedProofOrder)}
+                orderFolio={selectedProofOrder?.folio ?? null}
+                clientName={selectedProofOrder?.client_name || 'Cliente'}
+                fileName={proofFile?.name || selectedProofOrder?.payment_proof_name || null}
+                blobUrl={proofBlobUrl}
+                fileType={proofFile?.type || selectedProofOrder?.payment_proof_mime_type || null}
+                loading={proofPreviewState === 'loading'}
+                error={proofPreviewState === 'error' ? proofError : null}
+                canDownload={Boolean(proofFile)}
+                onClose={closeProofPreview}
+                onRetry={() => {
+                    if (selectedProofOrder) {
+                        void loadProofForOrder(selectedProofOrder);
+                    }
+                }}
+                onDownload={() => downloadProofFile(proofFile)}
+            />
         </div>
     );
 };
