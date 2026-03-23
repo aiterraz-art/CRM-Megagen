@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone, Mail, Upload } from 'lucide-react';
+import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone, Mail, Upload, Share2 } from 'lucide-react';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
@@ -1337,12 +1337,12 @@ const Quotations: React.FC = () => {
                                             hasPendingDiscountBlock
                                                 ? 'Cotización bloqueada por aprobación de descuento'
                                                 : hasEmailTarget
-                                                    ? 'Enviar por Correo'
+                                                    ? 'Compartir PDF con correo como respaldo'
                                                     : 'Cliente sin correo'
                                         }
                                     >
-                                        <Mail size={12} className="mr-1" />
-                                        Correo
+                                        <Share2 size={12} className="mr-1" />
+                                        Compartir
                                     </button>
 
                                     {q.status !== 'approved' && (

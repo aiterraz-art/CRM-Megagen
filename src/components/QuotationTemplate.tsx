@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Printer, Download, X, Share2, Loader2, MessageSquare, Mail } from 'lucide-react';
+import { Printer, Download, X, Share2, Loader2, MessageSquare } from 'lucide-react';
 import type { QuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import QuotationDocumentContent, { buildQuotationDocumentViewModel } from './QuotationDocumentContent';
@@ -308,16 +308,17 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                                     onClick={handleSendEmail}
                                     disabled={!canShareAndDownload || generatingPdf || !String(data.clientEmail || '').trim()}
                                     className="flex shrink-0 items-center rounded-lg bg-sky-600 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                    title={String(data.clientEmail || '').trim() ? 'Enviar por correo' : 'Cliente sin correo'}
+                                    title={String(data.clientEmail || '').trim() ? 'Compartir PDF con correo como respaldo' : 'Cliente sin correo'}
                                 >
-                                    <Mail size={16} className="mr-2" /> Correo
+                                    <Share2 size={16} className="mr-2" /> Compartir
                                 </button>
                                 <button
                                     onClick={handleShare}
                                     disabled={!canShareAndDownload || generatingPdf}
                                     className="flex shrink-0 items-center rounded-lg bg-green-500 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                    title="Abrir más opciones para compartir"
                                 >
-                                    <Share2 size={16} className="mr-2" /> Compartir
+                                    <Share2 size={16} className="mr-2" /> Más opciones
                                 </button>
                                 <button onClick={() => window.print()} className="flex shrink-0 items-center rounded-lg border bg-white px-4 py-2 text-sm font-bold transition-all hover:bg-gray-50">
                                     <Printer size={16} className="mr-2" /> Imprimir
@@ -421,16 +422,17 @@ const QuotationTemplate: React.FC<Props> = ({ data, onClose, canShareAndDownload
                             onClick={handleSendEmail}
                             disabled={!canShareAndDownload || generatingPdf || !String(data.clientEmail || '').trim()}
                             className="flex min-h-[42px] items-center justify-center rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white transition-all hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            title={String(data.clientEmail || '').trim() ? 'Enviar por correo' : 'Cliente sin correo'}
+                            title={String(data.clientEmail || '').trim() ? 'Compartir PDF con correo como respaldo' : 'Cliente sin correo'}
                         >
-                            <Mail size={16} className="mr-2" /> Correo
+                            <Share2 size={16} className="mr-2" /> Compartir
                         </button>
                         <button
                             onClick={handleShare}
                             disabled={!canShareAndDownload || generatingPdf}
                             className="flex min-h-[42px] items-center justify-center rounded-lg bg-green-500 px-3 py-2 text-xs font-bold text-white transition-all hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Abrir más opciones para compartir"
                         >
-                            <Share2 size={16} className="mr-2" /> Compartir
+                            <Share2 size={16} className="mr-2" /> Más opciones
                         </button>
                         <button
                             onClick={handleDownloadPDF}
