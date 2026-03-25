@@ -8,6 +8,7 @@ import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/
 import PaymentProofPreviewModal from '../components/modals/PaymentProofPreviewModal';
 import OrderNotificationHistoryModal from '../components/modals/OrderNotificationHistoryModal';
 import type { OrderNotificationLog } from '../utils/orderNotification';
+import OrderItemsPreviewModal, { type OrderItemsPreviewItem } from '../components/modals/OrderItemsPreviewModal';
 
 type OrderStatusFilter = 'all' | 'completed' | 'cancelled';
 type DeliveryStatusFilter = 'all' | 'pending' | 'out_for_delivery' | 'delivered';
@@ -31,6 +32,7 @@ type EnrichedOrder = {
     payment_proof_name: string | null;
     payment_proof_mime_type: string | null;
 };
+
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString('es-CL')}`;
 const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL') : '-';
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
@@ -79,6 +81,10 @@ const Orders = () => {
     const [proofError, setProofError] = useState<string | null>(null);
     const [notificationLogsByOrderId, setNotificationLogsByOrderId] = useState<Record<string, OrderNotificationLog[]>>({});
     const [selectedNotificationOrder, setSelectedNotificationOrder] = useState<EnrichedOrder | null>(null);
+    const [selectedItemsOrder, setSelectedItemsOrder] = useState<EnrichedOrder | null>(null);
+    const [orderItemsPreviewState, setOrderItemsPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+    const [orderItemsPreview, setOrderItemsPreview] = useState<OrderItemsPreviewItem[]>([]);
+    const [orderItemsPreviewError, setOrderItemsPreviewError] = useState<string | null>(null);
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewAll = useMemo(
@@ -275,6 +281,52 @@ const Orders = () => {
         setProofPreviewState('idle');
         await loadProofForOrder(order);
     }, [loadProofForOrder]);
+
+    const closeOrderItemsPreview = useCallback(() => {
+        setSelectedItemsOrder(null);
+        setOrderItemsPreviewState('idle');
+        setOrderItemsPreview([]);
+        setOrderItemsPreviewError(null);
+    }, []);
+
+    const loadOrderItemsPreview = useCallback(async (order: EnrichedOrder) => {
+        setOrderItemsPreviewState('loading');
+        setOrderItemsPreview([]);
+        setOrderItemsPreviewError(null);
+
+        try {
+            const { data, error } = await supabase
+                .from('order_items')
+                .select('id, quantity, unit_price, total_price, inventory(name, sku)')
+                .eq('order_id', order.id)
+                .order('id', { ascending: true });
+
+            if (error) throw error;
+
+            const items = (data || []).map((item: any) => ({
+                sku: item.inventory?.sku || '',
+                productName: item.inventory?.name || 'Producto',
+                quantity: Number(item.quantity || 0),
+                value: Number(item.total_price || (Number(item.unit_price || 0) * Number(item.quantity || 0)))
+            }));
+
+            setOrderItemsPreview(items);
+            setOrderItemsPreviewState('ready');
+        } catch (error: any) {
+            console.error('Error loading order items preview:', error);
+            setOrderItemsPreview([]);
+            setOrderItemsPreviewState('error');
+            setOrderItemsPreviewError(error?.message || 'No se pudo cargar el detalle del pedido.');
+        }
+    }, []);
+
+    const openOrderItemsPreview = useCallback(async (order: EnrichedOrder) => {
+        setSelectedItemsOrder(order);
+        setOrderItemsPreviewState('idle');
+        setOrderItemsPreview([]);
+        setOrderItemsPreviewError(null);
+        await loadOrderItemsPreview(order);
+    }, [loadOrderItemsPreview]);
 
     const handleResendOrderEmail = useCallback(async (order: EnrichedOrder) => {
         if (!profile?.id) {
@@ -542,9 +594,17 @@ const Orders = () => {
                                             const orderLogs = notificationLogsByOrderId[order.id] || [];
                                             const latestLog = orderLogs[0] || null;
                                             const canResend = Boolean(profile?.id) && (effectiveRole === 'admin' || effectiveRole === 'facturador' || order.user_id === profile?.id);
+                                            const canRetryEmail = canResend && ['failed', 'pending'].includes(String(order.payment_email_status || '').toLowerCase());
                                             return (
                                                 <>
-                                        <td className="px-4 py-3 font-black text-gray-900">#{order.folio ?? '-'}</td>
+                                        <td className="px-4 py-3">
+                                            <button
+                                                onClick={() => void openOrderItemsPreview(order)}
+                                                className="inline-flex items-center rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-black text-gray-900 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                                            >
+                                                #{order.folio ?? '-'}
+                                            </button>
+                                        </td>
                                         <td className="px-4 py-3 font-bold text-indigo-600">#{order.quotation_folio ?? '-'}</td>
                                         <td className="px-4 py-3 font-bold text-gray-800">{order.client_name}</td>
                                         <td className="px-4 py-3 font-medium text-gray-700">{order.seller_name}</td>
@@ -576,6 +636,22 @@ const Orders = () => {
                                                         </p>
                                                     </div>
                                                 )}
+                                                {canRetryEmail ? (
+                                                    <button
+                                                        onClick={() => handleResendOrderEmail(order)}
+                                                        disabled={resendingOrderId === order.id}
+                                                        className="mt-2 inline-flex items-center px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-700 text-[11px] font-black uppercase tracking-wider hover:bg-red-100 transition-all disabled:opacity-50"
+                                                    >
+                                                        {resendingOrderId === order.id ? (
+                                                            <div className="w-4 h-4 border-2 border-red-700 border-t-transparent animate-spin rounded-full" />
+                                                        ) : (
+                                                            <>
+                                                                <Send size={14} className="mr-2" />
+                                                                Reenviar correo
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                ) : null}
                                             </div>
                                         </td>
                                         <td className="px-4 py-3">
@@ -661,6 +737,21 @@ const Orders = () => {
                 clientName={selectedNotificationOrder?.client_name || 'Cliente'}
                 logs={selectedNotificationOrder ? (notificationLogsByOrderId[selectedNotificationOrder.id] || []) : []}
                 onClose={() => setSelectedNotificationOrder(null)}
+            />
+
+            <OrderItemsPreviewModal
+                isOpen={Boolean(selectedItemsOrder)}
+                orderFolio={selectedItemsOrder?.folio ?? null}
+                clientName={selectedItemsOrder?.client_name || 'Cliente'}
+                items={orderItemsPreview}
+                loading={orderItemsPreviewState === 'loading'}
+                error={orderItemsPreviewState === 'error' ? orderItemsPreviewError : null}
+                onClose={closeOrderItemsPreview}
+                onRetry={() => {
+                    if (selectedItemsOrder) {
+                        void loadOrderItemsPreview(selectedItemsOrder);
+                    }
+                }}
             />
         </div>
     );
