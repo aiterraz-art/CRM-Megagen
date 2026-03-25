@@ -150,6 +150,7 @@ const OrderItemsPreviewModal = ({
                                     const productText = item.productName || 'Producto';
                                     const quantityText = Number(item.quantity || 0).toLocaleString('es-CL');
                                     const valueText = formatMoney(item.value);
+                                    const valueCopyText = String(Math.round(Number(item.value || 0)));
 
                                     return (
                                         <div
@@ -194,7 +195,7 @@ const OrderItemsPreviewModal = ({
 
                                             <button
                                                 type="button"
-                                                onClick={() => void handleCopy(valueText, 'Valor')}
+                                                onClick={() => void handleCopy(valueCopyText, 'Valor')}
                                                 className="group rounded-xl border border-gray-200 px-3 py-3 text-left hover:border-indigo-300 hover:bg-indigo-50 transition-all"
                                             >
                                                 <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 md:hidden">Valor</p>

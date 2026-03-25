@@ -38,6 +38,7 @@ type EnrichedOrder = {
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString('es-CL')}`;
 const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL') : '-';
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
+const ORDER_ITEMS_PREVIEW_STORAGE_KEY = 'orders.activeItemsPreviewOrderId';
 
 const getPaymentEmailStatusStyles = (status: string | null | undefined) => {
     switch ((status || '').toLowerCase()) {
@@ -87,6 +88,10 @@ const Orders = () => {
     const [orderItemsPreviewState, setOrderItemsPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
     const [orderItemsPreview, setOrderItemsPreview] = useState<OrderItemsPreviewItem[]>([]);
     const [orderItemsPreviewError, setOrderItemsPreviewError] = useState<string | null>(null);
+    const [pendingItemsPreviewRestoreId, setPendingItemsPreviewRestoreId] = useState<string | null>(() => {
+        if (typeof window === 'undefined') return null;
+        return sessionStorage.getItem(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
+    });
     const [selectedOrderPdfOrder, setSelectedOrderPdfOrder] = useState<EnrichedOrder | null>(null);
     const [orderPdfPreviewState, setOrderPdfPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
     const [orderPdfFile, setOrderPdfFile] = useState<File | null>(null);
@@ -425,6 +430,31 @@ const Orders = () => {
         setOrderItemsPreviewError(null);
         await loadOrderItemsPreview(order);
     }, [loadOrderItemsPreview]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (selectedItemsOrder?.id) {
+            sessionStorage.setItem(ORDER_ITEMS_PREVIEW_STORAGE_KEY, selectedItemsOrder.id);
+        } else {
+            sessionStorage.removeItem(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
+        }
+    }, [selectedItemsOrder?.id]);
+
+    useEffect(() => {
+        if (loading || !pendingItemsPreviewRestoreId || selectedItemsOrder) return;
+
+        const restoredOrder = orders.find((order) => order.id === pendingItemsPreviewRestoreId);
+        if (!restoredOrder) {
+            if (typeof window !== 'undefined') {
+                sessionStorage.removeItem(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
+            }
+            setPendingItemsPreviewRestoreId(null);
+            return;
+        }
+
+        setPendingItemsPreviewRestoreId(null);
+        void openOrderItemsPreview(restoredOrder);
+    }, [loading, openOrderItemsPreview, orders, pendingItemsPreviewRestoreId, selectedItemsOrder]);
 
     const loadOrderPdfPreview = useCallback(async (order: EnrichedOrder) => {
         setOrderPdfPreviewState('loading');

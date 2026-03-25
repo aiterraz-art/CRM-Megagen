@@ -16,6 +16,14 @@ import { generateQuotationPdfFile } from '../utils/quotationPdf';
 
 const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
 
+type SellerOption = {
+    id: string;
+    full_name: string | null;
+    email: string | null;
+    role: string | null;
+    status: string | null;
+};
+
 type QuoteFilter = 'All' | 'Draft' | 'Sent' | 'Approved';
 const FILTER_OPTIONS: Array<{ label: string; value: QuoteFilter }> = [
     { label: 'Todos', value: 'All' },
@@ -86,6 +94,8 @@ const Quotations: React.FC = () => {
     const [quotationPendingOrder, setQuotationPendingOrder] = useState<any | null>(null);
     const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
     const [paymentProofError, setPaymentProofError] = useState<string | null>(null);
+    const [availableSellers, setAvailableSellers] = useState<SellerOption[]>([]);
+    const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
 
     // Form State
     const [formItems, setFormItems] = useState<any[]>([{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
@@ -365,6 +375,28 @@ const Quotations: React.FC = () => {
         if (data) setProducts(data);
     };
 
+    const fetchAvailableSellers = useCallback(async () => {
+        if (effectiveRole !== 'facturador') {
+            setAvailableSellers([]);
+            return;
+        }
+
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, role, status')
+            .eq('status', 'active')
+            .in('role', ['seller', 'jefe', 'admin'])
+            .order('full_name');
+
+        if (error) {
+            console.error('Error fetching sellers for quotation assignment:', error);
+            setAvailableSellers([]);
+            return;
+        }
+
+        setAvailableSellers((data || []) as SellerOption[]);
+    }, [effectiveRole]);
+
     const fetchClientsForModal = useCallback(async () => {
         let query = supabase.from('clients').select('*').order('name');
         if (isSellerRole && profile?.id) query = query.eq('created_by', profile.id);
@@ -377,7 +409,8 @@ const Quotations: React.FC = () => {
         fetchQuotations();
         fetchClientsForModal();
         fetchProducts();
-    }, [fetchQuotations, fetchClientsForModal, permissions]);
+        void fetchAvailableSellers();
+    }, [fetchAvailableSellers, fetchQuotations, fetchClientsForModal, permissions]);
 
     // Persist Draft Logic
     useEffect(() => {
@@ -394,6 +427,7 @@ const Quotations: React.FC = () => {
                     setPaymentTerms(draft.paymentTerms);
                     setDiscountApprovalRequested(Boolean(draft.discountApprovalRequested));
                     setApprovalReason(String(draft.approvalReason || ''));
+                    setSelectedSellerId(draft.selectedSellerId || null);
                 }
             } catch (e) {
                 console.error("Failed to load draft", e);
@@ -411,14 +445,15 @@ const Quotations: React.FC = () => {
                 comments: formComments,
                 paymentTerms: paymentTerms,
                 discountApprovalRequested,
-                approvalReason
+                approvalReason,
+                selectedSellerId
             };
             localStorage.setItem('quotation_draft', JSON.stringify(draft));
         } else if (!isItemModalOpen && !editingQuotation) {
             // Clear draft if closed and not editing
             localStorage.removeItem('quotation_draft');
         }
-    }, [isItemModalOpen, selectedClient, formItems, formComments, paymentTerms, editingQuotation, discountApprovalRequested, approvalReason]);
+    }, [isItemModalOpen, selectedClient, formItems, formComments, paymentTerms, editingQuotation, discountApprovalRequested, approvalReason, selectedSellerId]);
 
     useEffect(() => {
         if (!selectedClient?.id || availableClients.length === 0) return;
@@ -457,6 +492,7 @@ const Quotations: React.FC = () => {
         setDiscountApprovalRequested(false);
         setApprovalReason('');
         setApprovalReasonError(null);
+        setSelectedSellerId((prev) => effectiveRole === 'facturador' ? prev : (profile?.id || null));
     };
 
     const handleEditQuotation = (q: any) => {
@@ -483,6 +519,7 @@ const Quotations: React.FC = () => {
         setDiscountApprovalRequested(q.discount_approval?.status === 'pending');
         setApprovalReason(getApprovalReason(q.discount_approval));
         setApprovalReasonError(null);
+        setSelectedSellerId(q.seller_id || null);
         setIsItemModalOpen(true);
     };
 
@@ -675,6 +712,11 @@ const Quotations: React.FC = () => {
 
     const handleCreateQuotation = async () => {
         if (!profile || !selectedClient) return;
+        const sellerIdForQuotation = effectiveRole === 'facturador' ? selectedSellerId : profile.id;
+        if (!sellerIdForQuotation) {
+            setCreateError('Debes seleccionar un vendedor para la cotización.');
+            return;
+        }
         const normalizedItems = formItems
             .map(item => ({
                 ...item,
@@ -722,12 +764,13 @@ const Quotations: React.FC = () => {
         try {
             let latitude: number | null = null;
             let longitude: number | null = null;
+            const shouldCaptureSellerLocation = !(effectiveRole === 'facturador' && sellerIdForQuotation !== profile.id);
 
-            if (manualLocation) {
+            if (manualLocation && shouldCaptureSellerLocation) {
                 latitude = manualLocation.lat;
                 longitude = manualLocation.lng;
                 console.log("Using Manual Location:", manualLocation);
-            } else {
+            } else if (shouldCaptureSellerLocation) {
                 try {
                     const position = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 600 });
                     latitude = position.coords.latitude;
@@ -759,7 +802,8 @@ const Quotations: React.FC = () => {
             const tax = Math.round(netAmount * 0.19);
             const grandTotal = netAmount + tax;
             const requestedItems = buildDiscountApprovalRequestedItems(calculatedItems, SELLER_MAX_DISCOUNT_PCT);
-            const sellerName = profile.full_name || profile.email?.split('@')[0]?.toUpperCase() || 'Vendedor';
+            const sellerName = selectedSellerProfile?.full_name || selectedSellerProfile?.email?.split('@')[0]?.toUpperCase() || 'Vendedor';
+            const sellerEmail = selectedSellerProfile?.email || null;
             const trimmedApprovalReason = approvalReason.trim();
             const shouldStartAsSent =
                 !shouldCreateApprovalRequest
@@ -772,6 +816,7 @@ const Quotations: React.FC = () => {
                 const { error: updateError } = await supabase
                     .from('quotations')
                     .update({
+                        seller_id: sellerIdForQuotation,
                         items: calculatedItems,
                         total_amount: grandTotal,
                         payment_terms: paymentTerms,
@@ -797,7 +842,7 @@ const Quotations: React.FC = () => {
                                 total_amount: grandTotal,
                                 request_reason: trimmedApprovalReason,
                                 seller_name: sellerName,
-                                seller_email: profile.email || null,
+                                seller_email: sellerEmail,
                                 requested_items: requestedItems
                             },
                             status: 'pending'
@@ -816,7 +861,7 @@ const Quotations: React.FC = () => {
                     .insert({
                         id: crypto.randomUUID(),
                         client_id: selectedClient.id,
-                        seller_id: profile.id,
+                        seller_id: sellerIdForQuotation,
                         items: calculatedItems,
                         total_amount: grandTotal,
                         payment_terms: paymentTerms,
@@ -850,7 +895,7 @@ const Quotations: React.FC = () => {
                                 total_amount: grandTotal,
                                 request_reason: trimmedApprovalReason,
                                 seller_name: sellerName,
-                                seller_email: profile.email || null,
+                                seller_email: sellerEmail,
                                 requested_items: requestedItems
                             },
                             status: 'pending'
@@ -866,7 +911,7 @@ const Quotations: React.FC = () => {
                 let locationNotice = '';
                 if (latitude !== null && longitude !== null && insertData) {
                     const locationResult = await queueQuotationLocation({
-                        seller_id: profile.id,
+                        seller_id: sellerIdForQuotation,
                         quotation_id: insertData.id,
                         lat: latitude,
                         lng: longitude
@@ -895,6 +940,7 @@ const Quotations: React.FC = () => {
             setApprovalReason('');
             setApprovalReasonError(null);
             setIsApprovalReasonModalOpen(false);
+            setSelectedSellerId((prev) => effectiveRole === 'facturador' ? prev : profile.id);
             localStorage.removeItem('quotation_draft'); // Clear draft
             fetchQuotations();
 
@@ -1099,6 +1145,19 @@ const Quotations: React.FC = () => {
     const formItemCount = useMemo(() => {
         return formItems.reduce((count, item) => count + (Number(item.qty || 0) > 0 ? Number(item.qty || 0) : 0), 0);
     }, [formItems]);
+    const selectedSellerProfile = useMemo(() => {
+        if (!selectedSellerId) return null;
+        if (profile?.id === selectedSellerId) {
+            return {
+                id: profile.id,
+                full_name: profile.full_name || null,
+                email: profile.email || null,
+                role: effectiveRole,
+                status: profile.status || null
+            } as SellerOption;
+        }
+        return availableSellers.find((seller) => seller.id === selectedSellerId) || null;
+    }, [availableSellers, effectiveRole, profile?.email, profile?.full_name, profile?.id, profile?.status, selectedSellerId]);
 
     return (
         <div className="space-y-8 max-w-6xl mx-auto">
@@ -1699,6 +1758,26 @@ const Quotations: React.FC = () => {
                                         <div className="mt-1 font-semibold">
                                             Puedes editar precio neto manual. Si supera {SELLER_MAX_DISCOUNT_PCT}% de descuento, se solicitará autorización.
                                         </div>
+                                    </div>
+                                )}
+                                {effectiveRole === 'facturador' && (
+                                    <div className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+                                        <label className="text-[10px] uppercase font-black tracking-widest text-indigo-500">Vendedor asignado</label>
+                                        <select
+                                            value={selectedSellerId || ''}
+                                            onChange={(e) => setSelectedSellerId(e.target.value || null)}
+                                            className="mt-3 w-full rounded-2xl border border-indigo-200 bg-white px-4 py-3 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="">Selecciona un vendedor</option>
+                                            {availableSellers.map((seller) => (
+                                                <option key={seller.id} value={seller.id}>
+                                                    {(seller.full_name || seller.email || 'Usuario').toUpperCase()}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="mt-2 text-xs font-medium text-indigo-700">
+                                            La cotización quedará asignada al vendedor seleccionado y seguirá su flujo normal dentro del CRM.
+                                        </p>
                                     </div>
                                 )}
                                 <h4 className="font-bold text-gray-700 mb-4 flex items-center"><ShoppingBag size={18} className="mr-2 text-indigo-500" /> Ítems</h4>
