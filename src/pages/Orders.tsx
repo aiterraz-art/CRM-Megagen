@@ -352,7 +352,7 @@ const Orders = () => {
             const [clientRes, sellerRes, itemsRes] = await Promise.all([
                 supabase
                     .from('clients')
-                    .select('id, name, rut, address, office, phone, email, giro, credit_days')
+                    .select('id, name, rut, address, office, phone, email, giro, credit_days, comuna, zone, purchase_contact')
                     .eq('id', orderRow.client_id)
                     .single(),
                 supabase
@@ -398,6 +398,9 @@ const Orders = () => {
                     clientPhone: client.phone || '',
                     clientEmail: client.email || '',
                     clientGiro: client.giro || '',
+                    clientCity: client.zone || 'Santiago',
+                    clientComuna: client.comuna || '',
+                    clientContact: client.purchase_contact || '',
                     paymentTerms: formatPaymentTermsFromCreditDays(creditDays),
                     sellerName: seller.full_name || seller.email || 'Vendedor',
                     sellerEmail: seller.email || '',
@@ -409,7 +412,8 @@ const Orders = () => {
                         unitPrice: Number(item.unit_price || 0),
                         total: Number(item.total_price || 0)
                     })),
-                    totalAmount: Number(orderRow.total_amount || 0)
+                    totalAmount: Number(orderRow.total_amount || 0),
+                    comments: order.quotation_folio ? `Pedido generado desde cotización #${order.quotation_folio}.` : 'Pedido generado desde CRM.'
                 }
             });
 

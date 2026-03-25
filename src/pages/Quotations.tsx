@@ -607,6 +607,9 @@ const Quotations: React.FC = () => {
             clientPhone: client?.phone || '',
             clientEmail: client?.email || '',
             clientGiro: client?.giro || '',
+            clientCity: client?.zone || 'Santiago',
+            clientComuna: client?.comuna || '',
+            clientContact: quotation?.client_contact || client?.purchase_contact || '',
             paymentTerms: formatPaymentTermsFromCreditDays(creditDays),
             sellerName: quotation?.seller_name || 'Vendedor',
             sellerEmail: quotation?.seller_email || '',
@@ -618,7 +621,8 @@ const Quotations: React.FC = () => {
                 unitPrice: Number(item.net_price ?? item.netPrice ?? item.price ?? 0),
                 total: Number(item.total ?? (Number(item.qty || 0) * Number(item.net_price ?? item.netPrice ?? item.price ?? 0) || 0))
             })),
-            totalAmount: Number(quotation?.total_amount || 0)
+            totalAmount: Number(quotation?.total_amount || 0),
+            comments: quotation?.comments || (quotation?.folio ? `Pedido generado desde cotización #${quotation.folio}.` : 'Pedido generado desde CRM.')
         };
     }, [getQuotationCreditDays]);
 

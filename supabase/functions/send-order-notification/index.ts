@@ -182,8 +182,7 @@ serve(async (req) => {
       .map((row) => normalizeEmail(row.email))
       .filter(Boolean)));
 
-    const filteredRecipients = recipientEmails.filter((email) => email !== ORDER_NOTIFICATION_SENDER_EMAIL);
-    toRecipients = filteredRecipients.length > 0 ? filteredRecipients : recipientEmails;
+    toRecipients = recipientEmails;
     if (toRecipients.length === 0) {
       throw new Error("No hay usuarios facturadores activos configurados");
     }
