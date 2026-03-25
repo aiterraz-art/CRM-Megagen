@@ -4,6 +4,7 @@ import { useUser } from '../contexts/UserContext';
 import { Users, TrendingUp, Calendar, MapPin, ChevronRight, LayoutDashboard, Clock, CheckCircle2, AlertCircle, Plus, X, Download } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { grossToNet } from '../utils/amounts';
 
 const TeamStats = () => {
     const { hasPermission, loading: userLoading, profile: currentUser, effectiveRole } = useUser();
@@ -201,7 +202,7 @@ const TeamStats = () => {
             if (!repId) return;
 
             if (order.status !== 'cancelled' && order.status !== 'rejected') {
-                monthSalesByRep.set(repId, (monthSalesByRep.get(repId) || 0) + (order.total_amount || 0));
+                monthSalesByRep.set(repId, (monthSalesByRep.get(repId) || 0) + grossToNet(order.total_amount));
             }
 
             if (order.status === 'pending') {
@@ -370,7 +371,7 @@ const TeamStats = () => {
                 const row = summaryBySeller.get(o.user_id);
                 if (!row) return;
                 row.ventas += 1;
-                row.monto_ventas += Number(o.total_amount || 0);
+                row.monto_ventas += grossToNet(o.total_amount);
                 row.descuentos_total += Number(o.total_discount || 0);
             });
             quotations.forEach((q: any) => {
@@ -424,7 +425,7 @@ const TeamStats = () => {
                 fecha: o.created_at,
                 estado: o.status,
                 estado_despacho: o.delivery_status,
-                total: Number(o.total_amount || 0),
+                total_neto: grossToNet(o.total_amount),
                 descuento: Number(o.total_discount || 0)
             }));
 
@@ -587,7 +588,7 @@ const TeamStats = () => {
                 const row = byClient.get(o.client_id);
                 if (!row) return;
                 row.total_ventas += 1;
-                row.monto_ventas += Number(o.total_amount || 0);
+                row.monto_ventas += grossToNet(o.total_amount);
                 row.ultima_venta = maxDate(row.ultima_venta, o.created_at);
                 row.ultimo_contacto = maxDate(row.ultimo_contacto, o.created_at);
             });
@@ -940,9 +941,9 @@ const TeamStats = () => {
                 </div>
                 {hasPermission('VIEW_METAS') && (
                     <div className="premium-card p-6 border-l-4 border-l-green-500">
-                        <p className="text-[10px] font-black text-green-500 uppercase tracking-widest mb-1">Sales Pipeline</p>
+                        <p className="text-[10px] font-black text-green-500 uppercase tracking-widest mb-1">Ventas Netas Equipo</p>
                         <p className="text-3xl font-black text-gray-900">${stats.teamValue.toLocaleString()}</p>
-                        <p className="text-xs text-gray-400 font-bold mt-2">MTD Team Revenue</p>
+                        <p className="text-xs text-gray-400 font-bold mt-2">Monto neto acumulado del mes</p>
                     </div>
                 )}
             </div>
@@ -1014,7 +1015,7 @@ const TeamStats = () => {
                                             <p className="text-sm font-black text-gray-900">{pendingTasks}</p>
                                         </div>
                                         <div className="bg-gray-50 p-3 rounded-2xl text-center">
-                                            <p className="text-[9px] font-bold text-gray-400 uppercase">Sales</p>
+                                            <p className="text-[9px] font-bold text-gray-400 uppercase">Ventas Netas</p>
                                             <p className="text-sm font-black text-dental-600">
                                                 {hasPermission('VIEW_METAS') ? (
                                                     `$${(rep.monthSales || 0).toLocaleString()}`
@@ -1154,7 +1155,7 @@ const TeamStats = () => {
                         ) : (
                             <div className="space-y-4">
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Meta de Venta ($)</label>
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Meta de Venta Neta ($)</label>
                                     <input
                                         type="number"
                                         placeholder="0"

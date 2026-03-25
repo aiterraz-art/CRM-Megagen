@@ -13,6 +13,7 @@ import GoalProgressChart from '../components/charts/GoalProgressChart';
 import ActivityChart from '../components/charts/ActivityChart';
 import ZoneDistributionChart from '../components/charts/ZoneDistributionChart';
 import KPICard from '../components/KPICard';
+import { grossToNet } from '../utils/amounts';
 
 const gpsComunaCache = new Map<string, string>();
 
@@ -207,7 +208,7 @@ const Dashboard = () => {
 
                 monthOrders?.forEach(o => {
                     if (o.status !== 'cancelled' && o.status !== 'rejected') {
-                        monthSales += o.total_amount || 0;
+                        monthSales += grossToNet(o.total_amount);
                         activeOrdersCount++;
                     }
                 });
@@ -227,7 +228,7 @@ const Dashboard = () => {
                     if (o.status === 'cancelled' || o.status === 'rejected') return;
 
                     const day = new Date(o.created_at).getDate();
-                    salesByDay.set(day, (salesByDay.get(day) || 0) + (o.total_amount || 0));
+                    salesByDay.set(day, (salesByDay.get(day) || 0) + grossToNet(o.total_amount));
                 });
 
                 const trendData = [];
@@ -464,7 +465,7 @@ const Dashboard = () => {
                     const { data: mOrders } = await supabase.from('orders').select('total_amount').eq('user_id', seller.id).not('quotation_id', 'is', null).gte('created_at', firstDayOfMonth).lte('created_at', lastDayOfMonth);
 
                     let sellerMonthSales = 0;
-                    mOrders?.forEach(o => sellerMonthSales += o.total_amount || 0);
+                    mOrders?.forEach(o => sellerMonthSales += grossToNet(o.total_amount));
 
                     // 7. Last Zone
                     const { data: lastV } = await supabase.from('visits').select('clients(zone)').eq('sales_rep_id', seller.id).order('check_in_time', { ascending: false }).limit(1).maybeSingle();
@@ -494,7 +495,7 @@ const Dashboard = () => {
                         visits: handledClientIds.size,
                         clientsCreated: cCount || 0,
                         newClientNames: (cData || []).map(c => c.name),
-                        quoteAmount: oData?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0,
+                        quoteAmount: oData?.reduce((sum, o) => sum + grossToNet(o.total_amount), 0) || 0,
                         quoteCount: oData?.length || 0,
                         quotationCount: qData?.length || 0,
                         callCount: lData?.length || 0,
@@ -764,11 +765,11 @@ const Dashboard = () => {
             {/* KPI Cards Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <KPICard
-                    title="Venta Mensual"
+                    title="Venta Mensual Neta"
                     value={`$${monthlyStats.currentSales.toLocaleString()}`}
                     icon={ShoppingCart}
                     color="indigo"
-                    trend={monthlyStats.goal > 0 ? `${Math.round((monthlyStats.currentSales / monthlyStats.goal) * 100)}% de Meta` : undefined}
+                    trend={monthlyStats.goal > 0 ? `${Math.round((monthlyStats.currentSales / monthlyStats.goal) * 100)}% de Meta Neta` : undefined}
                     trendUp={monthlyStats.currentSales > 0}
                 />
                 <KPICard
@@ -799,7 +800,7 @@ const Dashboard = () => {
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="text-lg font-bold text-gray-900 flex items-center">
                                 <TrendingUp size={20} className="mr-2 text-indigo-600" />
-                                Tendencia de Ventas (Este Mes)
+                                Tendencia de Ventas Netas (Este Mes)
                             </h3>
                         </div>
                         <SalesTrendChart data={salesTrend} />
@@ -821,7 +822,7 @@ const Dashboard = () => {
                     <div className="premium-card p-6 flex flex-col items-center">
                         <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center self-start">
                             <Target size={20} className="mr-2 text-violet-600" />
-                            Progreso de Meta
+                            Progreso de Meta Neta
                         </h3>
                         <GoalProgressChart current={monthlyStats.currentSales} target={monthlyStats.goal || 1} />
 
@@ -881,8 +882,8 @@ const Dashboard = () => {
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Vendedor</th>
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas</th>
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Pedidos</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Monto</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Meta</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Monto Neto</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Meta Neta</th>
                                     </tr>
                                 </thead>
                                 <tbody>

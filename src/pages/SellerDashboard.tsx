@@ -4,6 +4,7 @@ import { useUser } from '../contexts/UserContext';
 import { Calendar, MapPin, Target, TrendingUp, Clock, Filter, Award, Medal, Trophy } from 'lucide-react';
 import KPICard from '../components/KPICard';
 import GoalProgressChart from '../components/charts/GoalProgressChart';
+import { grossToNet } from '../utils/amounts';
 
 type VisitRow = {
     id: string;
@@ -166,7 +167,7 @@ const SellerDashboard = () => {
             let monthlySalesAmount = 0;
             (monthOrders || []).forEach((o: any) => {
                 if (o.status !== 'cancelled' && o.status !== 'rejected') {
-                    monthlySalesAmount += Number(o.total_amount || 0);
+                    monthlySalesAmount += grossToNet(o.total_amount);
                 }
             });
             setMonthSales(monthlySalesAmount);
@@ -285,7 +286,7 @@ const SellerDashboard = () => {
                 <KPICard title="Visitas Hoy" value={todayVisits} icon={MapPin} color="emerald" trend={`${todayCompletedVisits} completadas`} trendUp />
                 <KPICard title="Meta Diaria" value={`${todayGoalPct}%`} icon={Target} color="indigo" trend={`${todayVisits}/${dailyGoal} visitas`} trendUp={todayGoalPct >= 100} />
                 <KPICard title="Promedio Diario" value={avgVisits} icon={TrendingUp} color="amber" trend={`Rango ${fromDate} a ${toDate}`} trendUp={avgVisits >= dailyGoal} />
-                <KPICard title="Venta Mes" value={`$${monthSales.toLocaleString()}`} icon={Clock} color="blue" trend={monthGoal > 0 ? `${Math.round((monthSales / monthGoal) * 100)}% de meta` : 'Sin meta cargada'} trendUp={monthGoal > 0 && monthSales >= monthGoal} />
+                <KPICard title="Venta Mes Neta" value={`$${monthSales.toLocaleString()}`} icon={Clock} color="blue" trend={monthGoal > 0 ? `${Math.round((monthSales / monthGoal) * 100)}% de meta neta` : 'Sin meta cargada'} trendUp={monthGoal > 0 && monthSales >= monthGoal} />
             </div>
             <div className="grid grid-cols-1 gap-6">
                 <KPICard
@@ -335,7 +336,7 @@ const SellerDashboard = () => {
                     </div>
 
                     <div className="premium-card p-5 border border-gray-50">
-                        <h4 className="font-black text-gray-900 mb-2">Metas</h4>
+                        <h4 className="font-black text-gray-900 mb-2">Metas Netas</h4>
                         <GoalProgressChart current={monthSales} target={monthGoal || 1} />
                         <div className="mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
                             <p className="text-[10px] font-black text-emerald-600 uppercase tracking-wider">Meta diaria visitas</p>
