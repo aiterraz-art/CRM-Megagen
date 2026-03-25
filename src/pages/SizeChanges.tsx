@@ -167,7 +167,7 @@ const SizeChanges: React.FC = () => {
                     ? supabase.from('clients').select('id, name, rut, address, comuna, office, created_by').order('name')
                     : Promise.resolve({ data: [], error: null }),
                 canCreateSizeChanges
-                    ? supabase.from('inventory').select('id, sku, name, price, stock_qty, created_at, category, demo_available').order('name')
+                    ? supabase.from('inventory').select('id, sku, name, price, stock_qty, created_at, category').order('name')
                     : Promise.resolve({ data: [], error: null }),
             ]);
 
