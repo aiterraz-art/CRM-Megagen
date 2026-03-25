@@ -5,10 +5,12 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
+import { generateOrderPdfFile, type OrderPdfData } from '../utils/orderPdf';
 import PaymentProofPreviewModal from '../components/modals/PaymentProofPreviewModal';
 import OrderNotificationHistoryModal from '../components/modals/OrderNotificationHistoryModal';
 import type { OrderNotificationLog } from '../utils/orderNotification';
 import OrderItemsPreviewModal, { type OrderItemsPreviewItem } from '../components/modals/OrderItemsPreviewModal';
+import OrderPdfPreviewModal from '../components/modals/OrderPdfPreviewModal';
 
 type OrderStatusFilter = 'all' | 'completed' | 'cancelled';
 type DeliveryStatusFilter = 'all' | 'pending' | 'out_for_delivery' | 'delivered';
@@ -85,6 +87,11 @@ const Orders = () => {
     const [orderItemsPreviewState, setOrderItemsPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
     const [orderItemsPreview, setOrderItemsPreview] = useState<OrderItemsPreviewItem[]>([]);
     const [orderItemsPreviewError, setOrderItemsPreviewError] = useState<string | null>(null);
+    const [selectedOrderPdfOrder, setSelectedOrderPdfOrder] = useState<EnrichedOrder | null>(null);
+    const [orderPdfPreviewState, setOrderPdfPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+    const [orderPdfFile, setOrderPdfFile] = useState<File | null>(null);
+    const [orderPdfBlobUrl, setOrderPdfBlobUrl] = useState<string | null>(null);
+    const [orderPdfError, setOrderPdfError] = useState<string | null>(null);
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewAll = useMemo(
@@ -217,6 +224,14 @@ const Orders = () => {
         };
     }, [proofBlobUrl]);
 
+    useEffect(() => {
+        return () => {
+            if (orderPdfBlobUrl) {
+                URL.revokeObjectURL(orderPdfBlobUrl);
+            }
+        };
+    }, [orderPdfBlobUrl]);
+
     const closeProofPreview = useCallback(() => {
         cleanupProofPreview();
         setSelectedProofOrder(null);
@@ -233,6 +248,16 @@ const Orders = () => {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
     }, []);
+
+    const cleanupOrderPdfPreview = useCallback(() => {
+        if (orderPdfBlobUrl) {
+            URL.revokeObjectURL(orderPdfBlobUrl);
+        }
+        setOrderPdfBlobUrl(null);
+        setOrderPdfFile(null);
+        setOrderPdfError(null);
+        setOrderPdfPreviewState('idle');
+    }, [orderPdfBlobUrl]);
 
     const loadProofForOrder = useCallback(async (order: EnrichedOrder) => {
         if (!order.payment_proof_path) {
@@ -289,6 +314,79 @@ const Orders = () => {
         setOrderItemsPreviewError(null);
     }, []);
 
+    const closeOrderPdfPreview = useCallback(() => {
+        cleanupOrderPdfPreview();
+        setSelectedOrderPdfOrder(null);
+    }, [cleanupOrderPdfPreview]);
+
+    const buildOrderPdfPayload = useCallback(async (order: EnrichedOrder): Promise<{ orderRow: any; orderPdfData: OrderPdfData; creditDays: number }> => {
+        const { data: orderRow, error: orderError } = await supabase
+            .from('orders')
+            .select('id, folio, client_id, user_id, total_amount, payment_proof_path, payment_proof_name, payment_proof_mime_type')
+            .eq('id', order.id)
+            .single();
+
+        if (orderError) throw orderError;
+
+        const [clientRes, sellerRes, itemsRes] = await Promise.all([
+            supabase
+                .from('clients')
+                .select('id, name, rut, address, office, phone, email, giro, credit_days, comuna, zone, purchase_contact')
+                .eq('id', orderRow.client_id)
+                .single(),
+            supabase
+                .from('profiles')
+                .select('id, full_name, email')
+                .eq('id', orderRow.user_id)
+                .single(),
+            supabase
+                .from('order_items')
+                .select('quantity, unit_price, total_price, inventory(name, sku)')
+                .eq('order_id', order.id)
+        ]);
+
+        if (clientRes.error) throw clientRes.error;
+        if (sellerRes.error) throw sellerRes.error;
+        if (itemsRes.error) throw itemsRes.error;
+
+        const client = clientRes.data;
+        const seller = sellerRes.data;
+        const creditDays = getClientCreditDays(client);
+
+        return {
+            orderRow,
+            creditDays,
+            orderPdfData: {
+                folio: orderRow.folio || order.id.slice(0, 8),
+                quotationFolio: order.quotation_folio,
+                date: new Date(order.created_at || new Date().toISOString()).toLocaleDateString('es-CL'),
+                clientName: client.name,
+                clientRut: client.rut || '',
+                clientAddress: client.address || '',
+                clientOffice: client.office || '',
+                clientPhone: client.phone || '',
+                clientEmail: client.email || '',
+                clientGiro: client.giro || '',
+                clientCity: client.zone || 'Santiago',
+                clientComuna: client.comuna || '',
+                clientContact: client.purchase_contact || '',
+                paymentTerms: formatPaymentTermsFromCreditDays(creditDays),
+                sellerName: seller.full_name || seller.email || 'Vendedor',
+                sellerEmail: seller.email || '',
+                items: (itemsRes.data || []).map((item: any) => ({
+                    code: item.inventory?.sku || '',
+                    detail: item.inventory?.name || 'Producto',
+                    qty: Number(item.quantity || 0),
+                    unit: 'UN',
+                    unitPrice: Number(item.unit_price || 0),
+                    total: Number(item.total_price || 0)
+                })),
+                totalAmount: Number(orderRow.total_amount || 0),
+                comments: order.quotation_folio ? `Pedido generado desde cotización #${order.quotation_folio}.` : 'Pedido generado desde CRM.'
+            }
+        };
+    }, []);
+
     const loadOrderItemsPreview = useCallback(async (order: EnrichedOrder) => {
         setOrderItemsPreviewState('loading');
         setOrderItemsPreview([]);
@@ -328,6 +426,38 @@ const Orders = () => {
         await loadOrderItemsPreview(order);
     }, [loadOrderItemsPreview]);
 
+    const loadOrderPdfPreview = useCallback(async (order: EnrichedOrder) => {
+        setOrderPdfPreviewState('loading');
+        setOrderPdfFile(null);
+        setOrderPdfError(null);
+
+        try {
+            const { orderPdfData } = await buildOrderPdfPayload(order);
+            const pdfFile = await generateOrderPdfFile(orderPdfData);
+
+            if (orderPdfBlobUrl) {
+                URL.revokeObjectURL(orderPdfBlobUrl);
+            }
+
+            const blobUrl = URL.createObjectURL(pdfFile);
+            setOrderPdfFile(pdfFile);
+            setOrderPdfBlobUrl(blobUrl);
+            setOrderPdfPreviewState('ready');
+        } catch (error: any) {
+            console.error('Error loading order PDF preview:', error);
+            setOrderPdfFile(null);
+            setOrderPdfBlobUrl(null);
+            setOrderPdfPreviewState('error');
+            setOrderPdfError(error?.message || 'No se pudo generar el PDF del pedido.');
+        }
+    }, [buildOrderPdfPayload, orderPdfBlobUrl]);
+
+    const openOrderPdfPreview = useCallback(async (order: EnrichedOrder) => {
+        setSelectedOrderPdfOrder(order);
+        cleanupOrderPdfPreview();
+        await loadOrderPdfPreview(order);
+    }, [cleanupOrderPdfPreview, loadOrderPdfPreview]);
+
     const handleResendOrderEmail = useCallback(async (order: EnrichedOrder) => {
         if (!profile?.id) {
             alert('No se pudo identificar al usuario actual.');
@@ -341,41 +471,10 @@ const Orders = () => {
 
         setResendingOrderId(order.id);
         try {
-            const { data: orderRow, error: orderError } = await supabase
-                .from('orders')
-                .select('id, folio, client_id, user_id, total_amount, payment_proof_path, payment_proof_name, payment_proof_mime_type')
-                .eq('id', order.id)
-                .single();
-
-            if (orderError) throw orderError;
-
-            const [clientRes, sellerRes, itemsRes] = await Promise.all([
-                supabase
-                    .from('clients')
-                    .select('id, name, rut, address, office, phone, email, giro, credit_days, comuna, zone, purchase_contact')
-                    .eq('id', orderRow.client_id)
-                    .single(),
-                supabase
-                    .from('profiles')
-                    .select('id, full_name, email')
-                    .eq('id', orderRow.user_id)
-                    .single(),
-                supabase
-                    .from('order_items')
-                    .select('quantity, unit_price, total_price, inventory(name, sku)')
-                    .eq('order_id', order.id)
-            ]);
-
-            if (clientRes.error) throw clientRes.error;
-            if (sellerRes.error) throw sellerRes.error;
-            if (itemsRes.error) throw itemsRes.error;
-
-            const client = clientRes.data;
-            const seller = sellerRes.data;
-            const creditDays = getClientCreditDays(client);
+            const { orderRow, orderPdfData, creditDays } = await buildOrderPdfPayload(order);
 
             if (orderRow.payment_proof_path) {
-                const { data: proofBlob, error: proofError } = await supabase.storage
+                const { error: proofError } = await supabase.storage
                     .from(PAYMENT_PROOFS_BUCKET)
                     .download(orderRow.payment_proof_path);
 
@@ -387,34 +486,7 @@ const Orders = () => {
             await sendOrderNotificationEmail({
                 orderId: order.id,
                 requestSource: 'manual_resend',
-                order: {
-                    folio: orderRow.folio || order.id.slice(0, 8),
-                    quotationFolio: order.quotation_folio,
-                    date: new Date(order.created_at || new Date().toISOString()).toLocaleDateString('es-CL'),
-                    clientName: client.name,
-                    clientRut: client.rut || '',
-                    clientAddress: client.address || '',
-                    clientOffice: client.office || '',
-                    clientPhone: client.phone || '',
-                    clientEmail: client.email || '',
-                    clientGiro: client.giro || '',
-                    clientCity: client.zone || 'Santiago',
-                    clientComuna: client.comuna || '',
-                    clientContact: client.purchase_contact || '',
-                    paymentTerms: formatPaymentTermsFromCreditDays(creditDays),
-                    sellerName: seller.full_name || seller.email || 'Vendedor',
-                    sellerEmail: seller.email || '',
-                    items: (itemsRes.data || []).map((item: any) => ({
-                        code: item.inventory?.sku || '',
-                        detail: item.inventory?.name || 'Producto',
-                        qty: Number(item.quantity || 0),
-                        unit: 'UN',
-                        unitPrice: Number(item.unit_price || 0),
-                        total: Number(item.total_price || 0)
-                    })),
-                    totalAmount: Number(orderRow.total_amount || 0),
-                    comments: order.quotation_folio ? `Pedido generado desde cotización #${order.quotation_folio}.` : 'Pedido generado desde CRM.'
-                }
+                order: orderPdfData
             });
 
             await fetchOrders();
@@ -426,7 +498,7 @@ const Orders = () => {
         } finally {
             setResendingOrderId(null);
         }
-    }, [effectiveRole, fetchOrders, profile?.id]);
+    }, [buildOrderPdfPayload, effectiveRole, fetchOrders, profile?.id]);
 
     const filteredOrders = useMemo(() => {
         const term = search.trim().toLowerCase();
@@ -680,6 +752,14 @@ const Orders = () => {
                                                 )}
 
                                                 <button
+                                                    onClick={() => void openOrderPdfPreview(order)}
+                                                    className="inline-flex items-center px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-[11px] font-black uppercase tracking-wider hover:bg-gray-50 transition-all"
+                                                >
+                                                    <FileText size={14} className="mr-2" />
+                                                    Ver PDF
+                                                </button>
+
+                                                <button
                                                     onClick={() => setSelectedNotificationOrder(order)}
                                                     className="inline-flex items-center px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-[11px] font-black uppercase tracking-wider hover:bg-gray-50 transition-all"
                                                 >
@@ -733,6 +813,24 @@ const Orders = () => {
                     }
                 }}
                 onDownload={() => downloadProofFile(proofFile)}
+            />
+
+            <OrderPdfPreviewModal
+                isOpen={Boolean(selectedOrderPdfOrder)}
+                orderFolio={selectedOrderPdfOrder?.folio ?? null}
+                clientName={selectedOrderPdfOrder?.client_name || 'Cliente'}
+                fileName={orderPdfFile?.name || null}
+                blobUrl={orderPdfBlobUrl}
+                loading={orderPdfPreviewState === 'loading'}
+                error={orderPdfPreviewState === 'error' ? orderPdfError : null}
+                canDownload={Boolean(orderPdfFile)}
+                onClose={closeOrderPdfPreview}
+                onRetry={() => {
+                    if (selectedOrderPdfOrder) {
+                        void loadOrderPdfPreview(selectedOrderPdfOrder);
+                    }
+                }}
+                onDownload={() => downloadProofFile(orderPdfFile)}
             />
 
             <OrderNotificationHistoryModal
