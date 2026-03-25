@@ -695,6 +695,65 @@ export interface Database {
                     visit_id?: string | null
                 }
             }
+            order_notification_logs: {
+                Row: {
+                    attachments: Json
+                    body_preview: string | null
+                    cc_recipients: string[]
+                    created_at: string
+                    error_message: string | null
+                    gmail_message_id: string | null
+                    gmail_thread_id: string | null
+                    id: string
+                    order_id: string
+                    request_source: string
+                    sender_email: string
+                    sender_profile_id: string | null
+                    sent_at: string | null
+                    status: string
+                    subject: string
+                    to_recipients: string[]
+                    triggered_by: string
+                }
+                Insert: {
+                    attachments?: Json
+                    body_preview?: string | null
+                    cc_recipients?: string[]
+                    created_at?: string
+                    error_message?: string | null
+                    gmail_message_id?: string | null
+                    gmail_thread_id?: string | null
+                    id?: string
+                    order_id: string
+                    request_source: string
+                    sender_email: string
+                    sender_profile_id?: string | null
+                    sent_at?: string | null
+                    status?: string
+                    subject: string
+                    to_recipients: string[]
+                    triggered_by: string
+                }
+                Update: {
+                    attachments?: Json
+                    body_preview?: string | null
+                    cc_recipients?: string[]
+                    created_at?: string
+                    error_message?: string | null
+                    gmail_message_id?: string | null
+                    gmail_thread_id?: string | null
+                    id?: string
+                    order_id?: string
+                    request_source?: string
+                    sender_email?: string
+                    sender_profile_id?: string | null
+                    sent_at?: string | null
+                    status?: string
+                    subject?: string
+                    to_recipients?: string[]
+                    triggered_by?: string
+                }
+            }
             installed_base: {
                 Row: {
                     client_id: string | null

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Eye, FileText, RefreshCw, Search, ShoppingCart, Send } from 'lucide-react';
+import { Eye, FileText, History, RefreshCw, Search, ShoppingCart, Send } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 import PaymentProofPreviewModal from '../components/modals/PaymentProofPreviewModal';
+import OrderNotificationHistoryModal from '../components/modals/OrderNotificationHistoryModal';
+import type { OrderNotificationLog } from '../utils/orderNotification';
 
 type OrderStatusFilter = 'all' | 'completed' | 'cancelled';
 type DeliveryStatusFilter = 'all' | 'pending' | 'out_for_delivery' | 'delivered';
@@ -29,7 +31,6 @@ type EnrichedOrder = {
     payment_proof_name: string | null;
     payment_proof_mime_type: string | null;
 };
-
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString('es-CL')}`;
 const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL') : '-';
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
@@ -76,6 +77,8 @@ const Orders = () => {
     const [proofFile, setProofFile] = useState<File | null>(null);
     const [proofBlobUrl, setProofBlobUrl] = useState<string | null>(null);
     const [proofError, setProofError] = useState<string | null>(null);
+    const [notificationLogsByOrderId, setNotificationLogsByOrderId] = useState<Record<string, OrderNotificationLog[]>>({});
+    const [selectedNotificationOrder, setSelectedNotificationOrder] = useState<EnrichedOrder | null>(null);
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewAll = useMemo(
@@ -112,8 +115,9 @@ const Orders = () => {
             const clientIds = Array.from(new Set(loaded.map((o) => o.client_id).filter(Boolean)));
             const userIds = Array.from(new Set(loaded.map((o) => o.user_id).filter(Boolean)));
             const quotationIds = Array.from(new Set(loaded.map((o) => o.quotation_id).filter(Boolean)));
+            const orderIds = loaded.map((o) => o.id).filter(Boolean);
 
-            const [clientsRes, profilesRes, quotationsRes] = await Promise.all([
+            const [clientsRes, profilesRes, quotationsRes, notificationLogsRes] = await Promise.all([
                 clientIds.length > 0
                     ? supabase.from('clients').select('id, name').in('id', clientIds)
                     : Promise.resolve({ data: [], error: null } as any),
@@ -122,16 +126,28 @@ const Orders = () => {
                     : Promise.resolve({ data: [], error: null } as any),
                 quotationIds.length > 0
                     ? supabase.from('quotations').select('id, folio').in('id', quotationIds)
+                    : Promise.resolve({ data: [], error: null } as any),
+                orderIds.length > 0
+                    ? supabase
+                        .from('order_notification_logs')
+                        .select('id, order_id, sender_email, to_recipients, cc_recipients, status, gmail_message_id, gmail_thread_id, error_message, request_source, sent_at, created_at')
+                        .in('order_id', orderIds)
+                        .order('created_at', { ascending: false })
                     : Promise.resolve({ data: [], error: null } as any)
             ]);
 
             if (clientsRes.error) throw clientsRes.error;
             if (profilesRes.error) throw profilesRes.error;
             if (quotationsRes.error) throw quotationsRes.error;
+            if (notificationLogsRes.error) throw notificationLogsRes.error;
 
             const clientsMap = new Map<string, any>((clientsRes.data || []).map((c: any) => [c.id, c]));
             const profilesMap = new Map<string, any>((profilesRes.data || []).map((p: any) => [p.id, p]));
             const quotationsMap = new Map<string, any>((quotationsRes.data || []).map((q: any) => [q.id, q]));
+            const logsByOrderId = (notificationLogsRes.data || []).reduce((acc: Record<string, OrderNotificationLog[]>, log: OrderNotificationLog) => {
+                acc[log.order_id] = [...(acc[log.order_id] || []), log];
+                return acc;
+            }, {});
 
             const enriched: EnrichedOrder[] = loaded.map((order: any) => {
                 const seller = profilesMap.get(order.user_id || '');
@@ -159,11 +175,13 @@ const Orders = () => {
             });
 
             setOrders(enriched);
+            setNotificationLogsByOrderId(logsByOrderId);
             setLastRefreshAt(new Date().toISOString());
         } catch (error: any) {
             console.error('Error fetching orders:', error);
             setErrorMessage(error?.message || 'No se pudo cargar el módulo de pedidos.');
             setOrders([]);
+            setNotificationLogsByOrderId({});
         } finally {
             setLoading(false);
         }
@@ -258,30 +276,14 @@ const Orders = () => {
         await loadProofForOrder(order);
     }, [loadProofForOrder]);
 
-    const updateOrderEmailStatus = useCallback(async (orderId: string, status: 'sent' | 'failed', errorMessage?: string | null) => {
-        const payload: any = {
-            payment_email_status: status,
-            payment_email_error: status === 'failed' ? (errorMessage || 'No se pudo enviar el correo') : null,
-            payment_email_sent_at: status === 'sent' ? new Date().toISOString() : null
-        };
-
-        const { error } = await supabase
-            .from('orders')
-            .update(payload)
-            .eq('id', orderId);
-
-        if (error) {
-            console.warn('No se pudo actualizar el estado de correo del pedido:', error.message);
-        }
-    }, []);
-
     const handleResendOrderEmail = useCallback(async (order: EnrichedOrder) => {
         if (!profile?.id) {
             alert('No se pudo identificar al usuario actual.');
             return;
         }
-        if (order.user_id !== profile.id) {
-            alert('Solo el vendedor dueño del pedido puede reenviar este correo.');
+        const canResend = effectiveRole === 'admin' || effectiveRole === 'facturador' || order.user_id === profile.id;
+        if (!canResend) {
+            alert('No tienes permisos para reenviar este correo.');
             return;
         }
 
@@ -320,24 +322,19 @@ const Orders = () => {
             const seller = sellerRes.data;
             const creditDays = getClientCreditDays(client);
 
-            let proofAttachment: File | null = null;
             if (orderRow.payment_proof_path) {
                 const { data: proofBlob, error: proofError } = await supabase.storage
                     .from(PAYMENT_PROOFS_BUCKET)
                     .download(orderRow.payment_proof_path);
 
                 if (proofError) throw proofError;
-
-                proofAttachment = new File(
-                    [proofBlob],
-                    orderRow.payment_proof_name || 'comprobante_pago',
-                    { type: orderRow.payment_proof_mime_type || proofBlob.type || 'application/octet-stream' }
-                );
             } else if (creditDays === 0) {
                 throw new Error('El pedido no tiene un comprobante de pago guardado para reenviar.');
             }
 
             await sendOrderNotificationEmail({
+                orderId: order.id,
+                requestSource: 'manual_resend',
                 order: {
                     folio: orderRow.folio || order.id.slice(0, 8),
                     quotationFolio: order.quotation_folio,
@@ -361,32 +358,19 @@ const Orders = () => {
                         total: Number(item.total_price || 0)
                     })),
                     totalAmount: Number(orderRow.total_amount || 0)
-                },
-                proofAttachment,
-                clientId: client.id,
-                profileId: profile.id
+                }
             });
 
-            await updateOrderEmailStatus(order.id, 'sent');
-            setOrders((prev) => prev.map((current) => (
-                current.id === order.id
-                    ? { ...current, payment_email_status: 'sent', payment_email_error: null }
-                    : current
-            )));
-            alert('Correo reenviado correctamente.');
+            await fetchOrders();
+            alert('Correo reenviado a facturación correctamente.');
         } catch (error: any) {
             const message = error?.message || 'No se pudo reenviar el correo';
-            await updateOrderEmailStatus(order.id, 'failed', message);
-            setOrders((prev) => prev.map((current) => (
-                current.id === order.id
-                    ? { ...current, payment_email_status: 'failed', payment_email_error: message }
-                    : current
-            )));
+            await fetchOrders();
             alert(message);
         } finally {
             setResendingOrderId(null);
         }
-    }, [profile?.id, updateOrderEmailStatus]);
+    }, [effectiveRole, fetchOrders, profile?.id]);
 
     const filteredOrders = useMemo(() => {
         const term = search.trim().toLowerCase();
@@ -554,6 +538,12 @@ const Orders = () => {
                             <tbody>
                                 {filteredOrders.map((order) => (
                                     <tr key={order.id} className="border-b border-gray-100 last:border-0">
+                                        {(() => {
+                                            const orderLogs = notificationLogsByOrderId[order.id] || [];
+                                            const latestLog = orderLogs[0] || null;
+                                            const canResend = Boolean(profile?.id) && (effectiveRole === 'admin' || effectiveRole === 'facturador' || order.user_id === profile?.id);
+                                            return (
+                                                <>
                                         <td className="px-4 py-3 font-black text-gray-900">#{order.folio ?? '-'}</td>
                                         <td className="px-4 py-3 font-bold text-indigo-600">#{order.quotation_folio ?? '-'}</td>
                                         <td className="px-4 py-3 font-bold text-gray-800">{order.client_name}</td>
@@ -572,6 +562,19 @@ const Orders = () => {
                                                     <p className="text-[11px] font-medium text-red-600 max-w-[200px] truncate" title={order.payment_email_error}>
                                                         {order.payment_email_error}
                                                     </p>
+                                                )}
+                                                {latestLog && (
+                                                    <div className="pt-1 space-y-1">
+                                                        <p className="text-[11px] font-semibold text-gray-600">
+                                                            Emisor: <span className="text-gray-800">{latestLog.sender_email}</span>
+                                                        </p>
+                                                        <p className="text-[11px] font-semibold text-gray-600 max-w-[260px] truncate" title={latestLog.to_recipients.join(', ')}>
+                                                            Para: <span className="text-gray-800">{latestLog.to_recipients.join(', ')}</span>
+                                                        </p>
+                                                        <p className="text-[11px] font-semibold text-gray-500">
+                                                            Último intento: {formatDate(latestLog.sent_at || latestLog.created_at)}
+                                                        </p>
+                                                    </div>
                                                 )}
                                             </div>
                                         </td>
@@ -596,7 +599,15 @@ const Orders = () => {
                                                     <span className="text-xs text-gray-400 font-medium">Sin comprobante</span>
                                                 )}
 
-                                                {(order.user_id === profile?.id && (order.payment_email_status === 'pending' || order.payment_email_status === 'failed')) ? (
+                                                <button
+                                                    onClick={() => setSelectedNotificationOrder(order)}
+                                                    className="inline-flex items-center px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-[11px] font-black uppercase tracking-wider hover:bg-gray-50 transition-all"
+                                                >
+                                                    <History size={14} className="mr-2" />
+                                                    Historial correo
+                                                </button>
+
+                                                {canResend ? (
                                                     <button
                                                         onClick={() => handleResendOrderEmail(order)}
                                                         disabled={resendingOrderId === order.id}
@@ -614,6 +625,9 @@ const Orders = () => {
                                                 ) : null}
                                             </div>
                                         </td>
+                                                </>
+                                            );
+                                        })()}
                                     </tr>
                                 ))}
                             </tbody>
@@ -639,6 +653,14 @@ const Orders = () => {
                     }
                 }}
                 onDownload={() => downloadProofFile(proofFile)}
+            />
+
+            <OrderNotificationHistoryModal
+                isOpen={Boolean(selectedNotificationOrder)}
+                orderFolio={selectedNotificationOrder?.folio ?? null}
+                clientName={selectedNotificationOrder?.client_name || 'Cliente'}
+                logs={selectedNotificationOrder ? (notificationLogsByOrderId[selectedNotificationOrder.id] || []) : []}
+                onClose={() => setSelectedNotificationOrder(null)}
             />
         </div>
     );

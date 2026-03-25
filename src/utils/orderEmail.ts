@@ -1,66 +1,58 @@
 import { supabase } from '../services/supabase';
-import { sendGmailMessage } from './gmail';
-import { getCompanyConfig } from './companyConfig';
 import { generateOrderPdfFile, type OrderPdfData } from './orderPdf';
 
+export type OrderNotificationRequestSource = 'quotation_conversion' | 'manual_resend';
+
 type SendOrderNotificationEmailInput = {
+    orderId: string;
+    requestSource: OrderNotificationRequestSource;
     order: OrderPdfData;
-    proofAttachment?: File | null;
-    clientId?: string;
-    profileId?: string;
 };
 
-const formatMoney = (value: number) => `$${Number(value || 0).toLocaleString('es-CL')}`;
+type SendOrderNotificationEmailResult = {
+    status: 'sent';
+    senderEmail: string;
+    toRecipients: string[];
+    ccRecipients: string[];
+    gmailMessageId: string;
+    gmailThreadId: string | null;
+};
 
-const loadOrderNotificationRecipients = async () => {
-    const { data, error } = await supabase
-        .from('profiles')
-        .select('email, role, status')
-        .in('role', ['facturador', 'administrativo'])
-        .eq('status', 'active');
+const fileToBase64 = async (file: File) => {
+    const arrayBuffer = await file.arrayBuffer();
+    let binary = '';
+    const bytes = new Uint8Array(arrayBuffer);
+    const chunkSize = 0x8000;
 
-    if (error) throw error;
-
-    const recipients = Array.from(new Set(
-        (data || [])
-            .map((profile) => String(profile.email || '').trim().toLowerCase())
-            .filter(Boolean)
-    ));
-
-    if (recipients.length === 0) {
-        throw new Error('No hay usuarios facturadores activos configurados.');
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
     }
 
-    return recipients;
+    return btoa(binary);
 };
 
-export const sendOrderNotificationEmail = async (input: SendOrderNotificationEmailInput) => {
-    const { order, proofAttachment = null, clientId, profileId } = input;
-    const { companyName } = getCompanyConfig();
-    const recipients = await loadOrderNotificationRecipients();
-    const orderPdf = await generateOrderPdfFile(order);
-    const attachments = proofAttachment ? [orderPdf, proofAttachment] : [orderPdf];
-    const subject = `Pedido #${order.folio} - ${order.clientName}`;
-    const message = [
-        `Equipo ${companyName},`,
-        '',
-        `Se genero el pedido #${order.folio}${order.quotationFolio ? ` desde la cotizacion #${order.quotationFolio}` : ''}.`,
-        `Cliente: ${order.clientName}`,
-        `Condicion de pago: ${order.paymentTerms}`,
-        `Total: ${formatMoney(order.totalAmount)}`,
-        `Vendedor: ${order.sellerName}`,
-        '',
-        proofAttachment
-            ? 'Adjuntos: PDF del pedido y comprobante de pago.'
-            : 'Adjunto: PDF del pedido.',
-    ].join('\n');
+export const sendOrderNotificationEmail = async (input: SendOrderNotificationEmailInput): Promise<SendOrderNotificationEmailResult> => {
+    const orderPdf = await generateOrderPdfFile(input.order);
+    const contentBase64 = await fileToBase64(orderPdf);
 
-    return sendGmailMessage({
-        to: recipients.join(','),
-        subject,
-        message,
-        attachments,
-        clientId,
-        profileId
+    const { data, error } = await supabase.functions.invoke('send-order-notification', {
+        body: {
+            orderId: input.orderId,
+            requestSource: input.requestSource,
+            orderPdfAttachment: {
+                name: orderPdf.name,
+                mimeType: orderPdf.type || 'application/pdf',
+                contentBase64,
+            },
+        },
     });
+
+    if (error) {
+        throw new Error(error.message || 'No se pudo enviar el pedido a facturación.');
+    }
+    if (!data || data.error) {
+        throw new Error(data?.error || 'No se pudo enviar el pedido a facturación.');
+    }
+
+    return data as SendOrderNotificationEmailResult;
 };

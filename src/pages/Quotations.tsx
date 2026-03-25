@@ -593,23 +593,6 @@ const Quotations: React.FC = () => {
         };
     }, [profile?.id]);
 
-    const updateOrderEmailStatus = useCallback(async (orderId: string, status: 'sent' | 'failed', errorMessage?: string | null) => {
-        const payload: any = {
-            payment_email_status: status,
-            payment_email_error: status === 'failed' ? (errorMessage || 'No se pudo enviar el correo') : null,
-            payment_email_sent_at: status === 'sent' ? new Date().toISOString() : null
-        };
-
-        const { error } = await supabase
-            .from('orders')
-            .update(payload)
-            .eq('id', orderId);
-
-        if (error) {
-            console.warn('No se pudo actualizar el estado de correo del pedido:', error.message);
-        }
-    }, []);
-
     const buildOrderEmailPayload = useCallback((quotation: any, orderFolio: number | string) => {
         const creditDays = getQuotationCreditDays(quotation);
         const client = quotation?.client || {};
@@ -979,20 +962,13 @@ const Quotations: React.FC = () => {
 
             try {
                 await sendOrderNotificationEmail({
+                    orderId: createdOrderId || response?.order_id,
+                    requestSource: 'quotation_conversion',
                     order: buildOrderEmailPayload(quotation, orderFolio),
-                    proofAttachment: requiresProof ? proofFile : null,
-                    clientId: quotation?.client_id || quotation?.client?.id,
-                    profileId: profile.id
                 });
-                if (createdOrderId) {
-                    await updateOrderEmailStatus(createdOrderId, 'sent');
-                }
-                alert('Pedido generado y correo enviado correctamente.');
+                alert('Pedido generado y correo enviado a facturación correctamente.');
             } catch (emailError: any) {
-                if (createdOrderId) {
-                    await updateOrderEmailStatus(createdOrderId, 'failed', emailError?.message || 'No se pudo enviar el correo');
-                }
-                alert('Pedido generado, pero el correo falló. Puedes reenviarlo desde el módulo de Pedidos.');
+                alert('Pedido generado, pero el correo a facturación falló. Puedes reenviarlo desde el módulo de Pedidos.');
             }
 
             closePaymentProofModal();
@@ -1012,13 +988,12 @@ const Quotations: React.FC = () => {
         fetchQuotations,
         getQuotationCreditDays,
         profile?.id,
-        updateOrderEmailStatus,
         uploadPaymentProof,
         validatePaymentProofFile
     ]);
 
     const handleConvertToOrder = async (quotation: any) => {
-        if (!confirm('¿Confirmar que el cliente aceptó esta cotización? Se generará un pedido y se enviará correo a soporte y amerino.')) return;
+        if (!confirm('¿Confirmar que el cliente aceptó esta cotización? Se generará un pedido y se enviará a facturación desde el buzón corporativo.')) return;
         if (!profile?.id) {
             alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
             return;
