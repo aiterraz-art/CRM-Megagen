@@ -15,6 +15,7 @@ import ClientFormModal from '../components/modals/ClientFormModal';
 import ScheduleVisitModal from '../components/modals/ScheduleVisitModal';
 import { isProspectStatus } from '../utils/prospect';
 import ConfettiBurst, { ConfettiBurstController } from '../components/ConfettiBurst';
+import { clearVisitCheckoutDraft, loadVisitCheckoutDraft, saveVisitCheckoutDraft } from '../utils/visitCheckoutDraft';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -81,11 +82,47 @@ const VisitLog = () => {
     }, [clientId, profile, effectiveRole, hasPermission, navigate]);
 
     useEffect(() => {
+        if (!activeVisit?.id) {
+            setShowNotesModal(false);
+            setVisitNotes('');
+            setLeadScore(null);
+            setCheckoutClientEmail('');
+            setCheckoutDoctorName('');
+            setCheckoutDoctorSpecialty('');
+            return;
+        }
+
+        const draft = loadVisitCheckoutDraft(activeVisit.id);
+        if (draft) {
+            setShowNotesModal(draft.isOpen);
+            setVisitNotes(draft.notes);
+            setLeadScore(draft.leadScore ?? client?.lead_score ?? null);
+            setCheckoutClientEmail(draft.clientEmail || client?.email || '');
+            setCheckoutDoctorName(draft.doctorName || client?.purchase_contact || '');
+            setCheckoutDoctorSpecialty(draft.doctorSpecialty || client?.doctor_specialty || '');
+            return;
+        }
+
         setCheckoutClientEmail(client?.email || '');
         setCheckoutDoctorName(client?.purchase_contact || '');
         setCheckoutDoctorSpecialty(client?.doctor_specialty || '');
         setLeadScore(client?.lead_score ?? null);
-    }, [client?.id]);
+    }, [activeVisit?.id, client?.id]);
+
+    useEffect(() => {
+        if (!activeVisit?.id) return;
+
+        saveVisitCheckoutDraft({
+            visitId: activeVisit.id,
+            isOpen: showNotesModal,
+            notes: visitNotes,
+            leadScore,
+            clientEmail: checkoutClientEmail,
+            doctorName: checkoutDoctorName,
+            doctorSpecialty: checkoutDoctorSpecialty,
+            updatedAt: new Date().toISOString()
+        });
+    }, [activeVisit?.id, showNotesModal, visitNotes, leadScore, checkoutClientEmail, checkoutDoctorName, checkoutDoctorSpecialty]);
 
     const checkGeofence = async (clientData: Client) => {
         if (!clientData.lat || !clientData.lng) {
@@ -219,6 +256,7 @@ const VisitLog = () => {
             }
             const closed = await endVisit({ notes: visitNotes });
             if (closed) {
+                clearVisitCheckoutDraft(activeVisit?.id || visitId || '');
                 navigate('/');
             }
         } catch (error) {
@@ -408,11 +446,7 @@ const VisitLog = () => {
 
                         {/* Checkout Button */}
                         <button
-                            onClick={() => {
-                                setLeadScore(client?.lead_score ?? null);
-                                setCheckoutClientEmail(client?.email || '');
-                                setShowNotesModal(true);
-                            }}
+                            onClick={() => setShowNotesModal(true)}
                             disabled={finishing}
                             className="md:col-span-2 p-6 bg-red-50 text-red-600 rounded-2xl font-black text-lg hover:bg-red-600 hover:text-white transition-all shadow-lg active:scale-95"
                         >

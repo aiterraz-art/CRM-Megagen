@@ -7,6 +7,7 @@ import VisitCheckoutModal from './modals/VisitCheckoutModal';
 import ScheduleVisitModal from './modals/ScheduleVisitModal';
 import { supabase } from '../services/supabase';
 import { isProspectStatus } from '../utils/prospect';
+import { clearVisitCheckoutDraft, loadVisitCheckoutDraft, saveVisitCheckoutDraft } from '../utils/visitCheckoutDraft';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -69,11 +70,47 @@ const GlobalVisitTimer = () => {
     }, [activeVisit?.client_id]);
 
     useEffect(() => {
+        if (!activeVisit?.id) {
+            setShowNotesModal(false);
+            setVisitNotes('');
+            setLeadScore(null);
+            setCheckoutClientEmail('');
+            setCheckoutDoctorName('');
+            setCheckoutDoctorSpecialty('');
+            return;
+        }
+
+        const draft = loadVisitCheckoutDraft(activeVisit.id);
+        if (draft) {
+            setShowNotesModal(draft.isOpen);
+            setVisitNotes(draft.notes);
+            setLeadScore(draft.leadScore ?? activeClient?.lead_score ?? null);
+            setCheckoutClientEmail(draft.clientEmail || activeClient?.email || '');
+            setCheckoutDoctorName(draft.doctorName || activeClient?.purchase_contact || '');
+            setCheckoutDoctorSpecialty(draft.doctorSpecialty || activeClient?.doctor_specialty || '');
+            return;
+        }
+
         setLeadScore(activeClient?.lead_score ?? null);
         setCheckoutClientEmail(activeClient?.email || '');
         setCheckoutDoctorName(activeClient?.purchase_contact || '');
         setCheckoutDoctorSpecialty(activeClient?.doctor_specialty || '');
-    }, [activeClient?.id]);
+    }, [activeVisit?.id, activeClient?.id]);
+
+    useEffect(() => {
+        if (!activeVisit?.id) return;
+
+        saveVisitCheckoutDraft({
+            visitId: activeVisit.id,
+            isOpen: showNotesModal,
+            notes: visitNotes,
+            leadScore,
+            clientEmail: checkoutClientEmail,
+            doctorName: checkoutDoctorName,
+            doctorSpecialty: checkoutDoctorSpecialty,
+            updatedAt: new Date().toISOString()
+        });
+    }, [activeVisit?.id, showNotesModal, visitNotes, leadScore, checkoutClientEmail, checkoutDoctorName, checkoutDoctorSpecialty]);
 
     const formatTime = (totalSeconds: number) => {
         const isOvertime = totalSeconds > 20 * 60; // 20 minutes limit
@@ -147,6 +184,7 @@ const GlobalVisitTimer = () => {
 
             const closed = await endVisit({ notes: visitNotes });
             if (closed) {
+                clearVisitCheckoutDraft(activeVisit.id);
                 setShowNotesModal(false);
                 navigate('/');
             }
