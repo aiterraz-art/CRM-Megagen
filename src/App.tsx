@@ -23,6 +23,7 @@ const Clients = loadable(() => import('./pages/Clients'));
 const Inventory = loadable(() => import('./pages/Inventory'));
 const TeamStats = loadable(() => import('./pages/TeamStats'));
 const Quotations = loadable(() => import('./pages/Quotations'));
+const SizeChanges = loadable(() => import('./pages/SizeChanges'));
 const Orders = loadable(() => import('./pages/Orders'));
 const SellerRoutes = loadable(() => import('./pages/SellerRoutes'));
 const Pipeline = loadable(() => import('./pages/Pipeline'));
@@ -214,6 +215,7 @@ function App() {
                             <Route path="schedule" element={<Schedule />} />
                             <Route path="clients" element={<Clients />} />
                             <Route path="quotations" element={<Quotations />} />
+                            <Route path="size-changes" element={<PermissionGuard permission="VIEW_SIZE_CHANGES"><SizeChanges /></PermissionGuard>} />
                             <Route path="orders" element={<Orders />} />
                             <Route path="conversions" element={<ConversionsRanking />} />
                             <Route path="routes" element={<NonFacturadorGuard><SellerRoutes /></NonFacturadorGuard>} />

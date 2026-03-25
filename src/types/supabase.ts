@@ -354,6 +354,124 @@ export interface Database {
                     updated_at?: string
                 }
             }
+            size_change_requests: {
+                Row: {
+                    cancel_note: string | null
+                    cancelled_at: string | null
+                    cancelled_by: string | null
+                    client_address_snapshot: string | null
+                    client_comuna_snapshot: string | null
+                    client_id: string
+                    client_name_snapshot: string
+                    client_rut_snapshot: string | null
+                    close_note: string | null
+                    closed_at: string | null
+                    closed_by: string | null
+                    created_at: string
+                    created_by: string
+                    exchange_completed_successfully: boolean
+                    folio: number
+                    id: string
+                    request_comment: string | null
+                    return_products_collected: boolean
+                    seller_id: string
+                    seller_name_snapshot: string
+                    sent_at: string | null
+                    sent_by: string | null
+                    sent_note: string | null
+                    status: string
+                    updated_at: string
+                }
+                Insert: {
+                    cancel_note?: string | null
+                    cancelled_at?: string | null
+                    cancelled_by?: string | null
+                    client_address_snapshot?: string | null
+                    client_comuna_snapshot?: string | null
+                    client_id: string
+                    client_name_snapshot: string
+                    client_rut_snapshot?: string | null
+                    close_note?: string | null
+                    closed_at?: string | null
+                    closed_by?: string | null
+                    created_at?: string
+                    created_by: string
+                    exchange_completed_successfully?: boolean
+                    folio?: never
+                    id?: string
+                    request_comment?: string | null
+                    return_products_collected?: boolean
+                    seller_id: string
+                    seller_name_snapshot: string
+                    sent_at?: string | null
+                    sent_by?: string | null
+                    sent_note?: string | null
+                    status?: string
+                    updated_at?: string
+                }
+                Update: {
+                    cancel_note?: string | null
+                    cancelled_at?: string | null
+                    cancelled_by?: string | null
+                    client_address_snapshot?: string | null
+                    client_comuna_snapshot?: string | null
+                    client_id?: string
+                    client_name_snapshot?: string
+                    client_rut_snapshot?: string | null
+                    close_note?: string | null
+                    closed_at?: string | null
+                    closed_by?: string | null
+                    created_at?: string
+                    created_by?: string
+                    exchange_completed_successfully?: boolean
+                    folio?: never
+                    id?: string
+                    request_comment?: string | null
+                    return_products_collected?: boolean
+                    seller_id?: string
+                    seller_name_snapshot?: string
+                    sent_at?: string | null
+                    sent_by?: string | null
+                    sent_note?: string | null
+                    status?: string
+                    updated_at?: string
+                }
+            }
+            size_change_request_items: {
+                Row: {
+                    created_at: string
+                    id: string
+                    line_total: number
+                    product_id: string
+                    product_name_snapshot: string
+                    qty: number
+                    request_id: string
+                    sku_snapshot: string
+                    unit_price: number
+                }
+                Insert: {
+                    created_at?: string
+                    id?: string
+                    line_total: number
+                    product_id: string
+                    product_name_snapshot: string
+                    qty: number
+                    request_id: string
+                    sku_snapshot: string
+                    unit_price: number
+                }
+                Update: {
+                    created_at?: string
+                    id?: string
+                    line_total?: number
+                    product_id?: string
+                    product_name_snapshot?: string
+                    qty?: number
+                    request_id?: string
+                    sku_snapshot?: string
+                    unit_price?: number
+                }
+            }
             profiles: {
                 Row: {
                     email: string | null

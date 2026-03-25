@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -19,6 +19,7 @@ type MenuContext = {
     isSupervisor: boolean;
     canViewProcurement: boolean;
     canViewKitLoans: boolean;
+    canViewSizeChanges: boolean;
 };
 
 type MenuEntry = {
@@ -78,6 +79,14 @@ const allMenuEntries: MenuEntry[] = [
         icon: <ShoppingBag size={20} />,
         group: 'comercial',
         visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+    },
+    {
+        id: 'size-changes',
+        label: 'Cambios de Medida',
+        path: '/size-changes',
+        icon: <RefreshCw size={20} />,
+        group: 'comercial',
+        visibleWhen: ({ effectiveRole, canViewSizeChanges }) => effectiveRole !== 'driver' && canViewSizeChanges,
     },
     {
         id: 'orders',
@@ -249,6 +258,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const [openGroupId, setOpenGroupId] = useState<MenuGroupId | null>(null);
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
     const canViewKitLoans = hasPermission('VIEW_KIT_LOANS');
+    const canViewSizeChanges = hasPermission('VIEW_SIZE_CHANGES');
 
     const menuContext = useMemo(
         () => ({
@@ -256,8 +266,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             isSupervisor,
             canViewProcurement,
             canViewKitLoans,
+            canViewSizeChanges,
         }),
-        [effectiveRole, isSupervisor, canViewProcurement, canViewKitLoans]
+        [effectiveRole, isSupervisor, canViewProcurement, canViewKitLoans, canViewSizeChanges]
     );
 
     const visibleMenuEntries = useMemo(
