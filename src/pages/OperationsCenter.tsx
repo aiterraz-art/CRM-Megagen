@@ -1,41 +1,15 @@
 import { ChangeEvent, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { read, utils, writeFile } from 'xlsx';
+import { utils, writeFile } from 'xlsx';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { Activity, AlertTriangle, Bot, CheckCircle2, Clock3, DollarSign, ShieldCheck, Wrench, Upload, Download } from 'lucide-react';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 import { getApprovalReason, getApprovalRequestedItems, readDiscountApprovalPayload } from '../utils/discountApproval';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
+import { CollectionUploadRejected, parseCollectionsImportFile } from '../utils/collectionsImport';
 
 type TabKey = 'health' | 'automations' | 'sla' | 'approvals' | 'postsale';
 
-type CollectionUploadRow = {
-    seller_email: string | null;
-    seller_name: string | null;
-    client_name: string;
-    client_rut: string | null;
-    document_number: string;
-    document_type: string;
-    issue_date: string | null;
-    due_date: string;
-    amount: number;
-    outstanding_amount: number;
-    status: 'pending' | 'partial' | 'paid' | 'overdue' | 'disputed';
-    notes: string | null;
-};
-
-type CollectionUploadRejected = {
-    row_number: number;
-    reason: string;
-    seller_email: string;
-    seller_name: string;
-    client_name: string;
-    document_number: string;
-    due_date: string;
-    amount: string;
-    outstanding_amount: string;
-    status: string;
-};
 
 type AutomationTemplate = {
     key: string;
@@ -139,76 +113,6 @@ const SLA_TEMPLATES: SlaTemplate[] = [
 
 const getLabel = (options: { value: string; label: string }[], value: string) => {
     return options.find((o) => o.value === value)?.label || 'Configuracion personalizada';
-};
-
-const normalizeHeader = (input: string) => {
-    return (input || '')
-        .toString()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]+/g, '_');
-};
-
-const toIsoDate = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
-
-const excelSerialToDate = (value: number) => {
-    const utcDays = Math.floor(value - 25569);
-    const utcValue = utcDays * 86400;
-    const dateInfo = new Date(utcValue * 1000);
-    return new Date(dateInfo.getUTCFullYear(), dateInfo.getUTCMonth(), dateInfo.getUTCDate());
-};
-
-const parseDate = (value: any): string | null => {
-    if (value == null || value === '') return null;
-    if (value instanceof Date && !Number.isNaN(value.getTime())) return toIsoDate(value);
-
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        const converted = excelSerialToDate(value);
-        if (!Number.isNaN(converted.getTime())) return toIsoDate(converted);
-    }
-
-    const raw = String(value).trim();
-    if (!raw) return null;
-
-    const dmy = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-    if (dmy) {
-        const dd = Number(dmy[1]);
-        const mm = Number(dmy[2]);
-        const yyyy = Number(dmy[3]);
-        const date = new Date(yyyy, mm - 1, dd);
-        if (!Number.isNaN(date.getTime())) return toIsoDate(date);
-    }
-
-    const parsed = new Date(raw);
-    if (!Number.isNaN(parsed.getTime())) return toIsoDate(parsed);
-
-    return null;
-};
-
-const parseNumber = (value: any): number => {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    const cleaned = String(value ?? '')
-        .replace(/\$/g, '')
-        .replace(/\s/g, '')
-        .replace(/\./g, '')
-        .replace(/,/g, '.');
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
-};
-
-const getValueByAliases = (row: Record<string, any>, aliases: string[]) => {
-    const aliasSet = new Set(aliases.map(normalizeHeader));
-    for (const [key, val] of Object.entries(row)) {
-        if (aliasSet.has(normalizeHeader(key))) return val;
-    }
-    return null;
 };
 
 const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
@@ -523,29 +427,14 @@ const OperationsCenter = () => {
     };
 
     const downloadCollectionsTemplate = () => {
-        const headers = [
-            'seller_email', 'seller_name', 'client_name', 'client_rut', 'document_number', 'document_type',
-            'issue_date', 'due_date', 'amount', 'outstanding_amount', 'status', 'notes'
-        ];
-        const sample = {
-            seller_email: 'vendedor@empresa.cl',
-            seller_name: 'Juan Perez',
-            client_name: 'Clinica Norte',
-            client_rut: '76.123.456-7',
-            document_number: 'FAC-100234',
-            document_type: 'invoice',
-            issue_date: '2026-02-01',
-            due_date: '2026-03-01',
-            amount: 1500000,
-            outstanding_amount: 450000,
-            status: 'pending',
-            notes: 'Compromiso de pago semana 1'
-        };
-
-        const ws = utils.json_to_sheet([sample], { header: headers });
+        const ws = utils.aoa_to_sheet([
+            ['Codigo Cliente', 'Nombre', 'Docto', 'Serie', 'Numero', 'Vencimiento', '( > 90 ) $', '(61 - 90) $', '(31 - 60) $', '( 0 - 30) $', 'Saldo $'],
+            ['76.123.456-7', 'Clinica Norte', 'FVAELECT', '', '100234', '2026-03-01', '0', '0', '0', '1500000', '1500000'],
+            ['Saldo Cliente', '', '', '', '', '', '0', '0', '0', '1500000', '1500000']
+        ]);
         const wb = utils.book_new();
         utils.book_append_sheet(wb, ws, 'cobranzas');
-        writeFile(wb, 'plantilla_cobranzas.xlsx');
+        writeFile(wb, 'plantilla_cobranzas_erp.xlsx');
     };
 
     const downloadCurrentCollections = () => {
@@ -578,80 +467,6 @@ const OperationsCenter = () => {
         writeFile(wb, 'cobranzas_filas_rechazadas.xlsx');
     };
 
-    const parseCollectionsRows = (rows: Record<string, any>[]): { valid: CollectionUploadRow[]; rejected: CollectionUploadRejected[] } => {
-        const valid: CollectionUploadRow[] = [];
-        const rejected: CollectionUploadRejected[] = [];
-
-        rows.forEach((row, index) => {
-            const sellerEmailRaw = getValueByAliases(row, ['seller_email', 'email_vendedor', 'vendedor_email', 'email']);
-            const sellerNameRaw = getValueByAliases(row, ['seller_name', 'vendedor', 'seller']);
-            const clientNameRaw = getValueByAliases(row, ['client_name', 'cliente', 'razon_social', 'nombre_cliente']);
-            const clientRutRaw = getValueByAliases(row, ['client_rut', 'rut_cliente', 'rut']);
-            const docNumberRaw = getValueByAliases(row, ['document_number', 'documento', 'folio', 'factura', 'numero_documento', 'nro_documento']);
-            const docTypeRaw = getValueByAliases(row, ['document_type', 'tipo_documento', 'tipo']);
-            const issueDateRaw = getValueByAliases(row, ['issue_date', 'fecha_emision', 'emision']);
-            const dueDateRaw = getValueByAliases(row, ['due_date', 'fecha_vencimiento', 'vencimiento', 'fecha_vence']);
-            const amountRaw = getValueByAliases(row, ['amount', 'monto_total', 'monto', 'total']);
-            const outstandingRaw = getValueByAliases(row, ['outstanding_amount', 'saldo_pendiente', 'saldo', 'pendiente']);
-            const statusRaw = getValueByAliases(row, ['status', 'estado']);
-            const notesRaw = getValueByAliases(row, ['notes', 'nota', 'observacion', 'observaciones']);
-
-            const clientName = String(clientNameRaw ?? '').trim();
-            const documentNumber = String(docNumberRaw ?? '').trim();
-            const dueDate = parseDate(dueDateRaw);
-            const amount = parseNumber(amountRaw);
-            const outstanding = parseNumber(outstandingRaw);
-            const statusNormalized = normalizeHeader(String(statusRaw ?? 'pending'));
-            const statusValid = ['pending', 'partial', 'paid', 'overdue', 'disputed'].includes(statusNormalized);
-
-            const reasons: string[] = [];
-            if (!clientName) reasons.push('client_name vacío');
-            if (!documentNumber) reasons.push('document_number vacío');
-            if (!dueDate) reasons.push('due_date inválida');
-            if (amount < 0) reasons.push('amount negativo');
-            if (outstanding < 0) reasons.push('outstanding_amount negativo');
-            if (!statusValid) reasons.push('status inválido');
-
-            if (reasons.length > 0) {
-                rejected.push({
-                    row_number: index + 2,
-                    reason: reasons.join('; '),
-                    seller_email: String(sellerEmailRaw ?? ''),
-                    seller_name: String(sellerNameRaw ?? ''),
-                    client_name: String(clientNameRaw ?? ''),
-                    document_number: String(docNumberRaw ?? ''),
-                    due_date: String(dueDateRaw ?? ''),
-                    amount: String(amountRaw ?? ''),
-                    outstanding_amount: String(outstandingRaw ?? ''),
-                    status: String(statusRaw ?? '')
-                });
-                return;
-            }
-
-            const status: CollectionUploadRow['status'] =
-                statusNormalized === 'partial' ? 'partial' :
-                    statusNormalized === 'paid' ? 'paid' :
-                        statusNormalized === 'overdue' ? 'overdue' : statusNormalized === 'disputed' ? 'disputed' : 'pending';
-
-            valid.push({
-                seller_email: sellerEmailRaw ? String(sellerEmailRaw).trim().toLowerCase() : null,
-                seller_name: sellerNameRaw ? String(sellerNameRaw).trim() : null,
-                client_name: clientName,
-                client_rut: clientRutRaw ? String(clientRutRaw).trim() : null,
-                document_number: documentNumber,
-                document_type: docTypeRaw ? String(docTypeRaw).trim() : 'invoice',
-                issue_date: parseDate(issueDateRaw),
-                due_date: dueDate as string,
-                amount,
-                outstanding_amount: outstanding > 0 ? outstanding : amount,
-                status,
-                notes: notesRaw ? String(notesRaw).trim() : null
-            });
-        });
-
-        return { valid, rejected };
-    };
-
     const uploadCollectionsFile = async (e: ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -671,21 +486,13 @@ const OperationsCenter = () => {
             }
 
             const buffer = await file.arrayBuffer();
-            const wb = read(buffer, { type: 'array', cellDates: true });
-            const sheetName = wb.SheetNames[0];
-            if (!sheetName) throw new Error('No se encontró hoja válida en el archivo.');
-
-            const ws = wb.Sheets[sheetName];
-            const rows = utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
-            if (rows.length === 0) throw new Error('El archivo no contiene datos.');
-
-            const parsed = parseCollectionsRows(rows);
+            const parsed = parseCollectionsImportFile(buffer);
             if (parsed.valid.length === 0) {
-                throw new Error('No se encontraron filas válidas. Verifica que el archivo tenga client_name, document_number y due_date.');
+                throw new Error('No se encontraron filas válidas. Verifica que el archivo corresponda al formato del ERP o a la plantilla histórica.');
             }
             setCollectionsRejectedRows(parsed.rejected);
 
-            const { data, error } = await supabase.rpc('replace_collections_pending', {
+            const { error } = await supabase.rpc('replace_collections_pending', {
                 p_file_name: file.name,
                 p_uploaded_by: profile?.id || null,
                 p_rows: parsed.valid
@@ -694,7 +501,7 @@ const OperationsCenter = () => {
             if (error) throw error;
 
             const rejectedNotice = parsed.rejected.length > 0 ? ` Filas rechazadas: ${parsed.rejected.length}.` : '';
-            alert(`Carga completada. Dataset reemplazado con ${parsed.valid.length} filas.${rejectedNotice} Batch: ${String(data).slice(0, 8)}`);
+            alert(`Sincronización completada. Documentos vigentes cargados: ${parsed.valid.length}.${rejectedNotice} Lo que no venía en este archivo quedó marcado como pagado.`);
             fetchData();
         } catch (err: any) {
             alert(`Error cargando cobranzas: ${err?.message || 'desconocido'}`);
@@ -1056,7 +863,7 @@ const OperationsCenter = () => {
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                             <div>
                                 <h3 className="font-black text-lg">Cobranzas Pendientes (carga masiva)</h3>
-                                <p className="text-xs text-gray-500">Sube CSV/XLSX. Cada carga reemplaza el dataset anterior. Solo se considera el Excel cargado; pedidos del CRM no suman cobranza.</p>
+                                <p className="text-xs text-gray-500">Sube el snapshot del ERP. Los documentos que sigan viniendo conservan el descargo del vendedor; los que desaparecen se marcan como pagados. Los pedidos del CRM no suman cobranza.</p>
                                 {activeCollectionBatch && (
                                     <p className="text-xs text-gray-400 mt-1">
                                         Batch activo: {activeCollectionBatch.file_name} · {activeCollectionBatch.row_count} filas · {new Date(activeCollectionBatch.created_at).toLocaleString()}

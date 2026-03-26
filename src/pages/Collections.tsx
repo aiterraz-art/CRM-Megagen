@@ -1,100 +1,9 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { read, utils, writeFile } from 'xlsx';
+import { utils, writeFile } from 'xlsx';
 import { Upload, Download, DollarSign } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-
-type CollectionUploadRow = {
-    client_name: string;
-    client_rut: string | null;
-    document_number: string;
-    due_date: string;
-    amount: number;
-    seller_email: string | null;
-    seller_name: string | null;
-};
-
-type CollectionUploadRejected = {
-    row_number: number;
-    reason: string;
-    client_name: string;
-    client_rut: string;
-    document_number: string;
-    due_date: string;
-    amount: string;
-    seller_email: string;
-    seller_name: string;
-};
-
-const normalizeHeader = (input: string) => {
-    return (input || '')
-        .toString()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]+/g, '_');
-};
-
-const toIsoDate = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
-
-const excelSerialToDate = (value: number) => {
-    const utcDays = Math.floor(value - 25569);
-    const utcValue = utcDays * 86400;
-    const dateInfo = new Date(utcValue * 1000);
-    return new Date(dateInfo.getUTCFullYear(), dateInfo.getUTCMonth(), dateInfo.getUTCDate());
-};
-
-const parseDate = (value: any): string | null => {
-    if (value == null || value === '') return null;
-    if (value instanceof Date && !Number.isNaN(value.getTime())) return toIsoDate(value);
-
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        const converted = excelSerialToDate(value);
-        if (!Number.isNaN(converted.getTime())) return toIsoDate(converted);
-    }
-
-    const raw = String(value).trim();
-    if (!raw) return null;
-
-    const dmy = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-    if (dmy) {
-        const dd = Number(dmy[1]);
-        const mm = Number(dmy[2]);
-        const yyyy = Number(dmy[3]);
-        const date = new Date(yyyy, mm - 1, dd);
-        if (!Number.isNaN(date.getTime())) return toIsoDate(date);
-    }
-
-    const parsed = new Date(raw);
-    if (!Number.isNaN(parsed.getTime())) return toIsoDate(parsed);
-
-    return null;
-};
-
-const parseNumber = (value: any): number => {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    const cleaned = String(value ?? '')
-        .replace(/\$/g, '')
-        .replace(/\s/g, '')
-        .replace(/\./g, '')
-        .replace(/,/g, '.');
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
-};
-
-const getValueByAliases = (row: Record<string, any>, aliases: string[]) => {
-    const aliasSet = new Set(aliases.map(normalizeHeader));
-    for (const [key, val] of Object.entries(row)) {
-        if (aliasSet.has(normalizeHeader(key))) return val;
-    }
-    return null;
-};
+import { CollectionUploadRejected, parseCollectionsImportFile } from '../utils/collectionsImport';
 
 const Collections = () => {
     const { profile, effectiveRole, hasPermission } = useUser();
@@ -178,27 +87,17 @@ const Collections = () => {
 
     const downloadTemplate = () => {
         if (!canDownloadTemplate) {
-            alert('Solo jefes y administradores pueden descargar la plantilla.');
+            alert('Solo usuarios con gestión de cobranzas pueden descargar la plantilla.');
             return;
         }
-        const headers = [
-            'razon_social', 'rut', 'numero_documento', 'fecha_vencimiento', 'monto_con_iva',
-            'seller_email', 'seller_name'
-        ];
-        const sample = {
-            razon_social: 'Clinica Norte',
-            rut: '76.123.456-7',
-            numero_documento: 'FAC-100234',
-            fecha_vencimiento: '2026-03-01',
-            monto_con_iva: 1500000,
-            seller_email: 'vendedor@empresa.cl',
-            seller_name: 'Juan Perez'
-        };
-
-        const ws = utils.json_to_sheet([sample], { header: headers });
+        const ws = utils.aoa_to_sheet([
+            ['Codigo Cliente', 'Nombre', 'Docto', 'Serie', 'Numero', 'Vencimiento', '( > 90 ) $', '(61 - 90) $', '(31 - 60) $', '( 0 - 30) $', 'Saldo $'],
+            ['76.123.456-7', 'Clinica Norte', 'FVAELECT', '', '100234', '2026-03-01', '0', '0', '0', '1500000', '1500000'],
+            ['Saldo Cliente', '', '', '', '', '', '0', '0', '0', '1500000', '1500000']
+        ]);
         const wb = utils.book_new();
         utils.book_append_sheet(wb, ws, 'cobranzas');
-        writeFile(wb, 'plantilla_cobranzas.xlsx');
+        writeFile(wb, 'plantilla_cobranzas_erp.xlsx');
     };
 
     const downloadCurrent = () => {
@@ -229,65 +128,12 @@ const Collections = () => {
         writeFile(wb, 'cobranzas_filas_rechazadas.xlsx');
     };
 
-    const parseRows = (rawRows: Record<string, any>[]): { valid: CollectionUploadRow[]; rejected: CollectionUploadRejected[] } => {
-        const valid: CollectionUploadRow[] = [];
-        const rejected: CollectionUploadRejected[] = [];
-
-        rawRows.forEach((row, index) => {
-            const sellerEmailRaw = getValueByAliases(row, ['seller_email', 'email_vendedor', 'vendedor_email', 'email']);
-            const sellerNameRaw = getValueByAliases(row, ['seller_name', 'vendedor', 'seller']);
-            const clientNameRaw = getValueByAliases(row, ['client_name', 'cliente', 'razon_social', 'nombre_cliente']);
-            const clientRutRaw = getValueByAliases(row, ['client_rut', 'rut_cliente', 'rut']);
-            const docNumberRaw = getValueByAliases(row, ['document_number', 'documento', 'folio', 'factura', 'numero_documento', 'nro_documento']);
-            const dueDateRaw = getValueByAliases(row, ['due_date', 'fecha_vencimiento', 'vencimiento', 'fecha_vence']);
-            const amountRaw = getValueByAliases(row, ['amount', 'monto_total', 'monto', 'total', 'monto_con_iva']);
-
-            const clientName = String(clientNameRaw ?? '').trim();
-            const documentNumber = String(docNumberRaw ?? '').trim();
-            const dueDate = parseDate(dueDateRaw);
-            const amount = parseNumber(amountRaw);
-
-            const reasons: string[] = [];
-            if (!clientName) reasons.push('razon_social vacío');
-            if (!documentNumber) reasons.push('numero_documento vacío');
-            if (!dueDate) reasons.push('fecha_vencimiento inválida');
-            if (amount <= 0) reasons.push('monto_con_iva inválido');
-
-            if (reasons.length > 0) {
-                rejected.push({
-                    row_number: index + 2,
-                    reason: reasons.join('; '),
-                    client_name: String(clientNameRaw ?? ''),
-                    client_rut: String(clientRutRaw ?? ''),
-                    document_number: String(docNumberRaw ?? ''),
-                    due_date: String(dueDateRaw ?? ''),
-                    amount: String(amountRaw ?? ''),
-                    seller_email: String(sellerEmailRaw ?? ''),
-                    seller_name: String(sellerNameRaw ?? '')
-                });
-                return;
-            }
-
-            valid.push({
-                client_name: clientName,
-                client_rut: clientRutRaw ? String(clientRutRaw).trim() : null,
-                document_number: documentNumber,
-                due_date: dueDate as string,
-                amount,
-                seller_email: sellerEmailRaw ? String(sellerEmailRaw).trim().toLowerCase() : null,
-                seller_name: sellerNameRaw ? String(sellerNameRaw).trim() : null
-            });
-        });
-
-        return { valid, rejected };
-    };
-
     const uploadFile = async (e: ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         if (!canUpload) {
-            alert('Solo jefes y administradores pueden cargar cobranzas.');
+            alert('Solo usuarios con gestión de cobranzas pueden cargar cobranzas.');
             e.target.value = '';
             return;
         }
@@ -301,21 +147,13 @@ const Collections = () => {
             }
 
             const buffer = await file.arrayBuffer();
-            const wb = read(buffer, { type: 'array', cellDates: true });
-            const sheetName = wb.SheetNames[0];
-            if (!sheetName) throw new Error('No se encontró hoja válida en el archivo.');
-
-            const ws = wb.Sheets[sheetName];
-            const importedRows = utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
-            if (importedRows.length === 0) throw new Error('El archivo no contiene datos.');
-
-            const parsed = parseRows(importedRows);
+            const parsed = parseCollectionsImportFile(buffer);
             if (parsed.valid.length === 0) {
-                throw new Error('No se encontraron filas válidas. Verifica columnas obligatorias: razon_social, rut, numero_documento, fecha_vencimiento, monto_con_iva.');
+                throw new Error('No se encontraron filas válidas. Verifica que el archivo corresponda al formato del ERP o a la plantilla histórica.');
             }
             setRejectedRows(parsed.rejected);
 
-            const { data, error } = await supabase.rpc('replace_collections_pending', {
+            const { error } = await supabase.rpc('replace_collections_pending', {
                 p_file_name: file.name,
                 p_uploaded_by: profile?.id || null,
                 p_rows: parsed.valid
@@ -324,7 +162,7 @@ const Collections = () => {
             if (error) throw error;
 
             const rejectedNotice = parsed.rejected.length > 0 ? ` Filas rechazadas: ${parsed.rejected.length}.` : '';
-            alert(`Carga incremental completada. Se procesaron ${parsed.valid.length} filas.${rejectedNotice} Batch: ${String(data).slice(0, 8)}`);
+            alert(`Sincronización completada. Documentos vigentes cargados: ${parsed.valid.length}.${rejectedNotice} Lo que no venía en este archivo quedó marcado como pagado.`);
             fetchData();
         } catch (err: any) {
             alert(`Error cargando cobranzas: ${err?.message || 'desconocido'}`);
@@ -383,7 +221,7 @@ const Collections = () => {
                     <div>
                         <h3 className="font-black text-lg">Carga masiva de cobranzas</h3>
                         <p className="text-sm text-gray-500">
-                            Importación incremental por número de documento: no duplica folios existentes y preserva descargos.
+                            Sincronización por snapshot del ERP. Los documentos que sigan viniendo conservan el descargo del vendedor; los que desaparecen se marcan como pagados.
                         </p>
                         {activeBatch && (
                             <p className="text-xs text-gray-500 mt-1">
@@ -424,7 +262,7 @@ const Collections = () => {
 
                 {!canUpload && (
                     <div className="p-3 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 text-sm">
-                        Solo jefes y administradores pueden subir archivos. Tú puedes visualizar tus cobranzas asignadas y registrar descargos.
+                        Solo usuarios con gestión de cobranzas pueden subir archivos. Tú puedes visualizar tus cobranzas asignadas y registrar descargos.
                     </div>
                 )}
 
