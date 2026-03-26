@@ -174,6 +174,7 @@ const OperationsCenter = () => {
     const [commitments, setCommitments] = useState<any[]>([]);
 
     const [collectionsRows, setCollectionsRows] = useState<any[]>([]);
+    const [collectionsPaidHistory, setCollectionsPaidHistory] = useState<any[]>([]);
     const [collectionsSummary, setCollectionsSummary] = useState<any[]>([]);
     const [activeCollectionBatch, setActiveCollectionBatch] = useState<any>(null);
     const [collectionsRejectedRows, setCollectionsRejectedRows] = useState<CollectionUploadRejected[]>([]);
@@ -195,6 +196,7 @@ const OperationsCenter = () => {
                 ticketsRes,
                 commitmentsRes,
                 collectionsRes,
+                collectionsPaidRes,
                 collectionsSummaryRes,
                 collectionsBatchRes
             ] = await Promise.all([
@@ -208,6 +210,7 @@ const OperationsCenter = () => {
                 supabase.from('service_tickets').select('*').order('created_at', { ascending: false }).limit(100),
                 supabase.from('payment_commitments').select('*').order('created_at', { ascending: false }).limit(100),
                 supabase.from('vw_collections_pending_current').select('*').order('due_date', { ascending: true }).limit(500),
+                supabase.from('vw_collections_paid_history').select('*').order('paid_detected_at', { ascending: false }).limit(100),
                 supabase.from('vw_collections_seller_summary_current').select('*').limit(200),
                 supabase.from('collections_import_batches').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle()
             ]);
@@ -215,7 +218,7 @@ const OperationsCenter = () => {
             const firstError =
                 healthRes.error || alertsRes.error || timelineRes.error || rulesRes.error || slaRes.error ||
                 slaEventsRes.error || approvalsRes.error || ticketsRes.error || commitmentsRes.error ||
-                collectionsRes.error || collectionsSummaryRes.error || collectionsBatchRes.error;
+                collectionsRes.error || collectionsPaidRes.error || collectionsSummaryRes.error || collectionsBatchRes.error;
 
             if (firstError) throw firstError;
 
@@ -299,6 +302,7 @@ const OperationsCenter = () => {
             setTickets(ticketsRes.data || []);
             setCommitments(commitmentsRes.data || []);
             setCollectionsRows(collectionsRes.data || []);
+            setCollectionsPaidHistory(collectionsPaidRes.data || []);
             setCollectionsSummary(collectionsSummaryRes.data || []);
             setActiveCollectionBatch(collectionsBatchRes.data || null);
         } catch (e: any) {
@@ -935,7 +939,7 @@ const OperationsCenter = () => {
                         </div>
                     </div>
 
-                    <div className="grid md:grid-cols-2 gap-4">
+                    <div className="grid md:grid-cols-3 gap-4">
                         <div className="bg-white border rounded-2xl p-4">
                             <h3 className="font-black mb-3 flex items-center gap-2"><AlertTriangle size={16} /> Tickets postventa</h3>
                             <div className="space-y-2">
@@ -951,6 +955,29 @@ const OperationsCenter = () => {
                                         )}
                                     </div>
                                 ))}
+                                {tickets.length === 0 && <p className="text-sm text-gray-500">No hay tickets.</p>}
+                            </div>
+                        </div>
+                        <div className="bg-white border rounded-2xl p-4">
+                            <h3 className="font-black mb-3 flex items-center gap-2"><CheckCircle2 size={16} /> Pagados detectados</h3>
+                            <div className="space-y-2 max-h-72 overflow-auto">
+                                {collectionsPaidHistory.map((row) => (
+                                    <div key={row.id} className="p-3 rounded-xl border">
+                                        <div className="flex justify-between gap-2">
+                                            <p className="font-bold text-sm">{row.document_number} · {row.client_name}</p>
+                                            <span className="text-[11px] text-emerald-700 font-bold">
+                                                {row.paid_detected_at ? new Date(row.paid_detected_at).toLocaleDateString('es-CL') : 'Pagado'}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-gray-500">
+                                            Vendedor: {row.seller_name || row.seller_email || '-'} · Monto: ${Number(row.amount || 0).toLocaleString('es-CL')}
+                                        </p>
+                                        {row.seller_comment && (
+                                            <p className="text-[11px] text-gray-600 mt-1">Descargo: {row.seller_comment}</p>
+                                        )}
+                                    </div>
+                                ))}
+                                {collectionsPaidHistory.length === 0 && <p className="text-sm text-gray-500">Sin historial pagado.</p>}
                             </div>
                         </div>
                         <div className="bg-white border rounded-2xl p-4">

@@ -14,6 +14,7 @@ const Collections = () => {
     const [uploading, setUploading] = useState(false);
 
     const [allRows, setAllRows] = useState<any[]>([]);
+    const [allPaidRows, setAllPaidRows] = useState<any[]>([]);
     const [allSummary, setAllSummary] = useState<any[]>([]);
     const [activeBatch, setActiveBatch] = useState<any>(null);
     const [rejectedRows, setRejectedRows] = useState<CollectionUploadRejected[]>([]);
@@ -51,21 +52,34 @@ const Collections = () => {
         });
     }, [allSummary, isSeller, profile?.email, profile?.id]);
 
+    const paidRows = useMemo(() => {
+        if (!isSeller) return allPaidRows;
+        const myEmail = normalizeEmail(profile?.email);
+        const myId = profile?.id;
+        return allPaidRows.filter((row) => {
+            const sellerId = row.seller_id || null;
+            const sellerEmail = normalizeEmail(row.seller_email);
+            return (myId && sellerId === myId) || (myEmail && sellerEmail === myEmail);
+        });
+    }, [allPaidRows, isSeller, profile?.email, profile?.id]);
+
     const fetchData = async () => {
         setLoading(true);
         setError(null);
         try {
-            const [rowsRes, summaryRes, batchRes] = await Promise.all([
+            const [rowsRes, paidRowsRes, summaryRes, batchRes] = await Promise.all([
                 supabase.from('vw_collections_pending_current').select('*').order('due_date', { ascending: true }).limit(5000),
+                supabase.from('vw_collections_paid_history').select('*').order('paid_detected_at', { ascending: false }).limit(5000),
                 supabase.from('vw_collections_seller_summary_current').select('*').limit(500),
                 supabase.from('collections_import_batches').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle()
             ]);
 
-            const firstError = rowsRes.error || summaryRes.error || batchRes.error;
+            const firstError = rowsRes.error || paidRowsRes.error || summaryRes.error || batchRes.error;
             if (firstError) throw firstError;
 
             const loadedRows = rowsRes.data || [];
             setAllRows(loadedRows);
+            setAllPaidRows(paidRowsRes.data || []);
             setAllSummary(summaryRes.data || []);
             setActiveBatch(batchRes.data || null);
 
@@ -178,6 +192,12 @@ const Collections = () => {
         const overdue = rows.filter(row => Number(row.aging_days || 0) > 0).reduce((acc, row) => acc + Number(row.outstanding_amount || 0), 0);
         return { docs, outstanding, overdue };
     }, [rows]);
+
+    const paidTotals = useMemo(() => {
+        const docs = paidRows.length;
+        const amount = paidRows.reduce((acc, row) => acc + Number(row.amount || 0), 0);
+        return { docs, amount };
+    }, [paidRows]);
 
     const saveSellerComment = async (row: any) => {
         if (!canEditComment) return;
@@ -349,6 +369,59 @@ const Collections = () => {
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <div className="bg-white border rounded-2xl p-4">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+                    <div>
+                        <h3 className="font-black text-lg">Historial pagado</h3>
+                        <p className="text-sm text-gray-500">
+                            Documentos que desaparecieron del snapshot del ERP y quedaron marcados como pagados.
+                        </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 md:w-auto">
+                        <div className="p-3 rounded-xl bg-gray-50 border min-w-[140px]">
+                            <p className="text-xs text-gray-500">Documentos pagados</p>
+                            <p className="text-xl font-black">{paidTotals.docs}</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-gray-50 border min-w-[160px]">
+                            <p className="text-xs text-gray-500">Monto histórico</p>
+                            <p className="text-xl font-black text-emerald-700">${paidTotals.amount.toLocaleString('es-CL')}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="overflow-auto max-h-[420px]">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="text-left border-b">
+                                <th className="py-2 pr-2">Razón social</th>
+                                <th className="py-2 pr-2">RUT</th>
+                                <th className="py-2 pr-2">N° documento</th>
+                                <th className="py-2 pr-2">Vencía</th>
+                                <th className="py-2 pr-2">Monto c/IVA</th>
+                                <th className="py-2 pr-2">Vendedor</th>
+                                <th className="py-2 pr-2">Pagado detectado</th>
+                                <th className="py-2 pr-2">Descargo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {paidRows.map((r) => (
+                                <tr key={r.id} className="border-b last:border-0 align-top">
+                                    <td className="py-2 pr-2">{r.client_name}</td>
+                                    <td className="py-2 pr-2">{r.client_rut || '-'}</td>
+                                    <td className="py-2 pr-2">{r.document_number}</td>
+                                    <td className="py-2 pr-2">{r.due_date}</td>
+                                    <td className="py-2 pr-2 font-bold">${Number(r.amount || 0).toLocaleString('es-CL')}</td>
+                                    <td className="py-2 pr-2 text-xs text-gray-600">{r.seller_name || r.seller_email || '-'}</td>
+                                    <td className="py-2 pr-2 text-xs text-gray-600">{r.paid_detected_at ? new Date(r.paid_detected_at).toLocaleString('es-CL') : '-'}</td>
+                                    <td className="py-2 pr-2 text-xs text-gray-600 min-w-[240px]">{r.seller_comment || '-'}</td>
+                                </tr>
+                            ))}
+                            {paidRows.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-gray-500">Sin historial pagado todavía.</td></tr>}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
