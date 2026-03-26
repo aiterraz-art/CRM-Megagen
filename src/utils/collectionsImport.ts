@@ -30,6 +30,8 @@ export type CollectionUploadRejected = {
     status: string;
 };
 
+export type CollectionsRpcRow = Array<string | number | null>;
+
 export const normalizeHeader = (input: string) => {
     return (input || '')
         .toString()
@@ -339,4 +341,75 @@ export const parseCollectionsImportFile = (buffer: ArrayBuffer) => {
 
     const legacyResult = parseLegacyRows(rawRows);
     return { ...legacyResult, detectedFormat: 'legacy' as const };
+};
+
+export const buildCollectionsRpcRows = (
+    rows: CollectionUploadRow[],
+    format: 'erp' | 'full' = 'full'
+): CollectionsRpcRow[] => {
+    if (format === 'erp') {
+        return rows.map((row) => [
+            row.client_name,
+            row.client_rut,
+            row.document_number,
+            row.document_type,
+            row.due_date,
+            row.amount
+        ]);
+    }
+
+    return rows.map((row) => [
+        row.seller_email,
+        row.seller_name,
+        row.client_name,
+        row.client_rut,
+        row.document_number,
+        row.document_type,
+        row.issue_date,
+        row.due_date,
+        row.amount,
+        row.outstanding_amount,
+        row.status,
+        row.notes
+    ]);
+};
+
+export const uploadCollectionsSnapshot = async (
+    supabase: any,
+    params: {
+        fileName: string;
+        uploadedBy: string | null;
+        rows: CollectionUploadRow[];
+        format: 'erp' | 'full';
+        chunkSize?: number;
+    }
+) => {
+    const sessionId = crypto.randomUUID();
+    const chunkSize = params.chunkSize ?? 100;
+    const rpcRows = buildCollectionsRpcRows(params.rows, params.format);
+
+    try {
+        for (let i = 0; i < rpcRows.length; i += chunkSize) {
+            const chunk = rpcRows.slice(i, i + chunkSize);
+            const { error } = await supabase.rpc('stage_collections_pending_rows', {
+                p_session_id: sessionId,
+                p_rows: chunk
+            } as any);
+            if (error) throw error;
+        }
+
+        const { data, error } = await supabase.rpc('finalize_collections_pending_upload', {
+            p_session_id: sessionId,
+            p_file_name: params.fileName,
+            p_uploaded_by: params.uploadedBy
+        } as any);
+        if (error) throw error;
+
+        return data as string;
+    } catch (error) {
+        await supabase.rpc('discard_collections_pending_upload', {
+            p_session_id: sessionId
+        } as any).catch(() => undefined);
+        throw error;
+    }
 };

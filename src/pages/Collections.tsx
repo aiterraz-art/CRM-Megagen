@@ -3,7 +3,7 @@ import { utils, writeFile } from 'xlsx';
 import { Upload, Download, DollarSign } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { CollectionUploadRejected, parseCollectionsImportFile } from '../utils/collectionsImport';
+import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollectionsSnapshot } from '../utils/collectionsImport';
 
 const Collections = () => {
     const { profile, effectiveRole, hasPermission } = useUser();
@@ -167,13 +167,12 @@ const Collections = () => {
             }
             setRejectedRows(parsed.rejected);
 
-            const { error } = await supabase.rpc('replace_collections_pending', {
-                p_file_name: file.name,
-                p_uploaded_by: profile?.id || null,
-                p_rows: parsed.valid
-            } as any);
-
-            if (error) throw error;
+            await uploadCollectionsSnapshot(supabase, {
+                fileName: file.name,
+                uploadedBy: profile?.id || null,
+                rows: parsed.valid,
+                format: parsed.detectedFormat === 'erp' ? 'erp' : 'full'
+            });
 
             const rejectedNotice = parsed.rejected.length > 0 ? ` Filas rechazadas: ${parsed.rejected.length}.` : '';
             alert(`Sincronización completada. Documentos vigentes cargados: ${parsed.valid.length}.${rejectedNotice} Lo que no venía en este archivo quedó marcado como pagado.`);

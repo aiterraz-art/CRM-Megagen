@@ -6,7 +6,7 @@ import { Activity, AlertTriangle, Bot, CheckCircle2, Clock3, DollarSign, ShieldC
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 import { getApprovalReason, getApprovalRequestedItems, readDiscountApprovalPayload } from '../utils/discountApproval';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
-import { CollectionUploadRejected, parseCollectionsImportFile } from '../utils/collectionsImport';
+import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollectionsSnapshot } from '../utils/collectionsImport';
 
 type TabKey = 'health' | 'automations' | 'sla' | 'approvals' | 'postsale';
 
@@ -496,13 +496,12 @@ const OperationsCenter = () => {
             }
             setCollectionsRejectedRows(parsed.rejected);
 
-            const { error } = await supabase.rpc('replace_collections_pending', {
-                p_file_name: file.name,
-                p_uploaded_by: profile?.id || null,
-                p_rows: parsed.valid
-            } as any);
-
-            if (error) throw error;
+            await uploadCollectionsSnapshot(supabase, {
+                fileName: file.name,
+                uploadedBy: profile?.id || null,
+                rows: parsed.valid,
+                format: parsed.detectedFormat === 'erp' ? 'erp' : 'full'
+            });
 
             const rejectedNotice = parsed.rejected.length > 0 ? ` Filas rechazadas: ${parsed.rejected.length}.` : '';
             alert(`Sincronización completada. Documentos vigentes cargados: ${parsed.valid.length}.${rejectedNotice} Lo que no venía en este archivo quedó marcado como pagado.`);
