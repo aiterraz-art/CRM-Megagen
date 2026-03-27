@@ -24,6 +24,7 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
         phone: '',
         email: '',
         address: '',
+        office: '',
         lat: 0,
         lng: 0,
         notes: '',
@@ -43,6 +44,7 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
                 phone: initialData.phone || '',
                 email: initialData.email || '',
                 address: initialData.address || '',
+                office: initialData.office || '',
                 lat: initialData.lat || 0,
                 lng: initialData.lng || 0,
                 notes: initialData.notes || '',
@@ -230,19 +232,32 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
                         </div>
 
                         {/* Address (Google Maps) */}
-                        <div className="space-y-2 md:col-span-2">
-                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Dirección (Búsqueda GPS)</label>
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Dirección (Búsqueda GPS) <span className="text-red-500">*</span></label>
                             <div className="relative group">
                                 <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-indigo-500 transition-colors" size={18} />
                                 <input
                                     ref={inputRef}
                                     type="text"
+                                    required
                                     value={formData.address}
                                     onChange={(e) => handleChange('address', e.target.value)}
                                     className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-transparent rounded-xl font-bold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200 outline-none transition-all placeholder:font-medium placeholder:text-gray-300"
                                     placeholder="Buscar dirección en Google Maps..."
                                 />
                             </div>
+                        </div>
+
+                        {/* Office / Dept */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Oficina / Depto</label>
+                            <input
+                                type="text"
+                                value={formData.office}
+                                onChange={(e) => handleChange('office', e.target.value)}
+                                className="w-full px-4 py-3 bg-gray-50 border border-transparent rounded-xl font-bold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200 outline-none transition-all placeholder:font-medium placeholder:text-gray-300"
+                                placeholder="Ej. Of 402"
+                            />
                         </div>
 
                         {/* Comuna */}

@@ -431,6 +431,7 @@ const Collections = () => {
             phone: String(formData.phone || '').trim(),
             email: String(formData.email || '').trim(),
             address: finalAddress,
+            office: String(formData.office || '').trim() || null,
             lat: Number.isFinite(finalLat) ? finalLat : 0,
             lng: Number.isFinite(finalLng) ? finalLng : 0,
             notes: String(formData.notes || 'Creado desde módulo de cobranzas').trim(),
@@ -440,7 +441,6 @@ const Collections = () => {
             zone: 'Santiago',
             giro: String(formData.giro || '').trim() || null,
             comuna: finalComuna,
-            office: null,
             credit_days: 0,
             purchase_contact: String(formData.purchase_contact || '').trim() || null
         };
@@ -770,6 +770,7 @@ const Collections = () => {
                     phone: '',
                     email: '',
                     address: '',
+                    office: '',
                     comuna: '',
                     notes: 'Creado desde módulo de cobranzas'
                 }}
