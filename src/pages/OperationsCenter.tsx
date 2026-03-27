@@ -133,6 +133,20 @@ const formatApprovalTime = (value: string | null | undefined) => {
         : '--:--';
 };
 
+const formatCollectionsDate = (value: string | null | undefined) => {
+    if (!value) return '-';
+    const raw = String(value).trim();
+    const datePart = raw.includes('T') ? raw.split('T')[0] : raw.split(' ')[0];
+    const match = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    const day = `${parsed.getDate()}`.padStart(2, '0');
+    const month = `${parsed.getMonth() + 1}`.padStart(2, '0');
+    return `${day}/${month}/${parsed.getFullYear()}`;
+};
+
 const resolveProfileName = (profile: any) => {
     if (!profile) return 'Vendedor no identificado';
     return profile.full_name || profile.email?.split('@')[0]?.toUpperCase() || profile.email || 'Vendedor no identificado';
@@ -929,7 +943,7 @@ const OperationsCenter = () => {
                                                 <p className="text-xs font-bold">{r.document_number} · {r.client_name}</p>
                                                 <span className={`text-[10px] px-2 py-0.5 rounded ${Number(r.aging_days || 0) > 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>{Number(r.aging_days || 0) > 0 ? `${r.aging_days}d vencido` : 'al día'}</span>
                                             </div>
-                                            <p className="text-[11px] text-gray-500">Vendedor: {r.seller_name || r.seller_email || '-'} · Vence: {r.due_date} · Saldo: ${Number(r.outstanding_amount || 0).toLocaleString('es-CL')}</p>
+                                            <p className="text-[11px] text-gray-500">Vendedor: {r.seller_name || r.seller_email || '-'} · Vence: {formatCollectionsDate(r.due_date)} · Saldo: ${Number(r.outstanding_amount || 0).toLocaleString('es-CL')}</p>
                                         </div>
                                     ))}
                                     {collectionsRows.length === 0 && <p className="text-xs text-gray-500">Sin documentos en dataset activo.</p>}
@@ -965,7 +979,7 @@ const OperationsCenter = () => {
                                         <div className="flex justify-between gap-2">
                                             <p className="font-bold text-sm">{row.document_number} · {row.client_name}</p>
                                             <span className="text-[11px] text-emerald-700 font-bold">
-                                                {row.paid_detected_at ? new Date(row.paid_detected_at).toLocaleDateString('es-CL') : 'Pagado'}
+                                                {formatCollectionsDate(row.paid_detected_at)}
                                             </span>
                                         </div>
                                         <p className="text-xs text-gray-500">
