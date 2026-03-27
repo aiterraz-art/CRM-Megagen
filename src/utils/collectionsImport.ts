@@ -409,9 +409,9 @@ export const uploadCollectionsSnapshot = async (
     try {
         for (let i = 0; i < rpcRows.length; i += chunkSize) {
             const chunk = rpcRows.slice(i, i + chunkSize);
-            const { error } = await supabase.rpc('stage_collections_pending_rows', {
+            const { error } = await supabase.rpc('stage_collections_pending_rows_text', {
                 p_session_id: sessionId,
-                p_rows: chunk
+                p_rows_text: JSON.stringify(chunk)
             } as any);
             if (error) throw error;
         }

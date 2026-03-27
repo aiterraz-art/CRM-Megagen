@@ -25,6 +25,9 @@ const buildRutVariants = (rut: string | null | undefined) => {
     return Array.from(new Set([raw, compact, noHyphen].filter(Boolean)));
 };
 
+const normalizeCollectionSellerEmail = (value: string | null | undefined) =>
+    (value || '').trim().toLowerCase();
+
 interface ClientDetailModalProps {
     client: Client;
     onClose: () => void;
@@ -34,7 +37,7 @@ interface ClientDetailModalProps {
 
 const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailModalProps) => {
     const navigate = useNavigate();
-    const { profile } = useUser();
+    const { profile, effectiveRole } = useUser();
     const [activeTab, setActiveTab] = useState<'overview' | 'visits' | 'quotations' | 'sent_quotations' | 'orders' | 'collections' | 'emails' | 'calls'>('overview');
     const [stats, setStats] = useState({
         totalVisits: 0,
@@ -62,6 +65,14 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
     const clientRutVariants = buildRutVariants(client.rut);
     const normalizedClientRut = normalizeRutForCollections(client.rut);
+    const mySellerEmail = normalizeCollectionSellerEmail(profile?.email);
+
+    const canViewCollectionRow = (row: any) => {
+        if (effectiveRole !== 'seller') return true;
+        const sellerId = row?.seller_id || null;
+        const sellerEmail = normalizeCollectionSellerEmail(row?.seller_email);
+        return (profile?.id && sellerId === profile.id) || (mySellerEmail && sellerEmail === mySellerEmail);
+    };
 
     useEffect(() => {
         fetchData();
@@ -95,7 +106,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 const approvedQuotations = (quotesData || []).filter((q) => q.status === 'approved').length;
                 const sent = (quotesData || []).filter((q) => q.status === 'sent');
                 const matchedCollections = (collectionData || []).filter((row: any) =>
-                    normalizeRutForCollections(row.client_rut) === normalizedClientRut
+                    normalizeRutForCollections(row.client_rut) === normalizedClientRut && canViewCollectionRow(row)
                 );
                 const totalCollectionsOutstanding = matchedCollections.reduce((acc: number, row: any) => acc + Number(row.outstanding_amount || 0), 0);
                 const overdueCollectionsOutstanding = matchedCollections
@@ -177,7 +188,9 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                         .in('client_rut', clientRutVariants)
                         .order('due_date', { ascending: true });
                     if (error) throw error;
-                    setCollections((data || []).filter((row: any) => normalizeRutForCollections(row.client_rut) === normalizedClientRut));
+                    setCollections((data || []).filter((row: any) =>
+                        normalizeRutForCollections(row.client_rut) === normalizedClientRut && canViewCollectionRow(row)
+                    ));
                 }
             } else if (activeTab === 'emails') {
                 const { data } = await supabase.from('email_logs').select('*, profiles(full_name)').eq('client_id', client.id).order('created_at', { ascending: false });
