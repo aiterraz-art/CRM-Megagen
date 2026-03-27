@@ -53,14 +53,14 @@ const Collections = () => {
     const [existingClientRutSet, setExistingClientRutSet] = useState<Set<string>>(new Set());
     const [clientCreationContext, setClientCreationContext] = useState<{ row: any; sellerId: string } | null>(null);
 
-    const isTreasurer = effectiveRole === 'tesorero';
     const isSeller = effectiveRole === 'seller';
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
+    const canManageClientOwnership = hasPermission('MANAGE_CLIENTS') || effectiveRole === 'jefe';
     const canUpload = canManageCollections;
     const canDownloadTemplate = canManageCollections;
     const canEditComment = effectiveRole === 'seller' || canManageCollections;
-    const canAssignSeller = effectiveRole === 'admin' || effectiveRole === 'jefe' || isTreasurer;
-    const canFilterBySeller = effectiveRole === 'admin' || effectiveRole === 'jefe' || isTreasurer;
+    const canAssignSeller = canManageCollections && canManageClientOwnership;
+    const canFilterBySeller = canManageCollections;
 
     const normalizeEmail = (value: string | null | undefined) => (value || '').trim().toLowerCase();
 
@@ -564,7 +564,7 @@ const Collections = () => {
                 <div className="bg-white border rounded-2xl p-4 space-y-3">
                     <div>
                         <h3 className="font-black text-lg">Filtros y orden</h3>
-                        <p className="text-sm text-gray-500">Disponible para admin, jefes y tesorería.</p>
+                        <p className="text-sm text-gray-500">Disponible para usuarios con gestión de cobranzas.</p>
                     </div>
                     <div className="grid md:grid-cols-2 gap-3">
                         <div>
