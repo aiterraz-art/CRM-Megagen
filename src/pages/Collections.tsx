@@ -24,6 +24,8 @@ const Collections = () => {
     const [sellerAssignments, setSellerAssignments] = useState<Record<string, string>>({});
     const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
     const [assigningSellerId, setAssigningSellerId] = useState<string | null>(null);
+    const [sellerFilter, setSellerFilter] = useState<string>('all');
+    const [amountSort, setAmountSort] = useState<'highest' | 'lowest'>('highest');
 
     const isSeller = effectiveRole === 'seller';
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
@@ -31,6 +33,7 @@ const Collections = () => {
     const canDownloadTemplate = canManageCollections;
     const canEditComment = effectiveRole === 'seller' || canManageCollections;
     const canAssignSeller = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canFilterBySeller = effectiveRole === 'admin' || effectiveRole === 'jefe';
 
     const normalizeEmail = (value: string | null | undefined) => (value || '').trim().toLowerCase();
 
@@ -66,6 +69,63 @@ const Collections = () => {
             return (myId && sellerId === myId) || (myEmail && sellerEmail === myEmail);
         });
     }, [allPaidRows, isSeller, profile?.email, profile?.id]);
+
+    const filteredRows = useMemo(() => {
+        const base = !canFilterBySeller || sellerFilter === 'all'
+            ? rows
+            : sellerFilter === '__unassigned__'
+                ? rows.filter((row) => !row.seller_id && !normalizeEmail(row.seller_email))
+                : rows.filter((row) => row.seller_id === sellerFilter);
+
+        return [...base].sort((a, b) => {
+            const aAmount = Number(a.outstanding_amount || a.amount || 0);
+            const bAmount = Number(b.outstanding_amount || b.amount || 0);
+            return amountSort === 'highest' ? bAmount - aAmount : aAmount - bAmount;
+        });
+    }, [rows, canFilterBySeller, sellerFilter, amountSort]);
+
+    const filteredPaidRows = useMemo(() => {
+        const base = !canFilterBySeller || sellerFilter === 'all'
+            ? paidRows
+            : sellerFilter === '__unassigned__'
+                ? paidRows.filter((row) => !row.seller_id && !normalizeEmail(row.seller_email))
+                : paidRows.filter((row) => row.seller_id === sellerFilter);
+
+        return [...base].sort((a, b) => {
+            const aAmount = Number(a.amount || 0);
+            const bAmount = Number(b.amount || 0);
+            return amountSort === 'highest' ? bAmount - aAmount : aAmount - bAmount;
+        });
+    }, [paidRows, canFilterBySeller, sellerFilter, amountSort]);
+
+    const filteredSummary = useMemo(() => {
+        const base = !canFilterBySeller || sellerFilter === 'all'
+            ? summary
+            : sellerFilter === '__unassigned__'
+                ? summary.filter((item) => !item.seller_id && !normalizeEmail(item.seller_email))
+                : summary.filter((item) => item.seller_id === sellerFilter);
+
+        return [...base].sort((a, b) => Number(b.outstanding_total || 0) - Number(a.outstanding_total || 0));
+    }, [summary, canFilterBySeller, sellerFilter]);
+
+    const sellerFilterOptions = useMemo(() => {
+        const seen = new Set<string>();
+        const options: Array<{ value: string; label: string }> = [];
+
+        sellerOptions.forEach((seller) => {
+            if (!seller?.id || seen.has(seller.id)) return;
+            seen.add(seller.id);
+            options.push({ value: seller.id, label: seller.full_name || seller.email || 'Sin nombre' });
+        });
+
+        rows.forEach((row) => {
+            if (!row.seller_id || seen.has(row.seller_id)) return;
+            seen.add(row.seller_id);
+            options.push({ value: row.seller_id, label: row.seller_name || row.seller_email || 'Sin nombre' });
+        });
+
+        return options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
+    }, [sellerOptions, rows]);
 
     const fetchData = async () => {
         setLoading(true);
@@ -222,17 +282,17 @@ const Collections = () => {
     };
 
     const totals = useMemo(() => {
-        const docs = rows.length;
-        const outstanding = rows.reduce((acc, row) => acc + Number(row.outstanding_amount || 0), 0);
-        const overdue = rows.filter(row => Number(row.aging_days || 0) > 0).reduce((acc, row) => acc + Number(row.outstanding_amount || 0), 0);
+        const docs = filteredRows.length;
+        const outstanding = filteredRows.reduce((acc, row) => acc + Number(row.outstanding_amount || 0), 0);
+        const overdue = filteredRows.filter(row => Number(row.aging_days || 0) > 0).reduce((acc, row) => acc + Number(row.outstanding_amount || 0), 0);
         return { docs, outstanding, overdue };
-    }, [rows]);
+    }, [filteredRows]);
 
     const paidTotals = useMemo(() => {
-        const docs = paidRows.length;
-        const amount = paidRows.reduce((acc, row) => acc + Number(row.amount || 0), 0);
+        const docs = filteredPaidRows.length;
+        const amount = filteredPaidRows.reduce((acc, row) => acc + Number(row.amount || 0), 0);
         return { docs, amount };
-    }, [paidRows]);
+    }, [filteredPaidRows]);
 
     const missingSellerCount = useMemo(
         () => rows.filter((row) => !row.seller_id && !normalizeEmail(row.seller_email)).length,
@@ -371,13 +431,50 @@ const Collections = () => {
                     <div className="p-3 rounded-xl bg-gray-50 border"><p className="text-xs text-gray-500">Saldo total</p><p className="text-xl font-black">${totals.outstanding.toLocaleString('es-CL')}</p></div>
                     <div className="p-3 rounded-xl bg-gray-50 border"><p className="text-xs text-gray-500">Saldo vencido</p><p className="text-xl font-black text-red-600">${totals.overdue.toLocaleString('es-CL')}</p></div>
                 </div>
+
             </div>
+
+            {canFilterBySeller && (
+                <div className="bg-white border rounded-2xl p-4 space-y-3">
+                    <div>
+                        <h3 className="font-black text-lg">Filtros y orden</h3>
+                        <p className="text-sm text-gray-500">Disponible para admin y jefes.</p>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Filtrar por vendedor</label>
+                            <select
+                                value={sellerFilter}
+                                onChange={(ev) => setSellerFilter(ev.target.value)}
+                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                            >
+                                <option value="all">Todos los vendedores</option>
+                                <option value="__unassigned__">Sin vendedor asignado</option>
+                                {sellerFilterOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Ordenar por cobranza</label>
+                            <select
+                                value={amountSort}
+                                onChange={(ev) => setAmountSort(ev.target.value as 'highest' | 'lowest')}
+                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                            >
+                                <option value="highest">Mayor saldo primero</option>
+                                <option value="lowest">Menor saldo primero</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="grid lg:grid-cols-3 gap-4">
                 <div className="bg-white border rounded-2xl p-4 lg:col-span-1">
                     <h3 className="font-black mb-3">Resumen por vendedor</h3>
                     <div className="space-y-2 max-h-[420px] overflow-auto">
-                        {summary.map((s) => (
+                        {filteredSummary.map((s) => (
                             <div key={s.seller_key} className="p-3 rounded-xl border">
                                 <p className="text-sm font-bold">{s.seller_name || s.seller_email || 'Sin vendedor'}</p>
                                 <p className="text-xs text-gray-500">Docs: {Number(s.documents || 0)}</p>
@@ -385,7 +482,7 @@ const Collections = () => {
                                 <p className="text-xs text-red-600">Vencido: ${Number(s.overdue_total || 0).toLocaleString('es-CL')}</p>
                             </div>
                         ))}
-                        {summary.length === 0 && <p className="text-xs text-gray-500">Sin datos cargados.</p>}
+                        {filteredSummary.length === 0 && <p className="text-xs text-gray-500">Sin datos cargados.</p>}
                     </div>
                 </div>
 
@@ -406,7 +503,7 @@ const Collections = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {rows.map((r) => (
+                                {filteredRows.map((r) => (
                                     <tr key={r.id} className="border-b last:border-0 align-top">
                                         <td className="py-2 pr-2">{r.client_name}</td>
                                         <td className="py-2 pr-2">{r.client_rut || '-'}</td>
@@ -467,7 +564,7 @@ const Collections = () => {
                                         </td>
                                     </tr>
                                 ))}
-                                {rows.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-gray-500">Sin documentos en dataset activo.</td></tr>}
+                                {filteredRows.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-gray-500">Sin documentos en dataset activo.</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -509,7 +606,7 @@ const Collections = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {paidRows.map((r) => (
+                            {filteredPaidRows.map((r) => (
                                 <tr key={r.id} className="border-b last:border-0 align-top">
                                     <td className="py-2 pr-2">{r.client_name}</td>
                                     <td className="py-2 pr-2">{r.client_rut || '-'}</td>
@@ -521,7 +618,7 @@ const Collections = () => {
                                     <td className="py-2 pr-2 text-xs text-gray-600 min-w-[240px]">{r.seller_comment || '-'}</td>
                                 </tr>
                             ))}
-                            {paidRows.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-gray-500">Sin historial pagado todavía.</td></tr>}
+                            {filteredPaidRows.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-gray-500">Sin historial pagado todavía.</td></tr>}
                         </tbody>
                     </table>
                 </div>
