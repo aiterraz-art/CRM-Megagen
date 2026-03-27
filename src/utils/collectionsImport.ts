@@ -407,9 +407,13 @@ export const uploadCollectionsSnapshot = async (
 
         return data as string;
     } catch (error) {
-        await supabase.rpc('discard_collections_pending_upload', {
-            p_session_id: sessionId
-        } as any).catch(() => undefined);
+        try {
+            await supabase.rpc('discard_collections_pending_upload', {
+                p_session_id: sessionId
+            } as any);
+        } catch {
+            // Best effort cleanup only. Preserve the original upload error.
+        }
         throw error;
     }
 };
