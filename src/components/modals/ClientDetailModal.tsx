@@ -11,6 +11,20 @@ import { googleService } from '../../services/googleService';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
+const normalizeRutForCollections = (value: string | null | undefined) =>
+    (value || '')
+        .toString()
+        .toLowerCase()
+        .replace(/[^0-9k]/g, '');
+
+const buildRutVariants = (rut: string | null | undefined) => {
+    const raw = (rut || '').trim();
+    if (!raw) return [];
+    const compact = raw.replace(/\./g, '');
+    const noHyphen = compact.replace(/-/g, '');
+    return Array.from(new Set([raw, compact, noHyphen].filter(Boolean)));
+};
+
 interface ClientDetailModalProps {
     client: Client;
     onClose: () => void;
@@ -21,17 +35,21 @@ interface ClientDetailModalProps {
 const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailModalProps) => {
     const navigate = useNavigate();
     const { profile } = useUser();
-    const [activeTab, setActiveTab] = useState<'overview' | 'visits' | 'quotations' | 'sent_quotations' | 'orders' | 'emails' | 'calls'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'visits' | 'quotations' | 'sent_quotations' | 'orders' | 'collections' | 'emails' | 'calls'>('overview');
     const [stats, setStats] = useState({
         totalVisits: 0,
         totalSales: 0,
         lastVisit: null as string | null,
         totalQuotations: 0,
-        approvedQuotations: 0
+        approvedQuotations: 0,
+        totalCollectionsDocuments: 0,
+        totalCollectionsOutstanding: 0,
+        overdueCollectionsOutstanding: 0
     });
     const [visits, setVisits] = useState<any[]>([]);
     const [quotations, setQuotations] = useState<any[]>([]);
     const [orders, setOrders] = useState<any[]>([]);
+    const [collections, setCollections] = useState<any[]>([]);
     const [emails, setEmails] = useState<any[]>([]);
     const [callLogs, setCallLogs] = useState<any[]>([]);
     const [recentActivity, setRecentActivity] = useState<Array<{ id: string; type: string; date: string; title: string; subtitle: string }>>([]);
@@ -42,6 +60,8 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const [showScheduleModal, setShowScheduleModal] = useState(false);
 
     const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+    const clientRutVariants = buildRutVariants(client.rut);
+    const normalizedClientRut = normalizeRutForCollections(client.rut);
 
     useEffect(() => {
         fetchData();
@@ -52,7 +72,11 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
         setLoadError(null);
         try {
             if (activeTab === 'overview') {
-                const [{ count: visitsCount }, { data: lastVisit }, { data: salesData }, { data: quotesData }, { data: recentVisits }, { data: recentCalls }, { data: recentEmails }, { data: recentOrders }] = await Promise.all([
+                const collectionsPromise = clientRutVariants.length > 0
+                    ? supabase.from('vw_collections_pending_current').select('*').in('client_rut', clientRutVariants).order('due_date', { ascending: true })
+                    : Promise.resolve({ data: [], error: null } as any);
+
+                const [{ count: visitsCount }, { data: lastVisit }, { data: salesData }, { data: quotesData }, { data: recentVisits }, { data: recentCalls }, { data: recentEmails }, { data: recentOrders }, { data: collectionData, error: collectionsError }] = await Promise.all([
                     supabase.from('visits').select('*', { count: 'exact', head: true }).eq('client_id', client.id),
                     supabase.from('visits').select('check_in_time').eq('client_id', client.id).eq('status', 'completed').order('check_in_time', { ascending: false }).limit(1).maybeSingle(),
                     supabase.from('orders').select('total_amount').eq('client_id', client.id),
@@ -60,22 +84,36 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                     supabase.from('visits').select('id, check_in_time, status, purpose').eq('client_id', client.id).order('check_in_time', { ascending: false }).limit(4),
                     supabase.from('call_logs').select('id, created_at, status').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4),
                     supabase.from('email_logs').select('id, created_at, subject').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4),
-                    supabase.from('orders').select('id, created_at, total_amount').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4)
+                    supabase.from('orders').select('id, created_at, total_amount').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4),
+                    collectionsPromise
                 ]);
+
+                if (collectionsError) throw collectionsError;
 
                 const totalSales = salesData?.reduce((acc, curr) => acc + (Number(curr.total_amount) || 0), 0) || 0;
                 const totalQuotations = quotesData?.length || 0;
                 const approvedQuotations = (quotesData || []).filter((q) => q.status === 'approved').length;
                 const sent = (quotesData || []).filter((q) => q.status === 'sent');
+                const matchedCollections = (collectionData || []).filter((row: any) =>
+                    normalizeRutForCollections(row.client_rut) === normalizedClientRut
+                );
+                const totalCollectionsOutstanding = matchedCollections.reduce((acc: number, row: any) => acc + Number(row.outstanding_amount || 0), 0);
+                const overdueCollectionsOutstanding = matchedCollections
+                    .filter((row: any) => Number(row.aging_days || 0) > 0)
+                    .reduce((acc: number, row: any) => acc + Number(row.outstanding_amount || 0), 0);
 
                 setStats({
                     totalVisits: visitsCount || 0,
                     totalSales,
                     lastVisit: lastVisit?.check_in_time || null,
                     totalQuotations,
-                    approvedQuotations
+                    approvedQuotations,
+                    totalCollectionsDocuments: matchedCollections.length,
+                    totalCollectionsOutstanding,
+                    overdueCollectionsOutstanding
                 });
                 setSentQuotations(sent.slice(0, 6));
+                setCollections(matchedCollections);
 
                 const timeline = [
                     ...(recentVisits || []).map((item: any) => ({
@@ -129,6 +167,18 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
             } else if (activeTab === 'orders') {
                 const { data } = await supabase.from('orders').select('*, order_items(quantity, total_price, inventory(name))').eq('client_id', client.id).order('created_at', { ascending: false });
                 setOrders(data || []);
+            } else if (activeTab === 'collections') {
+                if (clientRutVariants.length === 0) {
+                    setCollections([]);
+                } else {
+                    const { data, error } = await supabase
+                        .from('vw_collections_pending_current')
+                        .select('*')
+                        .in('client_rut', clientRutVariants)
+                        .order('due_date', { ascending: true });
+                    if (error) throw error;
+                    setCollections((data || []).filter((row: any) => normalizeRutForCollections(row.client_rut) === normalizedClientRut));
+                }
             } else if (activeTab === 'emails') {
                 const { data } = await supabase.from('email_logs').select('*, profiles(full_name)').eq('client_id', client.id).order('created_at', { ascending: false });
                 setEmails(data || []);
@@ -262,6 +312,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                         { id: 'quotations', label: 'Comercial', icon: FileSpreadsheet },
                         { id: 'sent_quotations', label: 'Enviadas', icon: Send },
                         { id: 'orders', label: 'Ventas', icon: ShoppingBag },
+                        { id: 'collections', label: 'Cobranzas', icon: AlertTriangle },
                         { id: 'calls', label: 'Llamadas', icon: Phone },
                         { id: 'emails', label: 'Correos', icon: Mail },
                     ].map(tab => (
@@ -307,6 +358,20 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Aprobadas</p>
                                                 <p className="text-2xl font-black text-emerald-600 mt-1">{stats.approvedQuotations}</p>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Docs en Cobranza</p>
+                                                <p className="text-2xl font-black text-gray-900 mt-1">{stats.totalCollectionsDocuments}</p>
+                                            </div>
+                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Saldo Pendiente</p>
+                                                <p className="text-2xl font-black text-amber-600 mt-1">{formatCurrency(stats.totalCollectionsOutstanding)}</p>
+                                            </div>
+                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Saldo Vencido</p>
+                                                <p className="text-2xl font-black text-red-600 mt-1">{formatCurrency(stats.overdueCollectionsOutstanding)}</p>
                                             </div>
                                         </div>
                                         <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
@@ -449,6 +514,39 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                             <p className="font-black text-gray-900">{formatCurrency(o.total_amount)}</p>
                                         </div>
                                     ))}
+                                    {activeTab === 'collections' && collections.map((item) => (
+                                        <div key={item.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div>
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <p className="font-bold text-gray-900">Documento #{item.document_number}</p>
+                                                        <span className="px-2 py-1 rounded-lg text-[10px] font-black uppercase bg-amber-100 text-amber-700">
+                                                            {item.document_type || 'Documento'}
+                                                        </span>
+                                                        {Number(item.aging_days || 0) > 0 && (
+                                                            <span className="px-2 py-1 rounded-lg text-[10px] font-black uppercase bg-red-100 text-red-700">
+                                                                {item.aging_days} día(s) vencido
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 font-medium mt-1">
+                                                        Vence: {formatDate(item.due_date)} • Vendedor: {item.seller_name || item.seller_email || 'Sin asignar'}
+                                                    </p>
+                                                    {item.seller_comment && (
+                                                        <div className="mt-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
+                                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Descargo del vendedor</p>
+                                                            <p className="text-sm text-gray-700 mt-1">{item.seller_comment}</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Saldo pendiente</p>
+                                                    <p className="font-black text-xl text-amber-700">{formatCurrency(Number(item.outstanding_amount || item.amount || 0))}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Monto documento: {formatCurrency(Number(item.amount || 0))}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
                                     {activeTab === 'sent_quotations' && sentQuotations.map((quote) => (
                                         <div key={quote.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
                                             <div className="flex items-start justify-between gap-3">
@@ -489,6 +587,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                     {activeTab === 'quotations' && quotations.length === 0 && <EmptyState message="No hay actividad comercial" />}
                                     {activeTab === 'sent_quotations' && sentQuotations.length === 0 && <EmptyState message="No hay cotizaciones enviadas" />}
                                     {activeTab === 'orders' && orders.length === 0 && <EmptyState message="No hay ventas registradas" />}
+                                    {activeTab === 'collections' && collections.length === 0 && <EmptyState message={client.rut ? "No hay cobranzas pendientes para este cliente" : "El cliente no tiene RUT para vincular cobranzas"} />}
                                     {activeTab === 'emails' && emails.length === 0 && <EmptyState message="No hay correos registrados" />}
                                     {activeTab === 'calls' && callLogs.length === 0 && <EmptyState message="No hay llamadas registradas" />}
                                 </div>
