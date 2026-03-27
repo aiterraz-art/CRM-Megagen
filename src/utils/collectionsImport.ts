@@ -32,6 +32,24 @@ export type CollectionUploadRejected = {
 
 export type CollectionsRpcRow = Array<string | number | null>;
 
+const sanitizeTextForRpc = (value: string | null | undefined) => {
+    if (value == null) return value ?? null;
+    let output = '';
+    const input = String(value);
+    for (let index = 0; index < input.length; index += 1) {
+        const code = input.charCodeAt(index);
+        const isForbiddenControl =
+            (code >= 0x00 && code <= 0x08)
+            || code === 0x0b
+            || code === 0x0c
+            || (code >= 0x0e && code <= 0x1f);
+        const isSurrogate = code >= 0xd800 && code <= 0xdfff;
+        if (isForbiddenControl || isSurrogate) continue;
+        output += input[index];
+    }
+    return output;
+};
+
 export const normalizeHeader = (input: string) => {
     return (input || '')
         .toString()
@@ -349,28 +367,28 @@ export const buildCollectionsRpcRows = (
 ): CollectionsRpcRow[] => {
     if (format === 'erp') {
         return rows.map((row) => [
-            row.client_name,
-            row.client_rut,
-            row.document_number,
-            row.document_type,
-            row.due_date,
+            sanitizeTextForRpc(row.client_name),
+            sanitizeTextForRpc(row.client_rut),
+            sanitizeTextForRpc(row.document_number),
+            sanitizeTextForRpc(row.document_type),
+            sanitizeTextForRpc(row.due_date),
             row.amount
         ]);
     }
 
     return rows.map((row) => [
-        row.seller_email,
-        row.seller_name,
-        row.client_name,
-        row.client_rut,
-        row.document_number,
-        row.document_type,
-        row.issue_date,
-        row.due_date,
+        sanitizeTextForRpc(row.seller_email),
+        sanitizeTextForRpc(row.seller_name),
+        sanitizeTextForRpc(row.client_name),
+        sanitizeTextForRpc(row.client_rut),
+        sanitizeTextForRpc(row.document_number),
+        sanitizeTextForRpc(row.document_type),
+        sanitizeTextForRpc(row.issue_date),
+        sanitizeTextForRpc(row.due_date),
         row.amount,
         row.outstanding_amount,
-        row.status,
-        row.notes
+        sanitizeTextForRpc(row.status),
+        sanitizeTextForRpc(row.notes)
     ]);
 };
 
