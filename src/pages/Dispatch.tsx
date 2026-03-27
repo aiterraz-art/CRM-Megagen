@@ -167,6 +167,9 @@ const queueStatusClass: Record<DispatchQueueItem['status'], string> = {
     cancelled: 'bg-red-50 text-red-700 border-red-100'
 };
 
+const isBillingBackofficeRole = (role: string | null | undefined) =>
+    role === 'facturador' || role === 'tesorero';
+
 const routeStatusLabel = (status: string) => {
     const normalized = normalizeText(status).toLowerCase();
     if (normalized === 'completed') return 'Completada';
@@ -214,7 +217,7 @@ const parseRpcValidationErrors = (error: any): DispatchImportError[] | null => {
 
 const Dispatch: React.FC = () => {
     const { effectiveRole, hasPermission } = useUser();
-    const canManageDispatch = hasPermission('MANAGE_DISPATCH') || effectiveRole === 'admin' || effectiveRole === 'facturador';
+    const canManageDispatch = hasPermission('MANAGE_DISPATCH') || effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole);
 
     const [activeTab, setActiveTab] = useState<DispatchTab>('queue');
     const [loading, setLoading] = useState(true);
@@ -666,7 +669,7 @@ const Dispatch: React.FC = () => {
     };
 
     if (!canManageDispatch) {
-        return <div className="p-10 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para Admin y Facturador.</div>;
+        return <div className="p-10 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para Admin, Facturación y Tesorería.</div>;
     }
 
     if (loading) {

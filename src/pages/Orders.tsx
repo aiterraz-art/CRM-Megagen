@@ -39,6 +39,8 @@ const formatMoney = (value: number | null | undefined) => `$${Number(value || 0)
 const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL') : '-';
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
 const ORDER_ITEMS_PREVIEW_STORAGE_KEY = 'orders.activeItemsPreviewOrderId';
+const isBillingBackofficeRole = (role: string | null | undefined) =>
+    role === 'facturador' || role === 'tesorero';
 
 const getPaymentEmailStatusStyles = (status: string | null | undefined) => {
     switch ((status || '').toLowerCase()) {
@@ -493,7 +495,7 @@ const Orders = () => {
             alert('No se pudo identificar al usuario actual.');
             return;
         }
-        const canResend = effectiveRole === 'admin' || effectiveRole === 'facturador' || order.user_id === profile.id;
+        const canResend = effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole) || order.user_id === profile.id;
         if (!canResend) {
             alert('No tienes permisos para reenviar este correo.');
             return;
@@ -699,7 +701,7 @@ const Orders = () => {
                                         {(() => {
                                             const orderLogs = notificationLogsByOrderId[order.id] || [];
                                             const latestLog = orderLogs[0] || null;
-                                            const canResend = Boolean(profile?.id) && (effectiveRole === 'admin' || effectiveRole === 'facturador' || order.user_id === profile?.id);
+                                            const canResend = Boolean(profile?.id) && (effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole) || order.user_id === profile?.id);
                                             const canRetryEmail = canResend && ['failed', 'pending'].includes(String(order.payment_email_status || '').toLowerCase());
                                             return (
                                                 <>

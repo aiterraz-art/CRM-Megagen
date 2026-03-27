@@ -37,6 +37,9 @@ type MenuGroup = {
     label: string;
 };
 
+const isBillingBackofficeRole = (role: string | null | undefined) =>
+    role === 'facturador' || role === 'tesorero';
+
 const menuGroups: MenuGroup[] = [
     { id: 'comercial', label: 'Comercial' },
     { id: 'prospection', label: 'Prospección' },
@@ -110,7 +113,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/collections',
         icon: <CircleDollarSign size={20} />,
         group: 'comercial',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'cold-visit',
@@ -118,7 +121,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/cold-visit',
         icon: <Stethoscope size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'map',
@@ -126,7 +129,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/map',
         icon: <MapIcon size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'visits',
@@ -134,7 +137,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/visits',
         icon: <ClipboardList size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'seller' && effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'seller' && !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'pipeline',
@@ -142,7 +145,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/pipeline',
         icon: <LayoutDashboard size={20} className="rotate-90" />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'lead-pipeline',
@@ -150,7 +153,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/lead-pipeline',
         icon: <Target size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'meta-leads',
@@ -166,7 +169,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/lead-messages',
         icon: <MessageSquare size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'inventory',
@@ -190,7 +193,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/dispatch',
         icon: <Truck size={20} />,
         group: 'logistics',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'facturador',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole),
     },
     {
         id: 'kit-loans',
@@ -214,7 +217,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/routes',
         icon: <MapIcon size={20} className="text-indigo-400" />,
         group: 'logistics',
-        visibleWhen: ({ effectiveRole, isSupervisor }) => isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole, isSupervisor }) => isSupervisor && effectiveRole !== 'seller' && !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'my-deliveries',
@@ -238,7 +241,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/team',
         icon: <ShieldCheck size={20} />,
         group: 'management',
-        visibleWhen: ({ effectiveRole, isSupervisor }) => isSupervisor && effectiveRole !== 'seller' && effectiveRole !== 'facturador' && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole, isSupervisor }) => isSupervisor && effectiveRole !== 'seller' && !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'settings',
@@ -429,6 +432,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                                     <option value="seller" className="text-gray-800">Ver como Vendedor</option>
                                     <option value="jefe" className="text-gray-800">Ver como Jefe</option>
                                     <option value="facturador" className="text-gray-800">Ver como Facturador</option>
+                                    <option value="tesorero" className="text-gray-800">Ver como Tesorero</option>
                                     <option value="driver" className="text-gray-800">Ver como Repartidor</option>
                                 </select>
                                 {simulatedRole && (

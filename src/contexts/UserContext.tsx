@@ -45,6 +45,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (baseRole === 'administrativo') return 'facturador';
         return baseRole;
     };
+    const isBillingBackofficeRole = (role: string | null | undefined) => {
+        const normalizedRole = normalizeRole(role);
+        return normalizedRole === 'facturador' || normalizedRole === 'tesorero';
+    };
 
     const fetchPermissions = async (role: string) => {
         const normalizedRole = normalizeRole(role);
@@ -52,6 +56,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             'admin': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
             'jefe': ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS'],
             'facturador': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
+            'tesorero': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
             'seller': ['VIEW_METAS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES'],
             'driver': ['EXECUTE_DELIVERY'],
             'supervisor': ['VIEW_TEAM_STATS', 'VIEW_OPERATIONS']
@@ -207,7 +212,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const isManager = effectiveRole === 'admin';
     const isChief = effectiveRole === 'jefe';
-    const isFacturador = effectiveRole === 'facturador';
+    const isFacturador = isBillingBackofficeRole(effectiveRole);
     const isSeller = effectiveRole === 'seller';
     const isDriver = effectiveRole === 'driver';
     const isSupervisor = permissions.includes('VIEW_TEAM_STATS');

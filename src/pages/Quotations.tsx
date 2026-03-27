@@ -47,6 +47,8 @@ const DISPATCH_SERVICE_NAME_KEY = normalizeProductKey(DISPATCH_SERVICE_NAME);
 const DISPATCH_SERVICE_SKU_KEY = normalizeProductKey(DISPATCH_SERVICE_SKU);
 
 const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp']);
+const isBillingBackofficeRole = (role: string | null | undefined) =>
+    role === 'facturador' || role === 'tesorero';
 
 const notifyApprovalPush = async (approvalId: string) => {
     try {
@@ -376,7 +378,7 @@ const Quotations: React.FC = () => {
     };
 
     const fetchAvailableSellers = useCallback(async () => {
-        if (effectiveRole !== 'facturador') {
+        if (!isBillingBackofficeRole(effectiveRole)) {
             setAvailableSellers([]);
             return;
         }
@@ -492,7 +494,7 @@ const Quotations: React.FC = () => {
         setDiscountApprovalRequested(false);
         setApprovalReason('');
         setApprovalReasonError(null);
-        setSelectedSellerId((prev) => effectiveRole === 'facturador' ? prev : (profile?.id || null));
+        setSelectedSellerId((prev) => isBillingBackofficeRole(effectiveRole) ? prev : (profile?.id || null));
     };
 
     const handleEditQuotation = (q: any) => {
@@ -712,7 +714,7 @@ const Quotations: React.FC = () => {
 
     const handleCreateQuotation = async () => {
         if (!profile || !selectedClient) return;
-        const sellerIdForQuotation = effectiveRole === 'facturador' ? selectedSellerId : profile.id;
+        const sellerIdForQuotation = isBillingBackofficeRole(effectiveRole) ? selectedSellerId : profile.id;
         if (!sellerIdForQuotation) {
             setCreateError('Debes seleccionar un vendedor para la cotización.');
             return;
@@ -764,7 +766,7 @@ const Quotations: React.FC = () => {
         try {
             let latitude: number | null = null;
             let longitude: number | null = null;
-            const shouldCaptureSellerLocation = !(effectiveRole === 'facturador' && sellerIdForQuotation !== profile.id);
+            const shouldCaptureSellerLocation = !(isBillingBackofficeRole(effectiveRole) && sellerIdForQuotation !== profile.id);
 
             if (manualLocation && shouldCaptureSellerLocation) {
                 latitude = manualLocation.lat;
@@ -940,7 +942,7 @@ const Quotations: React.FC = () => {
             setApprovalReason('');
             setApprovalReasonError(null);
             setIsApprovalReasonModalOpen(false);
-            setSelectedSellerId((prev) => effectiveRole === 'facturador' ? prev : profile.id);
+            setSelectedSellerId((prev) => isBillingBackofficeRole(effectiveRole) ? prev : profile.id);
             localStorage.removeItem('quotation_draft'); // Clear draft
             fetchQuotations();
 
@@ -1760,7 +1762,7 @@ const Quotations: React.FC = () => {
                                         </div>
                                     </div>
                                 )}
-                                {effectiveRole === 'facturador' && (
+                                {isBillingBackofficeRole(effectiveRole) && (
                                     <div className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
                                         <label className="text-[10px] uppercase font-black tracking-widest text-indigo-500">Vendedor asignado</label>
                                         <select

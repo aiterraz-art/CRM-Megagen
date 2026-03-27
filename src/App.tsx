@@ -51,11 +51,14 @@ const ScreenLoader = () => (
     </div>
 );
 
+const isBillingBackofficeRole = (role: string | null | undefined) =>
+    role === 'facturador' || role === 'tesorero';
+
 const DashboardWrapper = () => {
     const { effectiveRole } = useUser();
     if (effectiveRole === 'driver') return <DriverDashboard />;
     if (effectiveRole === 'seller') return <SellerDashboard />;
-    if (effectiveRole === 'facturador') return <AdministrativeDashboard />;
+    if (isBillingBackofficeRole(effectiveRole)) return <AdministrativeDashboard />;
     return <Dashboard />;
 };
 
@@ -69,7 +72,7 @@ const NonSellerGuard = ({ children }: { children: JSX.Element }) => {
 const NonFacturadorGuard = ({ children }: { children: JSX.Element }) => {
     const { effectiveRole, loading } = useUser();
     if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
-    if (effectiveRole === 'facturador') return <Navigate to="/" replace />;
+    if (isBillingBackofficeRole(effectiveRole)) return <Navigate to="/" replace />;
     return children;
 };
 

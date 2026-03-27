@@ -13,7 +13,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Tipos ENUM personalizados
 DO $$ BEGIN
-    CREATE TYPE app_role AS ENUM ('admin', 'jefe', 'facturador', 'seller', 'driver');
+    CREATE TYPE app_role AS ENUM ('admin', 'jefe', 'facturador', 'tesorero', 'seller', 'driver');
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 DO $$ BEGIN
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
     full_name TEXT,
-    role TEXT DEFAULT 'seller' CHECK (role IN ('admin', 'jefe', 'facturador', 'seller', 'driver')),
+    role TEXT DEFAULT 'seller' CHECK (role IN ('admin', 'jefe', 'facturador', 'tesorero', 'seller', 'driver')),
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'disabled')),
     phone TEXT,
     avatar_url TEXT,
@@ -87,7 +87,7 @@ ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 -- Políticas Clients
 CREATE POLICY "Sellers view own clients" ON clients FOR SELECT USING (
     created_by = auth.uid() OR 
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'facturador'))
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'facturador', 'tesorero'))
 );
 CREATE POLICY "Sellers insert clients" ON clients FOR INSERT WITH CHECK (auth.uid() = created_by);
 CREATE POLICY "Sellers update own clients" ON clients FOR UPDATE USING (created_by = auth.uid());
@@ -112,7 +112,7 @@ ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Everyone read products" ON products FOR SELECT USING (true);
 CREATE POLICY "Staff edit products" ON products FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'facturador'))
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'jefe', 'facturador', 'tesorero'))
 );
 
 -- NO SEED DATA FOR NEW INSTANCE

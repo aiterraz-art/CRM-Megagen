@@ -18,6 +18,10 @@ type OrderPdfAttachment = {
 };
 
 const normalizeEmail = (value: string | null | undefined) => String(value || "").trim().toLowerCase();
+const isBillingBackofficeRole = (role: string | null | undefined) => {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  return normalizedRole === "facturador" || normalizedRole === "tesorero";
+};
 
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString("es-CL")}`;
 
@@ -153,7 +157,7 @@ serve(async (req) => {
     if (orderError || !order) throw orderError || new Error("Order not found");
 
     const actorRole = normalizeEmail(actorProfile.role).replace(/[^a-z_]/g, "") || String(actorProfile.role || "").trim().toLowerCase();
-    const isAllowedActor = order.user_id === authUser.id || actorRole === "admin" || actorRole === "facturador";
+    const isAllowedActor = order.user_id === authUser.id || actorRole === "admin" || isBillingBackofficeRole(actorRole);
     if (!isAllowedActor) {
       throw new Error("No tienes permisos para enviar este pedido a facturación");
     }
@@ -164,7 +168,7 @@ serve(async (req) => {
       order.quotation_id
         ? serviceClient.from("quotations").select("id, folio").eq("id", order.quotation_id).single()
         : Promise.resolve({ data: null, error: null } as const),
-      serviceClient.from("profiles").select("id, full_name, email").eq("status", "active").eq("role", "facturador"),
+      serviceClient.from("profiles").select("id, full_name, email, role").eq("status", "active").in("role", ["facturador", "tesorero"]),
       serviceClient.from("profiles").select("id, full_name, email, status").eq("email", ORDER_NOTIFICATION_SENDER_EMAIL).maybeSingle(),
     ]);
 
@@ -184,7 +188,7 @@ serve(async (req) => {
 
     toRecipients = recipientEmails;
     if (toRecipients.length === 0) {
-      throw new Error("No hay usuarios facturadores activos configurados");
+      throw new Error("No hay usuarios activos de facturación/tesorería configurados");
     }
 
     const sellerEmail = normalizeEmail(sellerRes.data.email);

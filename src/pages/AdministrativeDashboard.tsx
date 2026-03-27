@@ -166,7 +166,7 @@ const AdministrativeDashboard = () => {
             setProofsTodayCount(proofsCountToday || 0);
         } catch (error: any) {
             console.error('AdministrativeDashboard error:', error);
-            alert(`Error cargando dashboard facturador: ${error?.message || 'desconocido'}`);
+            alert(`Error cargando dashboard backoffice: ${error?.message || 'desconocido'}`);
         }
     }, []);
 
@@ -195,7 +195,7 @@ const AdministrativeDashboard = () => {
         return (
             <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4">
                 <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent animate-spin rounded-full"></div>
-                <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Cargando panel facturador...</p>
+                <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Cargando panel backoffice...</p>
             </div>
         );
     }
@@ -204,7 +204,7 @@ const AdministrativeDashboard = () => {
         <div className="space-y-8 w-full mx-auto px-4 pb-12">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-black text-gray-900 tracking-tight">Dashboard Facturador</h1>
+                    <h1 className="text-4xl font-black text-gray-900 tracking-tight">Dashboard Backoffice</h1>
                     <p className="text-gray-500 font-medium mt-1">Seguimiento operativo de despacho, rutas y pruebas de entrega.</p>
                 </div>
                 <button
