@@ -1,6 +1,6 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { utils, writeFile } from 'xlsx';
-import { Upload, Download, DollarSign } from 'lucide-react';
+import { Upload, Download, DollarSign, Paperclip, Eye } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollectionsSnapshot } from '../utils/collectionsImport';
@@ -8,6 +8,17 @@ import ClientFormModal from '../components/modals/ClientFormModal';
 import { Database } from '../types/supabase';
 
 type Client = Database['public']['Tables']['clients']['Row'];
+const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
+const MAX_COLLECTION_PROOF_BYTES = 20 * 1024 * 1024;
+const ALLOWED_COLLECTION_PROOF_TYPES = new Set([
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/jpg',
+    'image/heic',
+    'image/heif'
+]);
 
 const normalizeRut = (value: string | null | undefined) =>
     (value || '').toString().replace(/[^0-9kK]/g, '').toUpperCase();
@@ -29,9 +40,16 @@ const formatShortDate = (value: string | null | undefined) => {
     return `${day}/${month}/${year}`;
 };
 
+const sanitizeFileName = (value: string) =>
+    value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9._-]+/g, '_');
+
 const Collections = () => {
     const { profile, effectiveRole, hasPermission } = useUser();
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const proofInputRef = useRef<HTMLInputElement | null>(null);
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -48,10 +66,13 @@ const Collections = () => {
     const [sellerAssignments, setSellerAssignments] = useState<Record<string, string>>({});
     const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
     const [assigningSellerId, setAssigningSellerId] = useState<string | null>(null);
+    const [proofUploadingId, setProofUploadingId] = useState<string | null>(null);
+    const [proofOpeningId, setProofOpeningId] = useState<string | null>(null);
     const [sellerFilter, setSellerFilter] = useState<string>('all');
     const [amountSort, setAmountSort] = useState<'highest' | 'lowest'>('highest');
     const [existingClientRutSet, setExistingClientRutSet] = useState<Set<string>>(new Set());
     const [clientCreationContext, setClientCreationContext] = useState<{ row: any; sellerId: string } | null>(null);
+    const [proofTargetRow, setProofTargetRow] = useState<any | null>(null);
 
     const isSeller = effectiveRole === 'seller';
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
@@ -376,6 +397,84 @@ const Collections = () => {
         }
     };
 
+    const uploadCollectionProof = async (row: any, file: File) => {
+        if (!profile?.id) throw new Error('No autenticado');
+        if (!canEditComment) throw new Error('Sin permisos para subir comprobantes');
+
+        const mimeType = file.type || 'application/octet-stream';
+        if (!ALLOWED_COLLECTION_PROOF_TYPES.has(mimeType)) {
+            throw new Error('Formato no permitido. Usa PDF, JPG, PNG, WEBP o HEIC.');
+        }
+        if (file.size > MAX_COLLECTION_PROOF_BYTES) {
+            throw new Error('El archivo supera el máximo de 20MB.');
+        }
+
+        const fileName = sanitizeFileName(file.name || 'comprobante_pago');
+        const path = `${profile.id}/collections/${row.id}/${Date.now()}_${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from(PAYMENT_PROOFS_BUCKET)
+            .upload(path, file, { contentType: mimeType, upsert: false });
+        if (uploadError) throw uploadError;
+
+        const payload = {
+            payment_proof_path: path,
+            payment_proof_name: file.name || fileName,
+            payment_proof_mime_type: mimeType,
+            payment_proof_uploaded_at: new Date().toISOString(),
+            payment_proof_uploaded_by: profile.id
+        };
+
+        const { error: updateError } = await supabase
+            .from('collections_pending')
+            .update(payload)
+            .eq('id', row.id);
+        if (updateError) throw updateError;
+
+        setAllRows((prev) => prev.map((item: any) => item.id === row.id ? { ...item, ...payload } : item));
+        setAllPaidRows((prev) => prev.map((item: any) => item.id === row.id ? { ...item, ...payload } : item));
+    };
+
+    const handleProofUploadClick = (row: any) => {
+        if (!canEditComment) return;
+        setProofTargetRow(row);
+        proofInputRef.current?.click();
+    };
+
+    const handleProofFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        const targetRow = proofTargetRow;
+        event.target.value = '';
+        if (!file || !targetRow) return;
+
+        setProofUploadingId(targetRow.id);
+        try {
+            await uploadCollectionProof(targetRow, file);
+            alert('Comprobante de pago cargado correctamente.');
+        } catch (uploadError: any) {
+            alert(`No se pudo cargar el comprobante: ${uploadError?.message || 'desconocido'}`);
+        } finally {
+            setProofUploadingId(null);
+            setProofTargetRow(null);
+        }
+    };
+
+    const openCollectionProof = async (row: any) => {
+        if (!row.payment_proof_path) return;
+        setProofOpeningId(row.id);
+        try {
+            const { data, error: signedUrlError } = await supabase.storage
+                .from(PAYMENT_PROOFS_BUCKET)
+                .createSignedUrl(row.payment_proof_path, 60 * 60);
+            if (signedUrlError) throw signedUrlError;
+            window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+        } catch (openError: any) {
+            alert(`No se pudo abrir el comprobante: ${openError?.message || 'desconocido'}`);
+        } finally {
+            setProofOpeningId(null);
+        }
+    };
+
     const assignSeller = async (row: any) => {
         if (!canAssignSeller) return;
 
@@ -692,9 +791,37 @@ const Collections = () => {
                                             >
                                                 {savingCommentId === r.id ? 'Guardando...' : 'Guardar descargo'}
                                             </button>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <button
+                                                    onClick={() => handleProofUploadClick(r)}
+                                                    disabled={proofUploadingId === r.id}
+                                                    className="px-3 py-2 rounded-xl border border-indigo-200 text-indigo-700 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
+                                                >
+                                                    <Paperclip size={14} />
+                                                    {proofUploadingId === r.id ? 'Subiendo...' : 'Subir comprobante'}
+                                                </button>
+                                                <button
+                                                    onClick={() => openCollectionProof(r)}
+                                                    disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                    className="px-3 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
+                                                >
+                                                    <Eye size={14} />
+                                                    {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                                </button>
+                                            </div>
                                         </div>
                                     ) : (
-                                        <p className="text-sm text-gray-700">{r.seller_comment || '-'}</p>
+                                        <div className="space-y-2">
+                                            <p className="text-sm text-gray-700">{r.seller_comment || '-'}</p>
+                                            <button
+                                                onClick={() => openCollectionProof(r)}
+                                                disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
+                                            >
+                                                <Eye size={14} />
+                                                {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -765,24 +892,54 @@ const Collections = () => {
                                         </td>
                                         <td className="py-2 pr-2 min-w-[260px]">
                                             {canEditComment ? (
-                                                <div className="flex items-center gap-2">
-                                                    <input
-                                                        type="text"
-                                                        value={commentDrafts[r.id] ?? ''}
-                                                        onChange={(ev) => setCommentDrafts(prev => ({ ...prev, [r.id]: ev.target.value }))}
-                                                        placeholder="Cliente ya pagó / paga mañana / próxima semana..."
-                                                        className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs"
-                                                    />
-                                                    <button
-                                                        onClick={() => saveSellerComment(r)}
-                                                        disabled={savingCommentId === r.id}
-                                                        className="px-2 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold disabled:opacity-50"
-                                                    >
-                                                        {savingCommentId === r.id ? '...' : 'Guardar'}
-                                                    </button>
+                                                <div className="space-y-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={commentDrafts[r.id] ?? ''}
+                                                            onChange={(ev) => setCommentDrafts(prev => ({ ...prev, [r.id]: ev.target.value }))}
+                                                            placeholder="Cliente ya pagó / paga mañana / próxima semana..."
+                                                            className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs"
+                                                        />
+                                                        <button
+                                                            onClick={() => saveSellerComment(r)}
+                                                            disabled={savingCommentId === r.id}
+                                                            className="px-2 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold disabled:opacity-50"
+                                                        >
+                                                            {savingCommentId === r.id ? '...' : 'Guardar'}
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => handleProofUploadClick(r)}
+                                                            disabled={proofUploadingId === r.id}
+                                                            className="px-2 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+                                                        >
+                                                            <Paperclip size={12} />
+                                                            {proofUploadingId === r.id ? 'Subiendo...' : 'Subir comprobante'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => openCollectionProof(r)}
+                                                            disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                            className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+                                                        >
+                                                            <Eye size={12} />
+                                                            {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             ) : (
-                                                <span className="text-xs text-gray-600">{r.seller_comment || '-'}</span>
+                                                <div className="space-y-2">
+                                                    <span className="text-xs text-gray-600 block">{r.seller_comment || '-'}</span>
+                                                    <button
+                                                        onClick={() => openCollectionProof(r)}
+                                                        disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                        className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+                                                    >
+                                                        <Eye size={12} />
+                                                        {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                                    </button>
+                                                </div>
                                             )}
                                         </td>
                                     </tr>
@@ -848,6 +1005,14 @@ const Collections = () => {
                             <div>
                                 <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Descargo</p>
                                 <p className="mt-1 text-sm text-gray-700">{r.seller_comment || '-'}</p>
+                                <button
+                                    onClick={() => openCollectionProof(r)}
+                                    disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                    className="mt-2 w-full px-3 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
+                                >
+                                    <Eye size={14} />
+                                    {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                </button>
                             </div>
                         </div>
                     ))}
@@ -880,7 +1045,19 @@ const Collections = () => {
                                     <td className="py-2 pr-2 font-bold">${Number(r.amount || 0).toLocaleString('es-CL')}</td>
                                     <td className="py-2 pr-2 text-xs text-gray-600">{r.seller_name || r.seller_email || '-'}</td>
                                     <td className="py-2 pr-2 text-xs text-gray-600 whitespace-nowrap">{formatShortDate(r.paid_detected_at)}</td>
-                                    <td className="py-2 pr-2 text-xs text-gray-600 min-w-[240px]">{r.seller_comment || '-'}</td>
+                                    <td className="py-2 pr-2 text-xs text-gray-600 min-w-[240px]">
+                                        <div className="space-y-2">
+                                            <span className="block">{r.seller_comment || '-'}</span>
+                                            <button
+                                                onClick={() => openCollectionProof(r)}
+                                                disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+                                            >
+                                                <Eye size={12} />
+                                                {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                            </button>
+                                        </div>
+                                    </td>
                                 </tr>
                             ))}
                             {filteredPaidRows.length === 0 && <tr><td colSpan={8} className="py-6 text-center text-gray-500">Sin historial pagado todavía.</td></tr>}
@@ -911,6 +1088,13 @@ const Collections = () => {
                 onSave={handleCreateClientFromCollection}
             />
         )}
+        <input
+            ref={proofInputRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif"
+            className="hidden"
+            onChange={handleProofFileChange}
+        />
         </>
     );
 };
