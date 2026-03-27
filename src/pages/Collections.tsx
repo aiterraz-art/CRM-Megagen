@@ -4,6 +4,13 @@ import { Upload, Download, DollarSign } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollectionsSnapshot } from '../utils/collectionsImport';
+import ClientFormModal from '../components/modals/ClientFormModal';
+import { Database } from '../types/supabase';
+
+type Client = Database['public']['Tables']['clients']['Row'];
+
+const normalizeRut = (value: string | null | undefined) =>
+    (value || '').toString().replace(/[^0-9kK]/g, '').toUpperCase();
 
 const Collections = () => {
     const { profile, effectiveRole, hasPermission } = useUser();
@@ -26,6 +33,8 @@ const Collections = () => {
     const [assigningSellerId, setAssigningSellerId] = useState<string | null>(null);
     const [sellerFilter, setSellerFilter] = useState<string>('all');
     const [amountSort, setAmountSort] = useState<'highest' | 'lowest'>('highest');
+    const [existingClientRutSet, setExistingClientRutSet] = useState<Set<string>>(new Set());
+    const [clientCreationContext, setClientCreationContext] = useState<{ row: any; sellerId: string } | null>(null);
 
     const isSeller = effectiveRole === 'seller';
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
@@ -161,6 +170,36 @@ const Collections = () => {
                 });
                 return next;
             });
+
+            const uniqueRuts = Array.from(new Set(
+                loadedRows
+                    .map((row: any) => normalizeRut(row.client_rut))
+                    .filter(Boolean)
+            ));
+
+            if (uniqueRuts.length > 0) {
+                const matchingRuts = new Set<string>();
+                const chunkSize = 200;
+                for (let i = 0; i < uniqueRuts.length; i += chunkSize) {
+                    const chunk = uniqueRuts.slice(i, i + chunkSize);
+                    const { data: clientsData, error: clientsError } = await supabase
+                        .from('clients')
+                        .select('rut')
+                        .in('rut', chunk.map((rut) => {
+                            if (rut.length < 2) return rut;
+                            return `${rut.slice(0, -1)}-${rut.slice(-1)}`;
+                        }));
+
+                    if (clientsError) throw clientsError;
+                    (clientsData || []).forEach((client: any) => {
+                        const normalized = normalizeRut(client.rut);
+                        if (normalized) matchingRuts.add(normalized);
+                    });
+                }
+                setExistingClientRutSet(matchingRuts);
+            } else {
+                setExistingClientRutSet(new Set());
+            }
         } catch (e: any) {
             setError(e?.message || 'Error cargando cobranzas');
         } finally {
@@ -328,6 +367,12 @@ const Collections = () => {
             return;
         }
 
+        const normalizedRut = normalizeRut(row.client_rut);
+        if (normalizedRut && !existingClientRutSet.has(normalizedRut)) {
+            setClientCreationContext({ row, sellerId });
+            return;
+        }
+
         setAssigningSellerId(row.id);
         try {
             const { data, error } = await supabase.rpc('assign_collection_seller', {
@@ -347,11 +392,74 @@ const Collections = () => {
         }
     };
 
+    const handleCreateClientFromCollection = async (formData: Partial<Client>) => {
+        if (!clientCreationContext) return;
+
+        const normalizedRut = normalizeRut(formData.rut || clientCreationContext.row.client_rut);
+        if (!normalizedRut) {
+            throw new Error('El cliente debe tener un RUT válido para crearse desde cobranza.');
+        }
+
+        const formattedRut = `${normalizedRut.slice(0, -1)}-${normalizedRut.slice(-1)}`;
+        const finalAddress = String(formData.address || '').trim() || 'Dirección por actualizar';
+        const finalComuna = String(formData.comuna || '').trim() || null;
+        const finalLat = Number(formData.lat || 0);
+        const finalLng = Number(formData.lng || 0);
+
+        const clientPayload = {
+            id: crypto.randomUUID(),
+            name: String(formData.name || clientCreationContext.row.client_name || '').trim(),
+            rut: formattedRut,
+            phone: String(formData.phone || '').trim(),
+            email: String(formData.email || '').trim(),
+            address: finalAddress,
+            lat: Number.isFinite(finalLat) ? finalLat : 0,
+            lng: Number.isFinite(finalLng) ? finalLng : 0,
+            notes: String(formData.notes || 'Creado desde módulo de cobranzas').trim(),
+            created_by: clientCreationContext.sellerId,
+            pending_seller_email: null,
+            status: 'active',
+            zone: 'Santiago',
+            giro: String(formData.giro || '').trim() || null,
+            comuna: finalComuna,
+            office: null,
+            credit_days: 0,
+            purchase_contact: String(formData.purchase_contact || '').trim() || null
+        };
+
+        const { error: insertError } = await supabase.from('clients').insert(clientPayload);
+        if (insertError) throw insertError;
+
+        setExistingClientRutSet((prev) => new Set([...prev, normalizedRut]));
+
+        const targetRow = clientCreationContext.row;
+        const targetSeller = clientCreationContext.sellerId;
+        setClientCreationContext(null);
+        setSellerAssignments((prev) => ({ ...prev, [targetRow.id]: targetSeller }));
+
+        setAssigningSellerId(targetRow.id);
+        try {
+            const { data, error } = await supabase.rpc('assign_collection_seller', {
+                p_collection_id: targetRow.id,
+                p_seller_id: targetSeller
+            } as any);
+            if (error) throw error;
+
+            const updatedDocuments = Number(data?.updated_documents || 0);
+            const updatedClients = Number(data?.updated_clients || 0);
+            alert(`Cliente creado y vendedor asignado correctamente. Documentos actualizados: ${updatedDocuments}. Clientes corregidos: ${updatedClients}.`);
+            await fetchData();
+        } finally {
+            setAssigningSellerId(null);
+        }
+    };
+
     if (effectiveRole === 'driver') {
         return <div className="p-10 text-center font-bold">Acceso denegado</div>;
     }
 
     return (
+        <>
         <div className="space-y-6 pb-20">
             <div className="flex items-center justify-between">
                 <div>
@@ -486,7 +594,7 @@ const Collections = () => {
                     </div>
                 </div>
 
-                <div className="bg-white border rounded-2xl p-4 lg:col-span-2">
+            <div className="bg-white border rounded-2xl p-4 lg:col-span-2">
                     <h3 className="font-black mb-3 inline-flex items-center gap-2"><DollarSign size={16} />Documentos</h3>
                     <div className="overflow-auto max-h-[520px]">
                         <table className="w-full text-sm">
@@ -506,7 +614,14 @@ const Collections = () => {
                                 {filteredRows.map((r) => (
                                     <tr key={r.id} className="border-b last:border-0 align-top">
                                         <td className="py-2 pr-2">{r.client_name}</td>
-                                        <td className="py-2 pr-2">{r.client_rut || '-'}</td>
+                                        <td className="py-2 pr-2">
+                                            <div className="space-y-1">
+                                                <span>{r.client_rut || '-'}</span>
+                                                {canAssignSeller && normalizeRut(r.client_rut) && !existingClientRutSet.has(normalizeRut(r.client_rut)) && (
+                                                    <span className="block text-[11px] font-bold text-amber-700">Cliente no existe en CRM</span>
+                                                )}
+                                            </div>
+                                        </td>
                                         <td className="py-2 pr-2">{r.document_number}</td>
                                         <td className="py-2 pr-2">{r.due_date}</td>
                                         <td className="py-2 pr-2">{r.status}</td>
@@ -624,6 +739,26 @@ const Collections = () => {
                 </div>
             </div>
         </div>
+
+        {clientCreationContext && (
+            <ClientFormModal
+                isOpen={Boolean(clientCreationContext)}
+                onClose={() => setClientCreationContext(null)}
+                title="Crear cliente desde cobranza"
+                persistenceKey="collections-create-client"
+                initialData={{
+                    name: clientCreationContext.row.client_name || '',
+                    rut: clientCreationContext.row.client_rut || '',
+                    phone: '',
+                    email: '',
+                    address: '',
+                    comuna: '',
+                    notes: 'Creado desde módulo de cobranzas'
+                }}
+                onSave={handleCreateClientFromCollection}
+            />
+        )}
+        </>
     );
 };
 
