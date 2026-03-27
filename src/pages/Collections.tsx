@@ -614,11 +614,95 @@ const Collections = () => {
 
             <div className="bg-white border rounded-2xl p-4 lg:col-span-2">
                     <h3 className="font-black mb-3 inline-flex items-center gap-2"><DollarSign size={16} />Documentos</h3>
-                    <p className="md:hidden text-xs text-gray-500 mb-3">Desliza lateralmente para ver todas las columnas.</p>
-                    <div
-                        className="-mx-4 overflow-x-scroll overscroll-x-contain md:mx-0"
-                        style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
-                    >
+                    <div className="md:hidden space-y-3 max-h-[520px] overflow-y-auto">
+                        {filteredRows.map((r) => (
+                            <div key={r.id} className="border rounded-2xl p-4 space-y-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-black text-gray-900">{r.client_name}</p>
+                                        <p className="text-xs text-gray-500">{r.client_rut || '-'}</p>
+                                        {canAssignSeller && normalizeRut(r.client_rut) && !existingClientRutSet.has(normalizeRut(r.client_rut)) && (
+                                            <p className="mt-1 text-[11px] font-bold text-amber-700">Cliente no existe en CRM</p>
+                                        )}
+                                    </div>
+                                    <span className="shrink-0 px-2 py-1 rounded-full bg-gray-100 text-[11px] font-bold text-gray-700">{r.status}</span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                    <div>
+                                        <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Documento</p>
+                                        <p className="font-semibold text-gray-800">{r.document_number}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Vence</p>
+                                        <p className="font-semibold text-gray-800">{formatShortDate(r.due_date)}</p>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Monto c/IVA</p>
+                                        <p className="font-black text-lg text-gray-900">${Number(r.amount || 0).toLocaleString('es-CL')}</p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Vendedor</p>
+                                    {r.seller_name || r.seller_email ? (
+                                        <p className="text-sm text-gray-700">{r.seller_name || r.seller_email}</p>
+                                    ) : canAssignSeller ? (
+                                        <div className="space-y-2">
+                                            <select
+                                                value={sellerAssignments[r.id] || ''}
+                                                onChange={(ev) => setSellerAssignments((prev) => ({ ...prev, [r.id]: ev.target.value }))}
+                                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                                            >
+                                                <option value="">Asignar vendedor...</option>
+                                                {sellerOptions.map((seller) => (
+                                                    <option key={seller.id} value={seller.id}>
+                                                        {seller.full_name || seller.email}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                onClick={() => assignSeller(r)}
+                                                disabled={assigningSellerId === r.id || !sellerAssignments[r.id]}
+                                                className="w-full px-3 py-2 rounded-xl bg-amber-600 text-white text-sm font-bold disabled:opacity-50"
+                                            >
+                                                {assigningSellerId === r.id ? 'Asignando...' : 'Asignar vendedor'}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-gray-500">-</p>
+                                    )}
+                                </div>
+
+                                <div className="space-y-2">
+                                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Descargo</p>
+                                    {canEditComment ? (
+                                        <div className="space-y-2">
+                                            <textarea
+                                                value={commentDrafts[r.id] ?? ''}
+                                                onChange={(ev) => setCommentDrafts(prev => ({ ...prev, [r.id]: ev.target.value }))}
+                                                placeholder="Cliente ya pagó / paga mañana / próxima semana..."
+                                                rows={3}
+                                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm resize-none"
+                                            />
+                                            <button
+                                                onClick={() => saveSellerComment(r)}
+                                                disabled={savingCommentId === r.id}
+                                                className="w-full px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-bold disabled:opacity-50"
+                                            >
+                                                {savingCommentId === r.id ? 'Guardando...' : 'Guardar descargo'}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-gray-700">{r.seller_comment || '-'}</p>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                        {filteredRows.length === 0 && <div className="py-6 text-center text-gray-500 text-sm">Sin documentos en dataset activo.</div>}
+                    </div>
+
+                    <div className="hidden md:block -mx-4 overflow-x-auto md:mx-0">
                         <div className="min-w-[1180px] px-4 md:px-0">
                         <div className="overflow-y-auto max-h-[520px]">
                         <table className="w-full text-sm">
@@ -732,11 +816,45 @@ const Collections = () => {
                     </div>
                 </div>
 
-                <p className="md:hidden text-xs text-gray-500 mb-3">Desliza lateralmente para revisar el historial completo.</p>
-                <div
-                    className="-mx-4 overflow-x-scroll overscroll-x-contain md:mx-0"
-                    style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
-                >
+                <div className="md:hidden space-y-3 max-h-[420px] overflow-y-auto">
+                    {filteredPaidRows.map((r) => (
+                        <div key={r.id} className="border rounded-2xl p-4 space-y-3">
+                            <div>
+                                <p className="text-sm font-black text-gray-900">{r.client_name}</p>
+                                <p className="text-xs text-gray-500">{r.client_rut || '-'}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div>
+                                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Documento</p>
+                                    <p className="font-semibold text-gray-800">{r.document_number}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Vencía</p>
+                                    <p className="font-semibold text-gray-800">{formatShortDate(r.due_date)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Pagado detectado</p>
+                                    <p className="font-semibold text-gray-800">{formatShortDate(r.paid_detected_at)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Vendedor</p>
+                                    <p className="font-semibold text-gray-800">{r.seller_name || r.seller_email || '-'}</p>
+                                </div>
+                                <div className="col-span-2">
+                                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Monto c/IVA</p>
+                                    <p className="font-black text-lg text-emerald-700">${Number(r.amount || 0).toLocaleString('es-CL')}</p>
+                                </div>
+                            </div>
+                            <div>
+                                <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Descargo</p>
+                                <p className="mt-1 text-sm text-gray-700">{r.seller_comment || '-'}</p>
+                            </div>
+                        </div>
+                    ))}
+                    {filteredPaidRows.length === 0 && <div className="py-6 text-center text-gray-500 text-sm">Sin historial pagado todavía.</div>}
+                </div>
+
+                <div className="hidden md:block -mx-4 overflow-x-auto md:mx-0">
                     <div className="min-w-[1080px] px-4 md:px-0">
                     <div className="overflow-y-auto max-h-[420px]">
                     <table className="w-full text-sm">
