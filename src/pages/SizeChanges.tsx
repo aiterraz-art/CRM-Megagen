@@ -5,6 +5,7 @@ import { useUser } from '../contexts/UserContext';
 import { Database } from '../types/supabase';
 import SizeChangeRequestForm from '../components/forms/SizeChangeRequestForm';
 import SizeChangeRequestDetailModal from '../components/modals/SizeChangeRequestDetailModal';
+import { sendSizeChangeNotificationEmail } from '../utils/sizeChangeEmail';
 
 type SizeChangeRequestRow = Database['public']['Tables']['size_change_requests']['Row'];
 type SizeChangeRequestItemRow = Database['public']['Tables']['size_change_request_items']['Row'];
@@ -247,7 +248,7 @@ const SizeChanges: React.FC = () => {
                 })),
             };
 
-            const { error } = editingRequest
+            const response = editingRequest
                 ? await supabase.rpc('update_size_change_request', {
                     p_request_id: editingRequest.id,
                     p_payload: rpcPayload,
@@ -256,11 +257,30 @@ const SizeChanges: React.FC = () => {
                     p_payload: rpcPayload,
                 });
 
-            if (error) throw error;
+            if (response.error) throw response.error;
+
+            let notificationError: string | null = null;
+            if (!editingRequest) {
+                const requestId = String(response.data?.id || '').trim();
+                if (requestId) {
+                    try {
+                        await sendSizeChangeNotificationEmail({ requestId });
+                    } catch (error: any) {
+                        console.error('Error sending size change notification:', error);
+                        notificationError = error?.message || 'No se pudo enviar el aviso a facturación.';
+                    }
+                }
+            }
 
             closeFormModal();
             await fetchData();
-            alert(editingRequest ? 'Solicitud actualizada correctamente.' : 'Solicitud creada correctamente.');
+            if (editingRequest) {
+                alert('Solicitud actualizada correctamente.');
+            } else if (notificationError) {
+                alert(`Solicitud creada correctamente, pero no se pudo enviar el aviso a facturación: ${notificationError}`);
+            } else {
+                alert('Solicitud creada correctamente y correo enviado a facturación.');
+            }
         } catch (error: any) {
             console.error('Error saving size change request:', error);
             alert(error?.message || 'No se pudo guardar la solicitud de cambio.');
