@@ -614,8 +614,12 @@ const Collections = () => {
 
             <div className="bg-white border rounded-2xl p-4 lg:col-span-2">
                     <h3 className="font-black mb-3 inline-flex items-center gap-2"><DollarSign size={16} />Documentos</h3>
-                    <div className="overflow-auto max-h-[520px]">
-                        <table className="w-full text-sm">
+                    <p className="md:hidden text-xs text-gray-500 mb-3">Desliza lateralmente para ver todas las columnas.</p>
+                    <div
+                        className="-mx-4 px-4 md:mx-0 md:px-0 overflow-x-auto overflow-y-auto max-h-[520px] touch-pan-x"
+                        style={{ WebkitOverflowScrolling: 'touch' }}
+                    >
+                        <table className="min-w-[1180px] w-full text-sm">
                             <thead>
                                 <tr className="text-left border-b">
                                     <th className="py-2 pr-2">Razón social</th>
@@ -724,8 +728,12 @@ const Collections = () => {
                     </div>
                 </div>
 
-                <div className="overflow-auto max-h-[420px]">
-                    <table className="w-full text-sm">
+                <p className="md:hidden text-xs text-gray-500 mb-3">Desliza lateralmente para revisar el historial completo.</p>
+                <div
+                    className="-mx-4 px-4 md:mx-0 md:px-0 overflow-x-auto overflow-y-auto max-h-[420px] touch-pan-x"
+                    style={{ WebkitOverflowScrolling: 'touch' }}
+                >
+                    <table className="min-w-[1080px] w-full text-sm">
                         <thead>
                             <tr className="text-left border-b">
                                 <th className="py-2 pr-2">Razón social</th>
