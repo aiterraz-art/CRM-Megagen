@@ -18,15 +18,19 @@ const Collections = () => {
     const [allSummary, setAllSummary] = useState<any[]>([]);
     const [activeBatch, setActiveBatch] = useState<any>(null);
     const [rejectedRows, setRejectedRows] = useState<CollectionUploadRejected[]>([]);
+    const [sellerOptions, setSellerOptions] = useState<any[]>([]);
 
     const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+    const [sellerAssignments, setSellerAssignments] = useState<Record<string, string>>({});
     const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
+    const [assigningSellerId, setAssigningSellerId] = useState<string | null>(null);
 
     const isSeller = effectiveRole === 'seller';
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
     const canUpload = canManageCollections;
     const canDownloadTemplate = canManageCollections;
     const canEditComment = effectiveRole === 'seller' || canManageCollections;
+    const canAssignSeller = effectiveRole === 'admin' || effectiveRole === 'jefe';
 
     const normalizeEmail = (value: string | null | undefined) => (value || '').trim().toLowerCase();
 
@@ -88,6 +92,15 @@ const Collections = () => {
                 initialDrafts[row.id] = row.seller_comment || '';
             });
             setCommentDrafts(initialDrafts);
+            setSellerAssignments((prev) => {
+                const next = { ...prev };
+                loadedRows.forEach((row: any) => {
+                    if (row.seller_id && !next[row.id]) {
+                        next[row.id] = row.seller_id;
+                    }
+                });
+                return next;
+            });
         } catch (e: any) {
             setError(e?.message || 'Error cargando cobranzas');
         } finally {
@@ -95,9 +108,32 @@ const Collections = () => {
         }
     };
 
+    const fetchAssignableSellers = async () => {
+        if (!canAssignSeller) return;
+
+        try {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id, full_name, email, role, status')
+                .eq('status', 'active')
+                .order('full_name');
+
+            if (error) throw error;
+
+            const assignableRoles = new Set(['seller', 'jefe', 'manager', 'admin']);
+            setSellerOptions((data || []).filter((row) => assignableRoles.has(String(row.role || '').toLowerCase())));
+        } catch (e) {
+            console.error('No se pudo cargar la lista de vendedores para cobranza', e);
+        }
+    };
+
     useEffect(() => {
         fetchData();
     }, []);
+
+    useEffect(() => {
+        fetchAssignableSellers();
+    }, [canAssignSeller]);
 
     const downloadTemplate = () => {
         if (!canDownloadTemplate) {
@@ -198,6 +234,11 @@ const Collections = () => {
         return { docs, amount };
     }, [paidRows]);
 
+    const missingSellerCount = useMemo(
+        () => rows.filter((row) => !row.seller_id && !normalizeEmail(row.seller_email)).length,
+        [rows]
+    );
+
     const saveSellerComment = async (row: any) => {
         if (!canEditComment) return;
         const draft = (commentDrafts[row.id] ?? '').trim();
@@ -215,6 +256,34 @@ const Collections = () => {
             alert(`No se pudo guardar descargo: ${e?.message || 'desconocido'}`);
         } finally {
             setSavingCommentId(null);
+        }
+    };
+
+    const assignSeller = async (row: any) => {
+        if (!canAssignSeller) return;
+
+        const sellerId = sellerAssignments[row.id];
+        if (!sellerId) {
+            alert('Selecciona un vendedor antes de guardar la asignación.');
+            return;
+        }
+
+        setAssigningSellerId(row.id);
+        try {
+            const { data, error } = await supabase.rpc('assign_collection_seller', {
+                p_collection_id: row.id,
+                p_seller_id: sellerId
+            } as any);
+            if (error) throw error;
+
+            const updatedDocuments = Number(data?.updated_documents || 0);
+            const updatedClients = Number(data?.updated_clients || 0);
+            alert(`Vendedor asignado correctamente. Documentos actualizados: ${updatedDocuments}. Clientes corregidos: ${updatedClients}.`);
+            await fetchData();
+        } catch (e: any) {
+            alert(`No se pudo asignar vendedor: ${e?.message || 'desconocido'}`);
+        } finally {
+            setAssigningSellerId(null);
         }
     };
 
@@ -285,6 +354,12 @@ const Collections = () => {
                     </div>
                 )}
 
+                {canAssignSeller && missingSellerCount > 0 && (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-100 text-amber-700 text-sm">
+                        Hay {missingSellerCount} documento(s) sin vendedor resuelto. Puedes asignarlos manualmente y el sistema corregirá también el cliente para próximas cargas.
+                    </div>
+                )}
+
                 {rejectedRows.length > 0 && (
                     <div className="p-3 rounded-xl bg-amber-50 border border-amber-100 text-amber-700 text-sm">
                         {rejectedRows.length} fila(s) fueron rechazadas por validación estricta. Puedes descargar el detalle en "Exportar rechazadas".
@@ -339,7 +414,35 @@ const Collections = () => {
                                         <td className="py-2 pr-2">{r.due_date}</td>
                                         <td className="py-2 pr-2">{r.status}</td>
                                         <td className="py-2 pr-2 font-bold">${Number(r.amount || 0).toLocaleString('es-CL')}</td>
-                                        <td className="py-2 pr-2 text-xs text-gray-600">{r.seller_name || r.seller_email || '-'}</td>
+                                        <td className="py-2 pr-2 text-xs text-gray-600 min-w-[260px]">
+                                            {r.seller_name || r.seller_email ? (
+                                                <span>{r.seller_name || r.seller_email}</span>
+                                            ) : canAssignSeller ? (
+                                                <div className="flex items-center gap-2">
+                                                    <select
+                                                        value={sellerAssignments[r.id] || ''}
+                                                        onChange={(ev) => setSellerAssignments((prev) => ({ ...prev, [r.id]: ev.target.value }))}
+                                                        className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs"
+                                                    >
+                                                        <option value="">Asignar vendedor...</option>
+                                                        {sellerOptions.map((seller) => (
+                                                            <option key={seller.id} value={seller.id}>
+                                                                {seller.full_name || seller.email}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        onClick={() => assignSeller(r)}
+                                                        disabled={assigningSellerId === r.id || !sellerAssignments[r.id]}
+                                                        className="px-2 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-bold disabled:opacity-50"
+                                                    >
+                                                        {assigningSellerId === r.id ? '...' : 'Asignar'}
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <span>-</span>
+                                            )}
+                                        </td>
                                         <td className="py-2 pr-2 min-w-[260px]">
                                             {canEditComment ? (
                                                 <div className="flex items-center gap-2">
