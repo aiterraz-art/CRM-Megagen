@@ -113,7 +113,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/collections',
         icon: <CircleDollarSign size={20} />,
         group: 'comercial',
-        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
     },
     {
         id: 'cold-visit',

@@ -12,6 +12,23 @@ type Client = Database['public']['Tables']['clients']['Row'];
 const normalizeRut = (value: string | null | undefined) =>
     (value || '').toString().replace(/[^0-9kK]/g, '').toUpperCase();
 
+const formatShortDate = (value: string | null | undefined) => {
+    if (!value) return '-';
+    const raw = String(value).trim();
+    const datePart = raw.includes('T') ? raw.split('T')[0] : raw.split(' ')[0];
+    const match = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+        return `${match[3]}/${match[2]}/${match[1]}`;
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    const day = `${parsed.getDate()}`.padStart(2, '0');
+    const month = `${parsed.getMonth() + 1}`.padStart(2, '0');
+    const year = parsed.getFullYear();
+    return `${day}/${month}/${year}`;
+};
+
 const Collections = () => {
     const { profile, effectiveRole, hasPermission } = useUser();
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -36,13 +53,14 @@ const Collections = () => {
     const [existingClientRutSet, setExistingClientRutSet] = useState<Set<string>>(new Set());
     const [clientCreationContext, setClientCreationContext] = useState<{ row: any; sellerId: string } | null>(null);
 
+    const isTreasurer = effectiveRole === 'tesorero';
     const isSeller = effectiveRole === 'seller';
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
     const canUpload = canManageCollections;
     const canDownloadTemplate = canManageCollections;
     const canEditComment = effectiveRole === 'seller' || canManageCollections;
-    const canAssignSeller = effectiveRole === 'admin' || effectiveRole === 'jefe';
-    const canFilterBySeller = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canAssignSeller = effectiveRole === 'admin' || effectiveRole === 'jefe' || isTreasurer;
+    const canFilterBySeller = effectiveRole === 'admin' || effectiveRole === 'jefe' || isTreasurer;
 
     const normalizeEmail = (value: string | null | undefined) => (value || '').trim().toLowerCase();
 
@@ -546,7 +564,7 @@ const Collections = () => {
                 <div className="bg-white border rounded-2xl p-4 space-y-3">
                     <div>
                         <h3 className="font-black text-lg">Filtros y orden</h3>
-                        <p className="text-sm text-gray-500">Disponible para admin y jefes.</p>
+                        <p className="text-sm text-gray-500">Disponible para admin, jefes y tesorería.</p>
                     </div>
                     <div className="grid md:grid-cols-2 gap-3">
                         <div>
@@ -623,7 +641,7 @@ const Collections = () => {
                                             </div>
                                         </td>
                                         <td className="py-2 pr-2">{r.document_number}</td>
-                                        <td className="py-2 pr-2">{r.due_date}</td>
+                                        <td className="py-2 pr-2 whitespace-nowrap">{formatShortDate(r.due_date)}</td>
                                         <td className="py-2 pr-2">{r.status}</td>
                                         <td className="py-2 pr-2 font-bold">${Number(r.amount || 0).toLocaleString('es-CL')}</td>
                                         <td className="py-2 pr-2 text-xs text-gray-600 min-w-[260px]">
@@ -726,10 +744,10 @@ const Collections = () => {
                                     <td className="py-2 pr-2">{r.client_name}</td>
                                     <td className="py-2 pr-2">{r.client_rut || '-'}</td>
                                     <td className="py-2 pr-2">{r.document_number}</td>
-                                    <td className="py-2 pr-2">{r.due_date}</td>
+                                    <td className="py-2 pr-2 whitespace-nowrap">{formatShortDate(r.due_date)}</td>
                                     <td className="py-2 pr-2 font-bold">${Number(r.amount || 0).toLocaleString('es-CL')}</td>
                                     <td className="py-2 pr-2 text-xs text-gray-600">{r.seller_name || r.seller_email || '-'}</td>
-                                    <td className="py-2 pr-2 text-xs text-gray-600">{r.paid_detected_at ? new Date(r.paid_detected_at).toLocaleString('es-CL') : '-'}</td>
+                                    <td className="py-2 pr-2 text-xs text-gray-600 whitespace-nowrap">{formatShortDate(r.paid_detected_at)}</td>
                                     <td className="py-2 pr-2 text-xs text-gray-600 min-w-[240px]">{r.seller_comment || '-'}</td>
                                 </tr>
                             ))}

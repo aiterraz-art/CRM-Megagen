@@ -194,7 +194,7 @@ const ClientsContent = () => {
     const [poolAssigneeId, setPoolAssigneeId] = useState<string>('');
     const isSellerRole = effectiveRole === 'seller';
     const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
-    const canAssignClientOwner = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canAssignClientOwner = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'tesorero';
     const canManageClientCredit = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),

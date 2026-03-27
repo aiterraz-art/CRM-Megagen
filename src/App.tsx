@@ -234,7 +234,7 @@ function App() {
                             <Route path="delivery" element={<DeliveryRoute />} />
                             <Route path="my-deliveries" element={<MyDeliveries />} />
                             <Route path="operations" element={<OperationsCenter />} />
-                            <Route path="collections" element={<NonFacturadorGuard><Collections /></NonFacturadorGuard>} />
+                            <Route path="collections" element={<Collections />} />
                             <Route path="settings" element={<Settings />} />
                         </Route>
 
