@@ -434,8 +434,8 @@ const Inventory = () => {
                 </div>
             </div>
 
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="relative flex-1 md:max-w-3xl">
+            <div className="space-y-4">
+                <div className="relative w-full md:max-w-4xl">
                     <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                     <input
                         type="text"
