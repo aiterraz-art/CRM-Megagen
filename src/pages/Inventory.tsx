@@ -435,12 +435,12 @@ const Inventory = () => {
             </div>
 
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="relative flex-1 max-w-xl">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <div className="relative flex-1 md:max-w-3xl">
+                    <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                     <input
                         type="text"
                         placeholder="Buscar por SKU o Nombre de producto..."
-                        className="w-full pl-12 pr-4 py-4 bg-white border border-transparent rounded-2xl shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        className="w-full min-h-[64px] pl-14 pr-5 py-4 bg-white border border-transparent rounded-[1.75rem] shadow-sm text-base font-medium focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                     />
