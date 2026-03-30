@@ -209,24 +209,34 @@ const Inventory = () => {
         XLSX.writeFile(workbook, 'plantilla_importador_precios.xlsx');
     };
 
-    const downloadProductCatalog = () => {
-        if (items.length === 0) {
-            alert('No hay productos cargados para exportar.');
+    const downloadProductCatalog = async () => {
+        const { data, error } = await (supabase.from('inventory_price_catalog') as any)
+            .select('sku, product_name, price')
+            .order('product_name', { ascending: true });
+
+        if (error) {
+            console.error('Error fetching price catalog:', error);
+            alert(`No se pudo descargar la lista de precios: ${error.message}`);
             return;
         }
 
-        const rows = items.map((item) => ({
+        const rows = (data || []).map((item: any) => ({
             SKU: item.sku || '',
-            'Nombre del Producto': item.name || '',
+            'Nombre del Producto': item.product_name || '',
             'Precio Neto de Venta': Number(item.price || 0)
         }));
+
+        if (rows.length === 0) {
+            alert('No hay precios cargados en la lista permanente.');
+            return;
+        }
 
         const worksheet = XLSX.utils.json_to_sheet(rows, {
             header: ['SKU', 'Nombre del Producto', 'Precio Neto de Venta']
         });
         const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Productos');
-        XLSX.writeFile(workbook, 'inventario_productos_precios.xlsx');
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Precios');
+        XLSX.writeFile(workbook, 'lista_precios_permanente.xlsx');
     };
 
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -316,11 +326,11 @@ const Inventory = () => {
                 });
                 if (error) throw error;
 
-                const unknownCount = Number(data?.unknown_skus_count || 0);
-                const unknownMsg = unknownCount > 0
-                    ? ` SKUs no encontrados: ${unknownCount}.`
+                const catalogOnlyCount = Number(data?.catalog_only_count || 0);
+                const catalogOnlyMsg = catalogOnlyCount > 0
+                    ? ` ${catalogOnlyCount} SKU quedaron guardados solo en la lista de precios porque hoy no están en stock.`
                     : '';
-                alert(`Importador de precios completado. ${data?.updated_count || 0} SKU con precio actualizado y ${data?.reset_count || 0} SKU reseteados a precio 0.${unknownMsg}`);
+                alert(`Importador de precios completado. ${data?.stored_count || 0} SKU guardados en la lista permanente y ${data?.synced_inventory_count || 0} SKU sincronizados con el stock actual.${catalogOnlyMsg}`);
             }
 
             fetchInventory();
@@ -449,7 +459,7 @@ const Inventory = () => {
                     {canDownloadCatalog && (
                         <button
                             onClick={downloadProductCatalog}
-                            disabled={loading || items.length === 0}
+                            disabled={loading}
                             className="flex items-center px-6 py-4 bg-white rounded-2xl border border-gray-100 text-slate-700 font-bold hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
                         >
                             <Download size={18} className="mr-2" />
