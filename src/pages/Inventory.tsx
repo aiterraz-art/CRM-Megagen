@@ -121,6 +121,7 @@ const Inventory = () => {
         // Explicit projection: avoid leaking internal cost/margin columns to client UI.
         const { data, error } = await (supabase.from('inventory') as any)
             .select('id, sku, name, price, stock_qty, category, created_at')
+            .eq('is_service_item', false)
             .order('name');
         if (error) {
             console.error('Error fetching inventory:', error);
