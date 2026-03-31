@@ -45,10 +45,25 @@ const normalizeProductKey = (value: string) =>
         .replace(/[^A-Z0-9]/g, '');
 const DISPATCH_SERVICE_NAME_KEY = normalizeProductKey(DISPATCH_SERVICE_NAME);
 const DISPATCH_SERVICE_SKU_KEY = normalizeProductKey(DISPATCH_SERVICE_SKU);
+const ORDER_CONVERSION_TIMEOUT_MS = 60_000;
 
 const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp']);
 const isBillingBackofficeRole = (role: string | null | undefined) =>
     role === 'facturador' || role === 'tesorero';
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+
+    try {
+        return await Promise.race([promise, timeoutPromise]);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+};
 
 const notifyApprovalPush = async (approvalId: string) => {
     try {
@@ -96,6 +111,7 @@ const Quotations: React.FC = () => {
     const [quotationPendingOrder, setQuotationPendingOrder] = useState<any | null>(null);
     const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
     const [paymentProofError, setPaymentProofError] = useState<string | null>(null);
+    const [orderConversionStage, setOrderConversionStage] = useState<string | null>(null);
     const [availableSellers, setAvailableSellers] = useState<SellerOption[]>([]);
     const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
 
@@ -669,6 +685,7 @@ const Quotations: React.FC = () => {
         setQuotationPendingOrder(null);
         setPaymentProofFile(null);
         setPaymentProofError(null);
+        setOrderConversionStage(null);
     }, []);
 
     const handleDeleteQuotation = async (id: string) => {
@@ -983,21 +1000,32 @@ const Quotations: React.FC = () => {
         }
 
         setSubmitting(true);
+        setPaymentProofError(null);
+        setOrderConversionStage(requiresProof ? 'Subiendo comprobante de pago...' : 'Generando pedido...');
         let uploadedProof: { path: string; name: string; mimeType: string } | null = null;
         let createdOrderId: string | null = null;
 
         try {
             if (requiresProof && proofFile) {
-                uploadedProof = await uploadPaymentProof(quotation, proofFile);
+                uploadedProof = await withTimeout(
+                    uploadPaymentProof(quotation, proofFile),
+                    ORDER_CONVERSION_TIMEOUT_MS,
+                    'La subida del comprobante tardó demasiado. Revisa tu conexión e inténtalo nuevamente.'
+                );
             }
 
-            const { data, error } = await supabase.rpc('convert_quotation_to_order', {
-                p_quotation_id: quotation.id,
-                p_user_id: profile.id,
-                p_payment_proof_path: uploadedProof?.path ?? null,
-                p_payment_proof_name: uploadedProof?.name ?? null,
-                p_payment_proof_mime_type: uploadedProof?.mimeType ?? null
-            });
+            setOrderConversionStage('Generando pedido...');
+            const { data, error } = await withTimeout(
+                (async () => await supabase.rpc('convert_quotation_to_order', {
+                    p_quotation_id: quotation.id,
+                    p_user_id: profile.id,
+                    p_payment_proof_path: uploadedProof?.path ?? null,
+                    p_payment_proof_name: uploadedProof?.name ?? null,
+                    p_payment_proof_mime_type: uploadedProof?.mimeType ?? null
+                }))(),
+                ORDER_CONVERSION_TIMEOUT_MS,
+                'La generación del pedido tardó demasiado. Vuelve a revisar en Pedidos antes de reintentar para evitar duplicados.'
+            );
 
             if (error) throw error;
 
@@ -1013,26 +1041,41 @@ const Quotations: React.FC = () => {
             const orderFolio = response?.order_folio || response?.order_id?.slice?.(0, 8) || 'N/A';
 
             try {
-                await sendOrderNotificationEmail({
+                setOrderConversionStage('Enviando correo a facturación...');
+                await withTimeout(sendOrderNotificationEmail({
                     orderId: createdOrderId || response?.order_id,
                     requestSource: 'quotation_conversion',
                     order: buildOrderEmailPayload(quotation, orderFolio),
-                });
+                }), ORDER_CONVERSION_TIMEOUT_MS, 'El correo a facturación tardó demasiado. El pedido se generó igual y puedes reenviarlo desde Pedidos.');
                 alert('Pedido generado y correo enviado a facturación correctamente.');
             } catch (emailError: any) {
-                alert('Pedido generado, pero el correo a facturación falló. Puedes reenviarlo desde el módulo de Pedidos.');
+                console.warn('Order notification failed:', emailError);
+                alert(`Pedido generado, pero el correo a facturación falló. ${emailError?.message || 'Puedes reenviarlo desde el módulo de Pedidos.'}`);
             }
 
             closePaymentProofModal();
             fetchQuotations();
         } catch (error: any) {
             if (uploadedProof?.path && !createdOrderId) {
-                await supabase.storage.from(PAYMENT_PROOFS_BUCKET).remove([uploadedProof.path]);
+                void supabase.storage
+                    .from(PAYMENT_PROOFS_BUCKET)
+                    .remove([uploadedProof.path])
+                    .then(({ error: cleanupError }) => {
+                        if (cleanupError) {
+                            console.warn('No se pudo limpiar comprobante temporal tras fallo de conversión:', cleanupError.message);
+                        }
+                    })
+                    .catch((cleanupError) => {
+                        console.warn('Error inesperado limpiando comprobante temporal tras fallo de conversión:', cleanupError);
+                    });
             }
             console.error('Error converting to order:', error);
-            alert('Error al generar la venta: ' + (error.message || error.details || error));
+            const errorMessage = error?.message || error?.details || 'Ocurrió un error al generar el pedido.';
+            setPaymentProofError(errorMessage);
+            alert(`Error al generar la venta: ${errorMessage}`);
         } finally {
             setSubmitting(false);
+            setOrderConversionStage(null);
         }
     }, [
         buildOrderEmailPayload,
@@ -1693,6 +1736,11 @@ const Quotations: React.FC = () => {
                                     {paymentProofError && (
                                         <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
                                             {paymentProofError}
+                                        </div>
+                                    )}
+                                    {submitting && orderConversionStage && (
+                                        <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700">
+                                            {orderConversionStage}
                                         </div>
                                     )}
                                 </div>
