@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone, Mail, Upload, Share2 } from 'lucide-react';
+import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone, Mail, Upload, Share2, History } from 'lucide-react';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
@@ -14,6 +14,8 @@ import { buildDiscountApprovalRequestedItems, getApprovalReason } from '../utils
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import { generateQuotationPdfFile } from '../utils/quotationPdf';
+import QuotationOrderConversionHistoryModal from '../components/modals/QuotationOrderConversionHistoryModal';
+import { Database } from '../types/supabase';
 
 const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
 
@@ -24,6 +26,8 @@ type SellerOption = {
     role: string | null;
     status: string | null;
 };
+
+type QuotationOrderConversionLog = Database['public']['Tables']['quotation_order_conversion_logs']['Row'];
 
 type QuoteFilter = 'All' | 'Draft' | 'Sent' | 'Approved';
 const FILTER_OPTIONS: Array<{ label: string; value: QuoteFilter }> = [
@@ -115,6 +119,10 @@ const Quotations: React.FC = () => {
     const [orderConversionStage, setOrderConversionStage] = useState<string | null>(null);
     const [availableSellers, setAvailableSellers] = useState<SellerOption[]>([]);
     const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
+    const [conversionHistoryQuotation, setConversionHistoryQuotation] = useState<any | null>(null);
+    const [conversionHistoryLogs, setConversionHistoryLogs] = useState<QuotationOrderConversionLog[]>([]);
+    const [conversionHistoryLoading, setConversionHistoryLoading] = useState(false);
+    const [conversionHistoryError, setConversionHistoryError] = useState<string | null>(null);
 
     // Form State
     const [formItems, setFormItems] = useState<any[]>([{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
@@ -130,6 +138,7 @@ const Quotations: React.FC = () => {
     const { activeVisit } = useVisit();
 
     const isSellerRole = effectiveRole === 'seller';
+    const canViewOrderConversionTrace = effectiveRole === 'admin' && profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
@@ -688,6 +697,30 @@ const Quotations: React.FC = () => {
         setPaymentProofError(null);
         setOrderConversionStage(null);
     }, []);
+
+    const openConversionHistory = useCallback(async (quotation: any) => {
+        if (!canViewOrderConversionTrace) return;
+        setConversionHistoryQuotation(quotation);
+        setConversionHistoryLogs([]);
+        setConversionHistoryError(null);
+        setConversionHistoryLoading(true);
+
+        try {
+            const { data, error } = await supabase
+                .from('quotation_order_conversion_logs')
+                .select('*')
+                .eq('quotation_id', quotation.id)
+                .order('created_at', { ascending: false })
+                .limit(300);
+
+            if (error) throw error;
+            setConversionHistoryLogs((data || []) as QuotationOrderConversionLog[]);
+        } catch (historyError: any) {
+            setConversionHistoryError(historyError?.message || 'No se pudo cargar la trazabilidad de esta cotización.');
+        } finally {
+            setConversionHistoryLoading(false);
+        }
+    }, [canViewOrderConversionTrace]);
 
     const handleDeleteQuotation = async (id: string) => {
         if (!confirm('¿Está seguro de que desea eliminar esta cotización?')) return;
@@ -1645,8 +1678,18 @@ const Quotations: React.FC = () => {
                                                 <MapPin size={14} />
                                             </button>
                                         )}
-                                        {(isSupervisor || q.seller_id === profile?.id) && (
-                                            <>
+                                        <>
+                                            {canViewOrderConversionTrace && (
+                                                <button
+                                                    onClick={() => void openConversionHistory(q)}
+                                                    className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-slate-700 hover:bg-slate-50 transition-all"
+                                                    title="Ver trazabilidad de conversión"
+                                                >
+                                                    <History size={14} />
+                                                </button>
+                                            )}
+                                            {(isSupervisor || q.seller_id === profile?.id) && (
+                                                <>
                                                 <button
                                                     onClick={() => handleEditQuotation(q)}
                                                     className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-amber-600 hover:bg-amber-50 transition-all"
@@ -1666,8 +1709,9 @@ const Quotations: React.FC = () => {
                                                         <Trash2 size={14} />
                                                     )}
                                                 </button>
-                                            </>
-                                        )}
+                                                </>
+                                            )}
+                                        </>
                                     </div>
                                 </div>
                             </div>
@@ -1677,6 +1721,25 @@ const Quotations: React.FC = () => {
             </div>
 
             {/* Location Map Modal */}
+            {
+                conversionHistoryQuotation && (
+                    <QuotationOrderConversionHistoryModal
+                        isOpen={Boolean(conversionHistoryQuotation)}
+                        quotationFolio={conversionHistoryQuotation?.folio ?? null}
+                        clientName={conversionHistoryQuotation?.client_name || 'Cliente'}
+                        logs={conversionHistoryLogs}
+                        loading={conversionHistoryLoading}
+                        error={conversionHistoryError}
+                        onClose={() => {
+                            setConversionHistoryQuotation(null);
+                            setConversionHistoryLogs([]);
+                            setConversionHistoryError(null);
+                            setConversionHistoryLoading(false);
+                        }}
+                    />
+                )
+            }
+
             {
                 selectedLocation && (
                     <div className="fixed inset-0 z-[2000] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
