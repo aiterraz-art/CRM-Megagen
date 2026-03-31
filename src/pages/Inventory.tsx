@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { Search, Package, Plus, AlertTriangle, TrendingUp, History, FileSpreadsheet, Download, ClipboardList } from 'lucide-react';
+import { Search, Package, Plus, AlertTriangle, TrendingUp, History, FileSpreadsheet, Download, ClipboardList, Pencil, Check, X } from 'lucide-react';
 import { Database } from '../types/supabase';
 import * as XLSX from 'xlsx';
 
@@ -25,6 +25,9 @@ const Inventory = () => {
     const [importType, setImportType] = useState<ImportType | null>(null);
     const [showNewProductModal, setShowNewProductModal] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+    const [editingPriceValue, setEditingPriceValue] = useState('');
+    const [savingPriceId, setSavingPriceId] = useState<string | null>(null);
     const [newProduct, setNewProduct] = useState({
         sku: '',
         name: '',
@@ -391,6 +394,49 @@ const Inventory = () => {
         }
     };
 
+    const startPriceEdit = (item: InventoryItem) => {
+        setEditingPriceId(item.id);
+        setEditingPriceValue(String(Math.max(0, Number(item.price || 0))));
+    };
+
+    const cancelPriceEdit = () => {
+        setEditingPriceId(null);
+        setEditingPriceValue('');
+        setSavingPriceId(null);
+    };
+
+    const saveManualPrice = async (item: InventoryItem) => {
+        if (!canManageInventory) return;
+
+        const nextPrice = Math.max(0, Number(editingPriceValue || 0));
+        if (!Number.isFinite(nextPrice)) {
+            alert('Debes ingresar un precio válido.');
+            return;
+        }
+
+        setSavingPriceId(item.id);
+        try {
+            const { error } = await supabase
+                .from('inventory')
+                .update({ price: nextPrice })
+                .eq('id', item.id);
+
+            if (error) throw error;
+
+            setItems((prev) => prev.map((row) => (
+                row.id === item.id
+                    ? { ...row, price: nextPrice }
+                    : row
+            )));
+            cancelPriceEdit();
+            alert('Precio actualizado y guardado en la lista permanente.');
+        } catch (error: any) {
+            console.error('Error updating inventory price:', error);
+            alert(`No se pudo actualizar el precio: ${error.message}`);
+            setSavingPriceId(null);
+        }
+    };
+
     const filteredItems = items.filter(i =>
         (i.name?.toLowerCase() || '').includes(search.toLowerCase()) ||
         (i.sku?.toLowerCase() || '').includes(search.toLowerCase())
@@ -577,7 +623,61 @@ const Inventory = () => {
                                     </td>
                                     {!isSellerReadOnly && (
                                         <td className="px-6 py-5 text-center text-sm font-bold text-gray-900">
-                                            ${item.price?.toLocaleString()}
+                                            {canManageInventory && editingPriceId === item.id ? (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        step="1"
+                                                        className="w-28 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-sm font-bold text-center text-gray-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                        value={editingPriceValue}
+                                                        onChange={(e) => setEditingPriceValue(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                e.preventDefault();
+                                                                void saveManualPrice(item);
+                                                            }
+                                                            if (e.key === 'Escape') {
+                                                                e.preventDefault();
+                                                                cancelPriceEdit();
+                                                            }
+                                                        }}
+                                                        autoFocus
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void saveManualPrice(item)}
+                                                        disabled={savingPriceId === item.id}
+                                                        className="rounded-lg bg-emerald-50 p-2 text-emerald-600 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                                                        title="Guardar precio"
+                                                    >
+                                                        <Check size={16} />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={cancelPriceEdit}
+                                                        disabled={savingPriceId === item.id}
+                                                        className="rounded-lg bg-gray-100 p-2 text-gray-500 transition-colors hover:bg-gray-200 disabled:opacity-50"
+                                                        title="Cancelar edición"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <span>${item.price?.toLocaleString()}</span>
+                                                    {canManageInventory && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => startPriceEdit(item)}
+                                                            className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                                            title="Editar precio manualmente"
+                                                        >
+                                                            <Pencil size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
                                         </td>
                                     )}
                                     {canShowActions && (
