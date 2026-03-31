@@ -75,13 +75,14 @@ const Collections = () => {
     const [proofTargetRow, setProofTargetRow] = useState<any | null>(null);
 
     const isSeller = effectiveRole === 'seller';
+    const isChief = effectiveRole === 'jefe';
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
     const canManageClientOwnership = hasPermission('MANAGE_CLIENTS') || effectiveRole === 'jefe';
     const canUpload = canManageCollections;
     const canDownloadTemplate = canManageCollections;
     const canEditComment = effectiveRole === 'seller' || canManageCollections;
     const canAssignSeller = canManageCollections && canManageClientOwnership;
-    const canFilterBySeller = canManageCollections;
+    const canFilterBySeller = canManageCollections || isChief;
 
     const normalizeEmail = (value: string | null | undefined) => (value || '').trim().toLowerCase();
 
@@ -663,7 +664,7 @@ const Collections = () => {
                 <div className="bg-white border rounded-2xl p-4 space-y-3">
                     <div>
                         <h3 className="font-black text-lg">Filtros y orden</h3>
-                        <p className="text-sm text-gray-500">Disponible para usuarios con gestión de cobranzas.</p>
+                        <p className="text-sm text-gray-500">Disponible para tesorería, facturación, admins y jefaturas comerciales.</p>
                     </div>
                     <div className="grid md:grid-cols-2 gap-3">
                         <div>
