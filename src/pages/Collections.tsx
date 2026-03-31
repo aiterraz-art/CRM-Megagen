@@ -4,6 +4,7 @@ import { Upload, Download, DollarSign, Paperclip, Eye } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollectionsSnapshot } from '../utils/collectionsImport';
+import { sendCollectionPaymentEmail } from '../utils/collectionPaymentEmail';
 import ClientFormModal from '../components/modals/ClientFormModal';
 import { Database } from '../types/supabase';
 
@@ -451,7 +452,27 @@ const Collections = () => {
         setProofUploadingId(targetRow.id);
         try {
             await uploadCollectionProof(targetRow, file);
-            alert('Comprobante de pago cargado correctamente.');
+            try {
+                await sendCollectionPaymentEmail({
+                    attachment: file,
+                    row: {
+                        client_name: targetRow.client_name,
+                        client_rut: targetRow.client_rut,
+                        document_number: targetRow.document_number,
+                        due_date: targetRow.due_date,
+                        amount: targetRow.amount,
+                        outstanding_amount: targetRow.outstanding_amount,
+                        seller_comment: commentDrafts[targetRow.id] ?? targetRow.seller_comment,
+                        client_id: targetRow.client_id || null,
+                    },
+                    profileId: profile?.id || null,
+                    senderEmail: profile?.email || null,
+                    senderName: (profile as any)?.full_name || null,
+                });
+                alert('Comprobante de pago cargado y enviado a pagos correctamente.');
+            } catch (emailError: any) {
+                alert(`Comprobante cargado, pero el correo a pagos falló: ${emailError?.message || 'desconocido'}`);
+            }
         } catch (uploadError: any) {
             alert(`No se pudo cargar el comprobante: ${uploadError?.message || 'desconocido'}`);
         } finally {
