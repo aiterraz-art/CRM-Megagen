@@ -11,6 +11,7 @@ import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { logQuotationOrderConversionSafe } from '../utils/quotationOrderConversionLog';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays, getPaymentTermsFromCreditDays } from '../utils/credit';
 import { buildDiscountApprovalRequestedItems, getApprovalReason } from '../utils/discountApproval';
+import { convertHeicToJpeg, isHeicLikeFile } from '../utils/heic';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import { generateQuotationPdfFile } from '../utils/quotationPdf';
@@ -36,7 +37,13 @@ const FILTER_OPTIONS: Array<{ label: string; value: QuoteFilter }> = [
     { label: 'Enviadas', value: 'Sent' },
     { label: 'Aprobadas', value: 'Approved' }
 ];
-const formatMoney = (value: number) => `$${Number(value || 0).toLocaleString('es-CL')}`;
+const toWholeMoney = (value: unknown) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, Math.round(parsed));
+};
+
+const formatMoney = (value: number) => `$${toWholeMoney(value).toLocaleString('es-CL')}`;
 const SELLER_MAX_DISCOUNT_PCT = 5;
 const DISPATCH_SERVICE_NAME = 'SERVICIO DE DESPACHO';
 const DISPATCH_SERVICE_SKU = 'SERV-DESPACHO';
@@ -51,10 +58,17 @@ const normalizeProductKey = (value: string) =>
 const DISPATCH_SERVICE_NAME_KEY = normalizeProductKey(DISPATCH_SERVICE_NAME);
 const DISPATCH_SERVICE_SKU_KEY = normalizeProductKey(DISPATCH_SERVICE_SKU);
 const ORDER_CONVERSION_TIMEOUT_MS = 60_000;
+const PAYMENT_PROOF_MODAL_DRAFT_KEY = 'quotation_payment_proof_modal';
 
-const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp']);
+const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
 const isBillingBackofficeRole = (role: string | null | undefined) =>
     role === 'facturador' || role === 'tesorero';
+
+type PaymentProofModalDraft = {
+    quotationId: string;
+    actorId: string;
+    updatedAt: string;
+};
 
 const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -116,6 +130,7 @@ const Quotations: React.FC = () => {
     const [quotationPendingOrder, setQuotationPendingOrder] = useState<any | null>(null);
     const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
     const [paymentProofError, setPaymentProofError] = useState<string | null>(null);
+    const [paymentProofPreparing, setPaymentProofPreparing] = useState(false);
     const [orderConversionStage, setOrderConversionStage] = useState<string | null>(null);
     const [availableSellers, setAvailableSellers] = useState<SellerOption[]>([]);
     const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
@@ -527,9 +542,9 @@ const Quotations: React.FC = () => {
         setEditingQuotation(q);
         setSelectedClient(q.client);
         const loadedItems = (q.items || []).map((item: any) => {
-            const basePrice = Number(item.price || 0);
+            const basePrice = toWholeMoney(item.price);
             const discountPct = Number(item.discount || 0);
-            const netPrice = basePrice > 0 ? Math.round(basePrice * (1 - (discountPct / 100))) : Number(item.net_price || 0);
+            const netPrice = basePrice > 0 ? Math.round(basePrice * (1 - (discountPct / 100))) : toWholeMoney(item.net_price || 0);
             return {
                 productId: item.product_id || null,
                 code: item.code || '',
@@ -537,7 +552,7 @@ const Quotations: React.FC = () => {
                 qty: Number(item.qty || 1),
                 price: basePrice,
                 discountPct,
-                netPrice: Number(item.net_price ?? netPrice ?? basePrice)
+                netPrice: toWholeMoney(item.net_price ?? netPrice ?? basePrice)
             };
         });
         setFormItems(loadedItems.length > 0 ? loadedItems : [{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
@@ -556,17 +571,18 @@ const Quotations: React.FC = () => {
             const clone = [...prev];
             const current = clone[index];
             const updated = updater({ ...current });
-            const listPrice = Number(updated.price || 0);
+            const listPrice = toWholeMoney(updated.price);
             const discountPct = Math.max(0, Number(updated.discountPct || 0));
             const netPrice = listPrice > 0
-                ? Math.max(0, Number(updated.netPrice ?? Math.round(listPrice * (1 - (discountPct / 100)))))
-                : Math.max(0, Number(updated.netPrice || 0));
+                ? toWholeMoney(updated.netPrice ?? Math.round(listPrice * (1 - (discountPct / 100))))
+                : toWholeMoney(updated.netPrice || 0);
             const recomputedDiscount = listPrice > 0 ? Math.max(0, ((listPrice - netPrice) / listPrice) * 100) : 0;
 
             clone[index] = {
                 ...updated,
+                price: listPrice,
                 discountPct: Number(recomputedDiscount.toFixed(2)),
-                netPrice: Number(netPrice.toFixed(2))
+                netPrice
             };
             return clone;
         });
@@ -595,10 +611,10 @@ const Quotations: React.FC = () => {
 
     const getEffectiveDiscountPct = useCallback((item: any) => {
         const inventoryProduct = resolveInventoryProduct(item);
-        const catalogPrice = Number(inventoryProduct?.price || 0);
-        const fallbackPrice = Number(item?.price || 0);
+        const catalogPrice = toWholeMoney(inventoryProduct?.price || 0);
+        const fallbackPrice = toWholeMoney(item?.price || 0);
         const referencePrice = catalogPrice > 0 ? catalogPrice : fallbackPrice;
-        const netPrice = Math.max(0, Number(item?.netPrice ?? item?.price ?? 0));
+        const netPrice = toWholeMoney(item?.netPrice ?? item?.price ?? 0);
 
         if (referencePrice <= 0) return Math.max(0, Number(item?.discountPct || 0));
 
@@ -625,9 +641,13 @@ const Quotations: React.FC = () => {
         const validMime = mimeType === 'application/pdf'
             || mimeType === 'image/jpeg'
             || mimeType === 'image/png'
-            || mimeType === 'image/webp';
+            || mimeType === 'image/webp'
+            || mimeType === 'image/heic'
+            || mimeType === 'image/heif'
+            || mimeType === 'application/heic'
+            || mimeType === 'application/heif';
         if (!allowedPaymentProofExtensions.has(extension) && !validMime) {
-            return 'Formato inválido. Usa PDF, JPG, JPEG, PNG o WEBP.';
+            return 'Formato inválido. Usa PDF, JPG, JPEG, PNG, WEBP o HEIC.';
         }
         return null;
     }, []);
@@ -683,20 +703,13 @@ const Quotations: React.FC = () => {
                 detail: item.detail || '',
                 qty: Number(item.qty || 0),
                 unit: item.unit || 'UN',
-                unitPrice: Number(item.net_price ?? item.netPrice ?? item.price ?? 0),
-                total: Number(item.total ?? (Number(item.qty || 0) * Number(item.net_price ?? item.netPrice ?? item.price ?? 0) || 0))
+                unitPrice: toWholeMoney(item.net_price ?? item.netPrice ?? item.price ?? 0),
+                total: toWholeMoney(item.total ?? (Number(item.qty || 0) * Number(item.net_price ?? item.netPrice ?? item.price ?? 0) || 0))
             })),
-            totalAmount: Number(quotation?.total_amount || 0),
+            totalAmount: toWholeMoney(quotation?.total_amount || 0),
             comments: quotation?.comments || (quotation?.folio ? `Pedido generado desde cotización #${quotation.folio}.` : 'Pedido generado desde CRM.')
         };
     }, [getQuotationCreditDays]);
-
-    const closePaymentProofModal = useCallback(() => {
-        setQuotationPendingOrder(null);
-        setPaymentProofFile(null);
-        setPaymentProofError(null);
-        setOrderConversionStage(null);
-    }, []);
 
     const openConversionHistory = useCallback(async (quotation: any) => {
         if (!canViewOrderConversionTrace) return;
@@ -721,6 +734,100 @@ const Quotations: React.FC = () => {
             setConversionHistoryLoading(false);
         }
     }, [canViewOrderConversionTrace]);
+
+    const loadPaymentProofModalDraft = useCallback((): PaymentProofModalDraft | null => {
+        if (typeof window === 'undefined') return null;
+
+        try {
+            const raw = window.localStorage.getItem(PAYMENT_PROOF_MODAL_DRAFT_KEY);
+            if (!raw) return null;
+
+            const parsed = JSON.parse(raw) as Partial<PaymentProofModalDraft>;
+            if (!parsed.quotationId || !parsed.actorId) {
+                window.localStorage.removeItem(PAYMENT_PROOF_MODAL_DRAFT_KEY);
+                return null;
+            }
+
+            return {
+                quotationId: String(parsed.quotationId),
+                actorId: String(parsed.actorId),
+                updatedAt: String(parsed.updatedAt || '')
+            };
+        } catch (error) {
+            console.error('Error restoring payment proof modal draft:', error);
+            window.localStorage.removeItem(PAYMENT_PROOF_MODAL_DRAFT_KEY);
+            return null;
+        }
+    }, []);
+
+    const savePaymentProofModalDraft = useCallback((quotationId: string) => {
+        if (typeof window === 'undefined' || !quotationId || !profile?.id) return;
+
+        try {
+            window.localStorage.setItem(PAYMENT_PROOF_MODAL_DRAFT_KEY, JSON.stringify({
+                quotationId,
+                actorId: profile.id,
+                updatedAt: new Date().toISOString()
+            } satisfies PaymentProofModalDraft));
+        } catch (error) {
+            console.error('Error saving payment proof modal draft:', error);
+        }
+    }, [profile?.id]);
+
+    const clearPaymentProofModalDraft = useCallback(() => {
+        if (typeof window === 'undefined') return;
+
+        try {
+            window.localStorage.removeItem(PAYMENT_PROOF_MODAL_DRAFT_KEY);
+        } catch (error) {
+            console.error('Error clearing payment proof modal draft:', error);
+        }
+    }, []);
+
+    const handlePaymentProofFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFile = event.target.files?.[0] || null;
+        event.target.value = '';
+
+        if (!selectedFile) {
+            setPaymentProofFile(null);
+            setPaymentProofError(null);
+            return;
+        }
+
+        setPaymentProofPreparing(true);
+        setPaymentProofError(null);
+
+        try {
+            const normalizedFile = await convertHeicToJpeg(selectedFile);
+            const validationError = validatePaymentProofFile(normalizedFile);
+            if (validationError) {
+                setPaymentProofFile(null);
+                setPaymentProofError(validationError);
+                return;
+            }
+
+            setPaymentProofFile(normalizedFile);
+            if (isHeicLikeFile(selectedFile)) {
+                setPaymentProofError('Archivo HEIC convertido automáticamente a JPG para compatibilidad.');
+            } else {
+                setPaymentProofError(null);
+            }
+        } catch (error: any) {
+            setPaymentProofFile(null);
+            setPaymentProofError(error?.message || 'No se pudo procesar el comprobante seleccionado.');
+        } finally {
+            setPaymentProofPreparing(false);
+        }
+    }, [validatePaymentProofFile]);
+
+    const closePaymentProofModal = useCallback(() => {
+        setQuotationPendingOrder(null);
+        setPaymentProofFile(null);
+        setPaymentProofError(null);
+        setPaymentProofPreparing(false);
+        setOrderConversionStage(null);
+        clearPaymentProofModalDraft();
+    }, [clearPaymentProofModalDraft]);
 
     const handleDeleteQuotation = async (id: string) => {
         if (!confirm('¿Está seguro de que desea eliminar esta cotización?')) return;
@@ -754,6 +861,45 @@ const Quotations: React.FC = () => {
     }, [location]);
 
     useEffect(() => {
+        if (!profile?.id || quotationPendingOrder || quotations.length === 0) return;
+
+        const draft = loadPaymentProofModalDraft();
+        if (!draft || draft.actorId !== profile.id) return;
+
+        const quotationToRestore = quotations.find((quote) => quote.id === draft.quotationId);
+        if (!quotationToRestore) {
+            clearPaymentProofModalDraft();
+            return;
+        }
+
+        if (quotationToRestore.seller_id !== profile.id) {
+            clearPaymentProofModalDraft();
+            return;
+        }
+
+        setQuotationPendingOrder(quotationToRestore);
+        setPaymentProofFile(null);
+        setPaymentProofPreparing(false);
+        setOrderConversionStage(null);
+        setPaymentProofError('La app se recargó mientras seleccionabas el comprobante. Debes volver a elegir el archivo antes de generar el pedido.');
+    }, [
+        clearPaymentProofModalDraft,
+        loadPaymentProofModalDraft,
+        profile?.id,
+        quotationPendingOrder,
+        quotations
+    ]);
+
+    useEffect(() => {
+        if (quotationPendingOrder?.id) {
+            savePaymentProofModalDraft(quotationPendingOrder.id);
+            return;
+        }
+
+        clearPaymentProofModalDraft();
+    }, [clearPaymentProofModalDraft, quotationPendingOrder?.id, savePaymentProofModalDraft]);
+
+    useEffect(() => {
         if (isInteractionModalOpen) {
             if (activeVisit) {
                 setSelectedInteractionType('Presencial');
@@ -775,9 +921,9 @@ const Quotations: React.FC = () => {
                 ...item,
                 detail: String(item.detail || '').trim(),
                 qty: Number(item.qty) || 0,
-                price: Number(item.price) || 0,
+                price: toWholeMoney(item.price),
                 discountPct: Number(item.discountPct) || 0,
-                netPrice: Number(item.netPrice) || 0
+                netPrice: toWholeMoney(item.netPrice)
             }))
             .filter(item => item.detail.length > 0 || item.qty > 0 || item.price > 0);
 
@@ -837,8 +983,8 @@ const Quotations: React.FC = () => {
             const calculatedItems = normalizedItems.map(item => {
                 const inventoryProduct = resolveInventoryProduct(item);
                 const qty = parseInt(item.qty) || 1;
-                const price = parseFloat(item.price) || 0;
-                const netPrice = price > 0 ? Number(item.netPrice || price) : 0;
+                const price = toWholeMoney(item.price);
+                const netPrice = price > 0 ? toWholeMoney(item.netPrice || price) : toWholeMoney(item.netPrice || 0);
                 const discount = price > 0 ? getEffectiveDiscountPct(item) : 0;
                 return {
                     ...item,
@@ -848,10 +994,10 @@ const Quotations: React.FC = () => {
                     net_price: netPrice,
                     unit: 'UN',
                     discount,
-                    total: qty * netPrice
+                    total: toWholeMoney(qty * netPrice)
                 };
             });
-            const netAmount = calculatedItems.reduce((sum, item) => sum + item.total, 0);
+            const netAmount = calculatedItems.reduce((sum, item) => sum + toWholeMoney(item.total), 0);
             const tax = Math.round(netAmount * 0.19);
             const grandTotal = netAmount + tax;
             const requestedItems = buildDiscountApprovalRequestedItems(calculatedItems, SELLER_MAX_DISCOUNT_PCT);
@@ -1027,27 +1173,77 @@ const Quotations: React.FC = () => {
 
         const creditDays = getQuotationCreditDays(quotation);
         const requiresProof = creditDays === 0;
-        const validationError = requiresProof ? validatePaymentProofFile(proofFile) : null;
-        if (validationError) {
+        const attemptId = crypto.randomUUID();
+        let normalizedProofFile = proofFile;
+
+        if (requiresProof && !proofFile) {
+            const validationError = 'Debes adjuntar el comprobante de pago.';
             setPaymentProofError(validationError);
-            if (profile?.id) {
+            await logQuotationOrderConversionSafe({
+                attemptId,
+                quotationId: quotation.id,
+                actorId: profile.id,
+                stage: 'payment_proof_upload',
+                status: 'failed',
+                message: validationError,
+                metadata: {
+                    requiresProof,
+                    quotationFolio: quotation?.folio || null,
+                },
+            });
+            return;
+        }
+
+        if (requiresProof && proofFile) {
+            try {
+                setPaymentProofPreparing(true);
+                setOrderConversionStage(isHeicLikeFile(proofFile) ? 'Convirtiendo comprobante HEIC a JPG...' : 'Validando comprobante de pago...');
+                normalizedProofFile = await convertHeicToJpeg(proofFile);
+                const validationError = validatePaymentProofFile(normalizedProofFile);
+                if (validationError) {
+                    setPaymentProofFile(null);
+                    setPaymentProofError(validationError);
+                    await logQuotationOrderConversionSafe({
+                        attemptId,
+                        quotationId: quotation.id,
+                        actorId: profile.id,
+                        stage: 'payment_proof_upload',
+                        status: 'failed',
+                        message: validationError,
+                        metadata: {
+                            requiresProof,
+                            quotationFolio: quotation?.folio || null,
+                            fileName: normalizedProofFile?.name || proofFile.name,
+                        },
+                    });
+                    return;
+                }
+                setPaymentProofFile(normalizedProofFile);
+                setPaymentProofError(isHeicLikeFile(proofFile) ? 'Archivo HEIC convertido automáticamente a JPG para compatibilidad.' : null);
+            } catch (proofPreparationError: any) {
+                const message = proofPreparationError?.message || 'No se pudo procesar el comprobante seleccionado.';
+                setPaymentProofFile(null);
+                setPaymentProofError(message);
                 await logQuotationOrderConversionSafe({
-                    attemptId: crypto.randomUUID(),
+                    attemptId,
                     quotationId: quotation.id,
                     actorId: profile.id,
                     stage: 'payment_proof_upload',
                     status: 'failed',
-                    message: validationError,
+                    message,
                     metadata: {
                         requiresProof,
                         quotationFolio: quotation?.folio || null,
+                        fileName: proofFile.name,
+                        fileType: proofFile.type || null,
                     },
                 });
+                return;
+            } finally {
+                setPaymentProofPreparing(false);
             }
-            return;
         }
 
-        const attemptId = crypto.randomUUID();
         setSubmitting(true);
         setPaymentProofError(null);
         setOrderConversionStage(requiresProof ? 'Subiendo comprobante de pago...' : 'Generando pedido...');
@@ -1069,10 +1265,10 @@ const Quotations: React.FC = () => {
                 },
             });
 
-            if (requiresProof && proofFile) {
+            if (requiresProof && normalizedProofFile) {
                 try {
                     uploadedProof = await withTimeout(
-                        uploadPaymentProof(quotation, proofFile),
+                        uploadPaymentProof(quotation, normalizedProofFile),
                         ORDER_CONVERSION_TIMEOUT_MS,
                         'La subida del comprobante tardó demasiado. Revisa tu conexión e inténtalo nuevamente.'
                     );
@@ -1099,9 +1295,9 @@ const Quotations: React.FC = () => {
                         message: proofError?.message || 'Error subiendo comprobante.',
                         metadata: {
                             requiresProof: true,
-                            fileName: proofFile.name,
-                            fileSize: proofFile.size,
-                            fileType: proofFile.type || null,
+                            fileName: normalizedProofFile.name,
+                            fileSize: normalizedProofFile.size,
+                            fileType: normalizedProofFile.type || null,
                         },
                     });
                     throw proofError;
@@ -1321,6 +1517,7 @@ const Quotations: React.FC = () => {
             setQuotationPendingOrder(quotation);
             setPaymentProofFile(null);
             setPaymentProofError(null);
+            setPaymentProofPreparing(false);
             return;
         }
 
@@ -1386,7 +1583,7 @@ const Quotations: React.FC = () => {
         const drafts = quotations.filter((q) => q.status === 'draft').length;
         const sent = quotations.filter((q) => q.status === 'sent').length;
         const approved = quotations.filter((q) => q.status === 'approved').length;
-        const totalAmount = quotations.reduce((acc, q) => acc + Number(q.total_amount || 0), 0);
+        const totalAmount = quotations.reduce((acc, q) => acc + toWholeMoney(q.total_amount || 0), 0);
         return { total: quotations.length, drafts, sent, approved, totalAmount };
     }, [quotations]);
     const pendingApprovalMineCount = useMemo(() => {
@@ -1399,7 +1596,7 @@ const Quotations: React.FC = () => {
     const formSubtotal = useMemo(() => {
         return formItems.reduce((sum, item) => {
             const qty = Number(item.qty || 0);
-            const unitNet = Number(item.netPrice ?? item.price ?? 0);
+            const unitNet = toWholeMoney(item.netPrice ?? item.price ?? 0);
             return sum + (qty * unitNet);
         }, 0);
     }, [formItems]);
@@ -1956,23 +2153,20 @@ const Quotations: React.FC = () => {
 
                             <div className="p-6 space-y-4">
                                 <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-medium text-amber-900">
-                                    Este cliente no tiene crédito. Debes adjuntar el comprobante de pago para generar el pedido y enviar el correo a soporte y amerino.
+                                    Este cliente no tiene crédito. Debes adjuntar el comprobante de pago para generar el pedido y enviarlo a facturación.
                                 </div>
 
                                 <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
                                     <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Archivos permitidos</p>
-                                    <p className="mt-1 text-sm font-bold text-gray-700">PDF, JPG, JPEG, PNG, WEBP hasta 20MB</p>
+                                    <p className="mt-1 text-sm font-bold text-gray-700">PDF, JPG, JPEG, PNG, WEBP, HEIC hasta 20MB</p>
+                                    <p className="mt-1 text-xs text-gray-500">Los archivos HEIC/HEIF se convierten automáticamente a JPG.</p>
                                 </div>
 
                                 <div className="space-y-3">
                                     <input
                                         type="file"
-                                        accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
-                                        onChange={(e) => {
-                                            const file = e.target.files?.[0] || null;
-                                            setPaymentProofFile(file);
-                                            setPaymentProofError(file ? validatePaymentProofFile(file) : null);
-                                        }}
+                                        accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"
+                                        onChange={handlePaymentProofFileChange}
                                         className="block w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-4 file:py-3 file:font-bold file:text-white hover:file:bg-emerald-700"
                                     />
                                     {paymentProofFile && (
@@ -1981,8 +2175,16 @@ const Quotations: React.FC = () => {
                                             <p className="text-xs text-gray-500 mt-1">{(paymentProofFile.size / 1024 / 1024).toFixed(2)} MB</p>
                                         </div>
                                     )}
+                                    {paymentProofPreparing && (
+                                        <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700">
+                                            Convirtiendo archivo HEIC para compatibilidad...
+                                        </div>
+                                    )}
                                     {paymentProofError && (
-                                        <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                                        <div className={`rounded-2xl px-4 py-3 text-sm font-medium ${paymentProofError.includes('convertido automáticamente')
+                                            ? 'border border-amber-100 bg-amber-50 text-amber-700'
+                                            : 'border border-red-100 bg-red-50 text-red-700'
+                                            }`}>
                                             {paymentProofError}
                                         </div>
                                     )}
@@ -2004,7 +2206,7 @@ const Quotations: React.FC = () => {
                                     <button
                                         type="button"
                                         onClick={() => executeConvertToOrder(quotationPendingOrder, paymentProofFile)}
-                                        disabled={submitting}
+                                        disabled={submitting || paymentProofPreparing}
                                         className="flex-1 px-4 py-3 rounded-2xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-all disabled:opacity-50 flex items-center justify-center"
                                     >
                                         {submitting ? (
@@ -2130,9 +2332,9 @@ const Quotations: React.FC = () => {
                                                                         productId: p.id || null,
                                                                         code: p.sku || '',
                                                                         detail: p.name,
-                                                                        price: p.price || 0,
+                                                                        price: toWholeMoney(p.price || 0),
                                                                         discountPct: 0,
-                                                                        netPrice: p.price || 0
+                                                                        netPrice: toWholeMoney(p.price || 0)
                                                                     };
                                                                     setFormItems(newItems);
                                                                     setSuggestions([]);
@@ -2188,9 +2390,9 @@ const Quotations: React.FC = () => {
                                                                         productId: p.id || null,
                                                                         code: p.sku || '',
                                                                         detail: p.name,
-                                                                        price: p.price || 0,
+                                                                        price: toWholeMoney(p.price || 0),
                                                                         discountPct: 0,
-                                                                        netPrice: p.price || 0
+                                                                        netPrice: toWholeMoney(p.price || 0)
                                                                     };
                                                                     setFormItems(newItems);
                                                                     setSuggestions([]);
@@ -2202,7 +2404,7 @@ const Quotations: React.FC = () => {
                                                                     <span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded font-mono">{p.sku}</span>
                                                                 </div>
                                                                 <div className="flex justify-between mt-1">
-                                                                    <span className="text-[10px] text-gray-400">Precio: ${p.price?.toLocaleString()}</span>
+                                                                    <span className="text-[10px] text-gray-400">Precio: {formatMoney(p.price || 0)}</span>
                                                                     <span className="text-[10px] font-black text-indigo-500">Stock: {p.stock_qty}</span>
                                                                 </div>
                                                             </button>
@@ -2229,6 +2431,7 @@ const Quotations: React.FC = () => {
                                                 <input
                                                     type="number"
                                                     min="0"
+                                                    step="1"
                                                     disabled={!allowManualUnitPrice}
                                                     className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none ${allowManualUnitPrice
                                                         ? 'bg-white border-gray-200 focus:ring-2 focus:ring-indigo-500'
@@ -2238,7 +2441,7 @@ const Quotations: React.FC = () => {
                                                     value={item.price}
                                                     onChange={(e) => {
                                                         if (!allowManualUnitPrice) return;
-                                                        const price = parseFloat(e.target.value) || 0;
+                                                        const price = toWholeMoney(e.target.value);
                                                         applyItemPricing(index, (current) => ({ ...current, price, netPrice: price }));
                                                     }}
                                                 />
@@ -2254,8 +2457,8 @@ const Quotations: React.FC = () => {
                                                     onChange={(e) => {
                                                         const discountPct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
                                                         applyItemPricing(index, (current) => {
-                                                            const listPrice = Number(current.price || 0);
-                                                            const netPrice = listPrice > 0 ? listPrice * (1 - (discountPct / 100)) : 0;
+                                                            const listPrice = toWholeMoney(current.price || 0);
+                                                            const netPrice = listPrice > 0 ? toWholeMoney(listPrice * (1 - (discountPct / 100))) : 0;
                                                             return { ...current, discountPct, netPrice };
                                                         });
                                                     }}
@@ -2266,6 +2469,7 @@ const Quotations: React.FC = () => {
                                                 <input
                                                     type="number"
                                                     min="0"
+                                                    step="1"
                                                     disabled={!allowManualNetPrice}
                                                     className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none ${allowManualNetPrice
                                                         ? 'bg-white border-gray-200 focus:ring-2 focus:ring-indigo-500'
@@ -2274,7 +2478,7 @@ const Quotations: React.FC = () => {
                                                     value={item.netPrice ?? item.price ?? 0}
                                                     onChange={(e) => {
                                                         if (!allowManualNetPrice) return;
-                                                        const netPrice = Math.max(0, parseFloat(e.target.value) || 0);
+                                                        const netPrice = toWholeMoney(e.target.value);
                                                         applyItemPricing(index, (current) => ({ ...current, netPrice }));
                                                     }}
                                                 />
@@ -2283,7 +2487,7 @@ const Quotations: React.FC = () => {
                                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
                                                     Desc. aplicado: {getEffectiveDiscountPct(item).toFixed(2)}%
                                                 </p>
-                                                <p className="font-black text-lg text-gray-700">$ {((item.qty || 0) * ((item.netPrice || item.price) || 0)).toLocaleString()}</p>
+                                                <p className="font-black text-lg text-gray-700">{formatMoney((item.qty || 0) * (item.netPrice || item.price || 0))}</p>
                                             </div>
                                                     </>
                                                 );

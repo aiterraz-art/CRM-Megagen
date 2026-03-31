@@ -12,7 +12,7 @@ type SendQuotationEmailInput = {
     pdfAttachment?: File | null;
 };
 
-const formatMoney = (value: number) => `$${Number(value || 0).toLocaleString('es-CL')}`;
+const formatMoney = (value: number) => `$${Math.max(0, Math.round(Number(value || 0))).toLocaleString('es-CL')}`;
 
 export const sendQuotationEmail = async (input: SendQuotationEmailInput) => {
     const { quotation, recipient, contactName, clientId, profileId, pdfAttachment = null } = input;
@@ -24,7 +24,7 @@ export const sendQuotationEmail = async (input: SendQuotationEmailInput) => {
     }
 
     const items = Array.isArray(quotation.items) ? quotation.items : [];
-    const subtotal = items.reduce((acc, item) => acc + Number(item.total || 0), 0);
+    const subtotal = items.reduce((acc, item) => acc + Math.max(0, Math.round(Number(item.total || 0))), 0);
     const tax = Math.round(subtotal * 0.19);
     const total = subtotal + tax;
     const quotationPdf = pdfAttachment || await generateQuotationPdfFile(quotation);

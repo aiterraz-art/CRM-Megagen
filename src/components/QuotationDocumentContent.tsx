@@ -1,6 +1,12 @@
 import React from 'react';
 import type { QuotationPreviewData, QuotationPreviewItem } from '../utils/quotationPreview';
 
+const toWholeMoney = (value: unknown) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, Math.round(parsed));
+};
+
 const normalizeCompanyValue = (value?: string | null) => {
     const cleaned = (value || '').trim();
     if (!cleaned) return '';
@@ -57,7 +63,7 @@ export const buildQuotationDocumentViewModel = (data: QuotationPreviewData): Quo
         items = [];
     }
 
-    const subtotal = items.reduce((acc, item) => acc + Number(item.total || 0), 0);
+    const subtotal = items.reduce((acc, item) => acc + toWholeMoney(item.total || 0), 0);
     const tax = Math.round(subtotal * 0.19);
     const total = subtotal + tax;
 
@@ -220,9 +226,9 @@ const QuotationDocumentContent: React.FC<{ data: QuotationPreviewData }> = ({ da
                                     <td className="p-2 font-medium">{item.code}</td>
                                     <td className="p-2 font-black uppercase tracking-tight">{item.detail}</td>
                                     <td className="p-2 text-center uppercase">{item.qty} {item.unit}</td>
-                                    <td className="p-2 text-right">${item.price.toLocaleString()}</td>
-                                    <td className="p-2 text-right border-l border-gray-50 text-gray-400">${item.discount}</td>
-                                    <td className="p-2 text-right font-bold border-l border-gray-50">${item.total.toLocaleString()}</td>
+                                    <td className="p-2 text-right">${toWholeMoney(item.price).toLocaleString('es-CL')}</td>
+                                    <td className="p-2 text-right border-l border-gray-50 text-gray-400">${toWholeMoney(item.discount).toLocaleString('es-CL')}</td>
+                                    <td className="p-2 text-right font-bold border-l border-gray-50">${toWholeMoney(item.total).toLocaleString('es-CL')}</td>
                                 </tr>
                                 {item.subDetail && (
                                     <tr className="border-b border-gray-50">
@@ -252,7 +258,7 @@ const QuotationDocumentContent: React.FC<{ data: QuotationPreviewData }> = ({ da
                     </div>
                     <div className="flex justify-between items-center text-gray-800 font-bold">
                         <span>Afecto</span>
-                        <span>$ {subtotal.toLocaleString()}</span>
+                        <span>$ {subtotal.toLocaleString('es-CL')}</span>
                     </div>
                     <div className="flex justify-between items-center text-gray-500">
                         <span>Exento</span>
@@ -260,7 +266,7 @@ const QuotationDocumentContent: React.FC<{ data: QuotationPreviewData }> = ({ da
                     </div>
                     <div className="flex justify-between items-center text-gray-800 font-bold">
                         <span>19% IVA</span>
-                        <span>$ {tax.toLocaleString()}</span>
+                        <span>$ {tax.toLocaleString('es-CL')}</span>
                     </div>
 
                     <div className="pt-6 border-t border-gray-100 flex justify-between items-end">
@@ -268,7 +274,7 @@ const QuotationDocumentContent: React.FC<{ data: QuotationPreviewData }> = ({ da
                             <p className="font-bold text-lg text-orange-400 tracking-tighter">Total</p>
                             <p className="text-[8px] text-gray-400 font-black uppercase tracking-widest leading-none mt-1">{numberToWords(total)}</p>
                         </div>
-                        <p className="text-2xl font-black text-orange-400 tracking-tighter leading-none">$ {total.toLocaleString()}</p>
+                        <p className="text-2xl font-black text-orange-400 tracking-tighter leading-none">$ {total.toLocaleString('es-CL')}</p>
                     </div>
                 </div>
             </div>

@@ -5,6 +5,7 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollectionsSnapshot } from '../utils/collectionsImport';
 import { sendCollectionPaymentEmail } from '../utils/collectionPaymentEmail';
+import { convertHeicToJpeg, isHeicLikeFile } from '../utils/heic';
 import ClientFormModal from '../components/modals/ClientFormModal';
 import { Database } from '../types/supabase';
 
@@ -451,10 +452,11 @@ const Collections = () => {
 
         setProofUploadingId(targetRow.id);
         try {
-            await uploadCollectionProof(targetRow, file);
+            const normalizedFile = await convertHeicToJpeg(file);
+            await uploadCollectionProof(targetRow, normalizedFile);
             try {
                 await sendCollectionPaymentEmail({
-                    attachment: file,
+                    attachment: normalizedFile,
                     row: {
                         client_name: targetRow.client_name,
                         client_rut: targetRow.client_rut,
@@ -469,7 +471,9 @@ const Collections = () => {
                     senderEmail: profile?.email || null,
                     senderName: (profile as any)?.full_name || null,
                 });
-                alert('Comprobante de pago cargado y enviado a pagos correctamente.');
+                alert(isHeicLikeFile(file)
+                    ? 'Comprobante HEIC convertido a JPG, cargado y enviado a pagos correctamente.'
+                    : 'Comprobante de pago cargado y enviado a pagos correctamente.');
             } catch (emailError: any) {
                 alert(`Comprobante cargado, pero el correo a pagos falló: ${emailError?.message || 'desconocido'}`);
             }

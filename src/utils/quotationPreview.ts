@@ -29,12 +29,29 @@ export type QuotationPreviewData = {
     comments?: string;
 };
 
+const toWholeMoney = (value: unknown) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, Math.round(parsed));
+};
+
 const parseItems = (value: any): QuotationPreviewItem[] => {
-    if (Array.isArray(value)) return value;
+    const sanitizeItems = (items: any[]): QuotationPreviewItem[] => items.map((item) => ({
+        code: String(item?.code || ''),
+        detail: String(item?.detail || ''),
+        subDetail: item?.subDetail ? String(item.subDetail) : undefined,
+        qty: Math.max(0, Math.trunc(Number(item?.qty || 0))),
+        unit: String(item?.unit || 'UN'),
+        price: toWholeMoney(item?.price),
+        discount: toWholeMoney(item?.discount),
+        total: toWholeMoney(item?.total)
+    }));
+
+    if (Array.isArray(value)) return sanitizeItems(value);
     if (typeof value === 'string') {
         try {
             const parsed = JSON.parse(value);
-            return Array.isArray(parsed) ? parsed : [];
+            return Array.isArray(parsed) ? sanitizeItems(parsed) : [];
         } catch {
             return [];
         }
