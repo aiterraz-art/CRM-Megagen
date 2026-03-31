@@ -8,6 +8,7 @@ import { useVisit } from '../contexts/VisitContext';
 import { checkGPSConnection } from '../utils/gps';
 import { queueQuotationLocation } from '../services/locationQueue';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
+import { logQuotationOrderConversionSafe } from '../utils/quotationOrderConversionLog';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays, getPaymentTermsFromCreditDays } from '../utils/credit';
 import { buildDiscountApprovalRequestedItems, getApprovalReason } from '../utils/discountApproval';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
@@ -996,9 +997,24 @@ const Quotations: React.FC = () => {
         const validationError = requiresProof ? validatePaymentProofFile(proofFile) : null;
         if (validationError) {
             setPaymentProofError(validationError);
+            if (profile?.id) {
+                await logQuotationOrderConversionSafe({
+                    attemptId: crypto.randomUUID(),
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    stage: 'payment_proof_upload',
+                    status: 'failed',
+                    message: validationError,
+                    metadata: {
+                        requiresProof,
+                        quotationFolio: quotation?.folio || null,
+                    },
+                });
+            }
             return;
         }
 
+        const attemptId = crypto.randomUUID();
         setSubmitting(true);
         setPaymentProofError(null);
         setOrderConversionStage(requiresProof ? 'Subiendo comprobante de pago...' : 'Generando pedido...');
@@ -1006,31 +1022,118 @@ const Quotations: React.FC = () => {
         let createdOrderId: string | null = null;
 
         try {
+            await logQuotationOrderConversionSafe({
+                attemptId,
+                quotationId: quotation.id,
+                actorId: profile.id,
+                stage: 'started',
+                status: 'info',
+                message: 'Inicio de conversión de cotización a pedido.',
+                metadata: {
+                    quotationFolio: quotation?.folio || null,
+                    requiresProof,
+                    creditDays,
+                },
+            });
+
             if (requiresProof && proofFile) {
-                uploadedProof = await withTimeout(
-                    uploadPaymentProof(quotation, proofFile),
-                    ORDER_CONVERSION_TIMEOUT_MS,
-                    'La subida del comprobante tardó demasiado. Revisa tu conexión e inténtalo nuevamente.'
-                );
+                try {
+                    uploadedProof = await withTimeout(
+                        uploadPaymentProof(quotation, proofFile),
+                        ORDER_CONVERSION_TIMEOUT_MS,
+                        'La subida del comprobante tardó demasiado. Revisa tu conexión e inténtalo nuevamente.'
+                    );
+                    await logQuotationOrderConversionSafe({
+                        attemptId,
+                        quotationId: quotation.id,
+                        actorId: profile.id,
+                        stage: 'payment_proof_upload',
+                        status: 'success',
+                        message: 'Comprobante subido correctamente.',
+                        metadata: {
+                            path: uploadedProof.path,
+                            mimeType: uploadedProof.mimeType,
+                            name: uploadedProof.name,
+                        },
+                    });
+                } catch (proofError: any) {
+                    await logQuotationOrderConversionSafe({
+                        attemptId,
+                        quotationId: quotation.id,
+                        actorId: profile.id,
+                        stage: 'payment_proof_upload',
+                        status: 'failed',
+                        message: proofError?.message || 'Error subiendo comprobante.',
+                        metadata: {
+                            requiresProof: true,
+                            fileName: proofFile.name,
+                            fileSize: proofFile.size,
+                            fileType: proofFile.type || null,
+                        },
+                    });
+                    throw proofError;
+                }
             }
 
             setOrderConversionStage('Generando pedido...');
-            const { data, error } = await withTimeout(
-                (async () => await supabase.rpc('convert_quotation_to_order', {
-                    p_quotation_id: quotation.id,
-                    p_user_id: profile.id,
-                    p_payment_proof_path: uploadedProof?.path ?? null,
-                    p_payment_proof_name: uploadedProof?.name ?? null,
-                    p_payment_proof_mime_type: uploadedProof?.mimeType ?? null
-                }))(),
-                ORDER_CONVERSION_TIMEOUT_MS,
-                'La generación del pedido tardó demasiado. Vuelve a revisar en Pedidos antes de reintentar para evitar duplicados.'
-            );
+            let data: any = null;
+            try {
+                const rpcResponse = await withTimeout(
+                    (async () => await supabase.rpc('convert_quotation_to_order', {
+                        p_quotation_id: quotation.id,
+                        p_user_id: profile.id,
+                        p_payment_proof_path: uploadedProof?.path ?? null,
+                        p_payment_proof_name: uploadedProof?.name ?? null,
+                        p_payment_proof_mime_type: uploadedProof?.mimeType ?? null
+                    }))(),
+                    ORDER_CONVERSION_TIMEOUT_MS,
+                    'La generación del pedido tardó demasiado. Vuelve a revisar en Pedidos antes de reintentar para evitar duplicados.'
+                );
 
-            if (error) throw error;
+                if (rpcResponse.error) throw rpcResponse.error;
+                data = rpcResponse.data;
+            } catch (orderError: any) {
+                await logQuotationOrderConversionSafe({
+                    attemptId,
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    stage: 'order_creation',
+                    status: 'failed',
+                    message: orderError?.message || 'Error creando pedido.',
+                    metadata: {
+                        uploadedProofPath: uploadedProof?.path || null,
+                    },
+                });
+                throw orderError;
+            }
 
             const response = (data || {}) as any;
+            await logQuotationOrderConversionSafe({
+                attemptId,
+                quotationId: quotation.id,
+                actorId: profile.id,
+                orderId: response?.order_id || null,
+                stage: 'order_creation',
+                status: 'success',
+                message: response?.already_exists ? 'La cotización ya tenía pedido asociado.' : 'Pedido creado correctamente.',
+                metadata: {
+                    orderFolio: response?.order_folio || null,
+                    alreadyExists: Boolean(response?.already_exists),
+                },
+            });
             if (response?.already_exists) {
+                await logQuotationOrderConversionSafe({
+                    attemptId,
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    orderId: response?.order_id || null,
+                    stage: 'completed',
+                    status: 'success',
+                    message: 'Conversión finalizada reutilizando pedido existente.',
+                    metadata: {
+                        alreadyExists: true,
+                    },
+                });
                 closePaymentProofModal();
                 alert('Esta cotización ya tenía un pedido asociado. Revisa el módulo de Pedidos para su estado de correo.');
                 fetchQuotations();
@@ -1047,12 +1150,48 @@ const Quotations: React.FC = () => {
                     requestSource: 'quotation_conversion',
                     order: buildOrderEmailPayload(quotation, orderFolio),
                 }), ORDER_CONVERSION_TIMEOUT_MS, 'El correo a facturación tardó demasiado. El pedido se generó igual y puedes reenviarlo desde Pedidos.');
+                await logQuotationOrderConversionSafe({
+                    attemptId,
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    orderId: createdOrderId || response?.order_id || null,
+                    stage: 'notification',
+                    status: 'success',
+                    message: 'Correo a facturación enviado correctamente.',
+                    metadata: {
+                        orderFolio,
+                    },
+                });
                 alert('Pedido generado y correo enviado a facturación correctamente.');
             } catch (emailError: any) {
                 console.warn('Order notification failed:', emailError);
+                await logQuotationOrderConversionSafe({
+                    attemptId,
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    orderId: createdOrderId || response?.order_id || null,
+                    stage: 'notification',
+                    status: 'failed',
+                    message: emailError?.message || 'Error enviando correo a facturación.',
+                    metadata: {
+                        orderFolio,
+                    },
+                });
                 alert(`Pedido generado, pero el correo a facturación falló. ${emailError?.message || 'Puedes reenviarlo desde el módulo de Pedidos.'}`);
             }
 
+            await logQuotationOrderConversionSafe({
+                attemptId,
+                quotationId: quotation.id,
+                actorId: profile.id,
+                orderId: createdOrderId || response?.order_id || null,
+                stage: 'completed',
+                status: 'success',
+                message: 'Conversión de cotización a pedido finalizada.',
+                metadata: {
+                    orderFolio,
+                },
+            });
             closePaymentProofModal();
             fetchQuotations();
         } catch (error: any) {
@@ -1063,14 +1202,60 @@ const Quotations: React.FC = () => {
                     .then(({ error: cleanupError }) => {
                         if (cleanupError) {
                             console.warn('No se pudo limpiar comprobante temporal tras fallo de conversión:', cleanupError.message);
+                            void logQuotationOrderConversionSafe({
+                                attemptId,
+                                quotationId: quotation.id,
+                                actorId: profile.id,
+                                stage: 'cleanup',
+                                status: 'failed',
+                                message: cleanupError.message,
+                                metadata: {
+                                    path: uploadedProof?.path || null,
+                                },
+                            });
+                            return;
                         }
+                        void logQuotationOrderConversionSafe({
+                            attemptId,
+                            quotationId: quotation.id,
+                            actorId: profile.id,
+                            stage: 'cleanup',
+                            status: 'success',
+                            message: 'Comprobante temporal eliminado tras fallo de conversión.',
+                            metadata: {
+                                path: uploadedProof?.path || null,
+                            },
+                        });
                     })
                     .catch((cleanupError) => {
                         console.warn('Error inesperado limpiando comprobante temporal tras fallo de conversión:', cleanupError);
+                        void logQuotationOrderConversionSafe({
+                            attemptId,
+                            quotationId: quotation.id,
+                            actorId: profile.id,
+                            stage: 'cleanup',
+                            status: 'failed',
+                            message: cleanupError?.message || 'Error inesperado limpiando comprobante temporal.',
+                            metadata: {
+                                path: uploadedProof?.path || null,
+                            },
+                        });
                     });
             }
             console.error('Error converting to order:', error);
             const errorMessage = error?.message || error?.details || 'Ocurrió un error al generar el pedido.';
+            await logQuotationOrderConversionSafe({
+                attemptId,
+                quotationId: quotation.id,
+                actorId: profile.id,
+                orderId: createdOrderId,
+                stage: 'completed',
+                status: 'failed',
+                message: errorMessage,
+                metadata: {
+                    uploadedProofPath: uploadedProof?.path || null,
+                },
+            });
             setPaymentProofError(errorMessage);
             alert(`Error al generar la venta: ${errorMessage}`);
         } finally {

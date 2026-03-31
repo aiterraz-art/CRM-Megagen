@@ -872,6 +872,44 @@ export interface Database {
                     triggered_by?: string
                 }
             }
+            quotation_order_conversion_logs: {
+                Row: {
+                    actor_id: string
+                    attempt_id: string
+                    created_at: string
+                    id: string
+                    message: string | null
+                    metadata: Json
+                    order_id: string | null
+                    quotation_id: string
+                    stage: string
+                    status: string
+                }
+                Insert: {
+                    actor_id: string
+                    attempt_id: string
+                    created_at?: string
+                    id?: string
+                    message?: string | null
+                    metadata?: Json
+                    order_id?: string | null
+                    quotation_id: string
+                    stage: string
+                    status: string
+                }
+                Update: {
+                    actor_id?: string
+                    attempt_id?: string
+                    created_at?: string
+                    id?: string
+                    message?: string | null
+                    metadata?: Json
+                    order_id?: string | null
+                    quotation_id?: string
+                    stage?: string
+                    status?: string
+                }
+            }
             installed_base: {
                 Row: {
                     client_id: string | null
