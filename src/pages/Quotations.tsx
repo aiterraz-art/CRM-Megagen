@@ -1537,6 +1537,11 @@ const Quotations: React.FC = () => {
 
         const creditDays = getQuotationCreditDays(quotation);
         if (creditDays === 0) {
+            if (isAndroidDevice) {
+                clearPaymentProofModalDraft();
+                navigate(`/quotations/${quotation.id}/order-proof`);
+                return;
+            }
             setQuotationPendingOrder(quotation);
             setPaymentProofFile(null);
             setPaymentProofError(null);
