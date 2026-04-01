@@ -5,7 +5,7 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollectionsSnapshot } from '../utils/collectionsImport';
 import { sendCollectionPaymentEmail } from '../utils/collectionPaymentEmail';
-import { convertHeicToJpeg, isHeicLikeFile } from '../utils/heic';
+import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
 import ClientFormModal from '../components/modals/ClientFormModal';
 import { Database } from '../types/supabase';
 
@@ -452,7 +452,8 @@ const Collections = () => {
 
         setProofUploadingId(targetRow.id);
         try {
-            const normalizedFile = await convertHeicToJpeg(file);
+            const inMemoryFile = await materializeBrowserFile(file);
+            const normalizedFile = await convertHeicToJpeg(inMemoryFile);
             await uploadCollectionProof(targetRow, normalizedFile);
             try {
                 await sendCollectionPaymentEmail({

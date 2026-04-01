@@ -6,7 +6,7 @@ import { useUser } from '../contexts/UserContext';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { logQuotationOrderConversionSafe } from '../utils/quotationOrderConversionLog';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
-import { convertHeicToJpeg, isHeicLikeFile } from '../utils/heic';
+import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
 import { uploadFileToStorage } from '../utils/storageUpload';
 
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
@@ -288,7 +288,8 @@ const QuotationOrderProof = () => {
         setPaymentProofError(null);
 
         try {
-            const normalizedFile = await convertHeicToJpeg(selectedFile);
+            const inMemoryFile = await materializeBrowserFile(selectedFile);
+            const normalizedFile = await convertHeicToJpeg(inMemoryFile);
             const validationError = validatePaymentProofFile(normalizedFile);
             if (validationError) {
                 setPaymentProofFile(null);

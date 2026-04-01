@@ -19,6 +19,22 @@ export const isHeicLikeFile = (file: Pick<File, 'name' | 'type'> | null | undefi
     return HEIC_MIME_TYPES.has(mimeType) || HEIC_EXTENSIONS.has(extension);
 };
 
+export const materializeBrowserFile = async (file: File) => {
+    try {
+        const buffer = await file.arrayBuffer();
+        return new File([buffer], file.name || 'archivo', {
+            type: file.type || 'application/octet-stream',
+            lastModified: Date.now(),
+        });
+    } catch (error: any) {
+        const message = String(error?.message || error || '').toLowerCase();
+        if (message.includes('requested file could not be read') || message.includes('permission')) {
+            throw new Error('Android perdio acceso al archivo seleccionado. Vuelve a elegirlo y prueba otra vez.');
+        }
+        throw error;
+    }
+};
+
 export const convertHeicToJpeg = async (file: File) => {
     if (!isHeicLikeFile(file)) return file;
 

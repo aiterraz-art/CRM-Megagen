@@ -11,7 +11,7 @@ import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { logQuotationOrderConversionSafe } from '../utils/quotationOrderConversionLog';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays, getPaymentTermsFromCreditDays } from '../utils/credit';
 import { buildDiscountApprovalRequestedItems, getApprovalReason } from '../utils/discountApproval';
-import { convertHeicToJpeg, isHeicLikeFile } from '../utils/heic';
+import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import { generateQuotationPdfFile } from '../utils/quotationPdf';
@@ -805,7 +805,8 @@ const Quotations: React.FC = () => {
         setPaymentProofError(null);
 
         try {
-            const normalizedFile = await convertHeicToJpeg(selectedFile);
+            const inMemoryFile = await materializeBrowserFile(selectedFile);
+            const normalizedFile = await convertHeicToJpeg(inMemoryFile);
             const validationError = validatePaymentProofFile(normalizedFile);
             if (validationError) {
                 setPaymentProofFile(null);
