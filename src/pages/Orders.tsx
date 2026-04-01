@@ -42,6 +42,18 @@ const ORDER_ITEMS_PREVIEW_STORAGE_KEY = 'orders.activeItemsPreviewOrderId';
 const isBillingBackofficeRole = (role: string | null | undefined) =>
     role === 'facturador' || role === 'tesorero';
 
+const canResendOrderEmail = (
+    effectiveRole: string | null | undefined,
+    profileId: string | null | undefined,
+    order: EnrichedOrder
+) => {
+    if (!profileId) return false;
+    return effectiveRole === 'admin'
+        || effectiveRole === 'seller'
+        || isBillingBackofficeRole(effectiveRole)
+        || order.user_id === profileId;
+};
+
 const getPaymentEmailStatusStyles = (status: string | null | undefined) => {
     switch ((status || '').toLowerCase()) {
         case 'sent':
@@ -495,7 +507,7 @@ const Orders = () => {
             alert('No se pudo identificar al usuario actual.');
             return;
         }
-        const canResend = effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole) || order.user_id === profile.id;
+        const canResend = canResendOrderEmail(effectiveRole, profile.id, order);
         if (!canResend) {
             alert('No tienes permisos para reenviar este correo.');
             return;
@@ -701,7 +713,7 @@ const Orders = () => {
                                         {(() => {
                                             const orderLogs = notificationLogsByOrderId[order.id] || [];
                                             const latestLog = orderLogs[0] || null;
-                                            const canResend = Boolean(profile?.id) && (effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole) || order.user_id === profile?.id);
+                                            const canResend = canResendOrderEmail(effectiveRole, profile?.id, order);
                                             const canRetryEmail = canResend && ['failed', 'pending'].includes(String(order.payment_email_status || '').toLowerCase());
                                             return (
                                                 <>
