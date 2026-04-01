@@ -65,6 +65,11 @@ const PAYMENT_PROOF_RESTORE_MESSAGE = 'La app se recargó mientras seleccionabas
 const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
 const canAssignQuotationSeller = (role: string | null | undefined) =>
     role === 'admin' || role === 'facturador' || role === 'tesorero';
+const canCloseQuotationSale = (
+    role: string | null | undefined,
+    actorId: string | null | undefined,
+    quotationSellerId: string | null | undefined
+) => quotationSellerId === actorId || role === 'admin' || role === 'facturador';
 
 type PaymentProofModalDraft = {
     quotationId: string;
@@ -880,7 +885,7 @@ const Quotations: React.FC = () => {
             return;
         }
 
-        if (quotationToRestore.seller_id !== profile.id) {
+        if (!canCloseQuotationSale(effectiveRole, profile.id, quotationToRestore.seller_id)) {
             clearPaymentProofModalDraft();
             return;
         }
@@ -892,6 +897,7 @@ const Quotations: React.FC = () => {
         setPaymentProofError(PAYMENT_PROOF_RESTORE_MESSAGE);
     }, [
         clearPaymentProofModalDraft,
+        effectiveRole,
         loadPaymentProofModalDraft,
         profile?.id,
         quotationPendingOrder,
@@ -1185,8 +1191,8 @@ const Quotations: React.FC = () => {
             alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
             return;
         }
-        if (quotation?.seller_id !== profile.id) {
-            alert('Solo el vendedor dueño de la cotización puede convertirla a pedido.');
+        if (!canCloseQuotationSale(effectiveRole, profile.id, quotation?.seller_id)) {
+            alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
             return;
         }
         if (quotation?.discount_approval?.status === 'pending' || quotation?.discount_approval?.status === 'rejected') {
@@ -1519,6 +1525,7 @@ const Quotations: React.FC = () => {
         closePaymentProofModal,
         fetchQuotations,
         getQuotationCreditDays,
+        effectiveRole,
         profile?.id,
         uploadPaymentProof,
         validatePaymentProofFile
@@ -1530,8 +1537,8 @@ const Quotations: React.FC = () => {
             alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
             return;
         }
-        if (quotation?.seller_id !== profile.id) {
-            alert('Solo el vendedor dueño de la cotización puede convertirla a pedido.');
+        if (!canCloseQuotationSale(effectiveRole, profile.id, quotation?.seller_id)) {
+            alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
             return;
         }
 
@@ -1740,7 +1747,7 @@ const Quotations: React.FC = () => {
                         const hasPendingDiscountBlock = q.discount_approval?.status === 'pending' || q.discount_approval?.status === 'rejected';
                         const hasWhatsappTarget = Boolean(normalizePhoneForWhatsapp(q.client_phone || q.client?.phone));
                         const hasEmailTarget = Boolean(String(q.client_email || q.client?.email || '').trim());
-                        const canConvertOrder = q.seller_id === profile?.id;
+                        const canConvertOrder = canCloseQuotationSale(effectiveRole, profile?.id, q.seller_id);
 
                         return (
                         <div key={q.id} className="premium-card p-4 flex flex-col justify-between group">
@@ -1879,7 +1886,7 @@ const Quotations: React.FC = () => {
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
                                                 }`}
-                                            title={canConvertOrder ? 'Convertir en Pedido' : 'Solo el vendedor dueño puede convertir y enviar el correo'}
+                                            title={canConvertOrder ? 'Convertir en Pedido' : 'Solo el vendedor dueño, un admin o facturación pueden convertir y enviar el correo'}
                                         >
                                             <ShoppingBag size={12} className="mr-1" />
                                             {q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}

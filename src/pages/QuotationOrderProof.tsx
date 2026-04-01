@@ -15,6 +15,11 @@ const ORDER_CONVERSION_TIMEOUT_MS = 60_000;
 const PROOF_ROUTE_DRAFT_KEY = 'quotation_order_proof_route';
 const PROOF_ROUTE_RESTORE_MESSAGE = 'La app se recargó mientras seleccionabas el comprobante. Vuelve a elegir el archivo y luego genera el pedido.';
 const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
+const canCloseQuotationSale = (
+    role: string | null | undefined,
+    actorId: string | null | undefined,
+    quotationSellerId: string | null | undefined
+) => quotationSellerId === actorId || role === 'admin' || role === 'facturador';
 
 type ProofRouteDraft = {
     quotationId: string;
@@ -54,7 +59,7 @@ const createAttemptId = () => {
 const QuotationOrderProof = () => {
     const navigate = useNavigate();
     const { quotationId } = useParams<{ quotationId: string }>();
-    const { profile } = useUser();
+    const { profile, effectiveRole } = useUser();
 
     const [quotation, setQuotation] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
@@ -314,8 +319,8 @@ const QuotationOrderProof = () => {
 
         try {
             if (!quotation || !profile?.id) return;
-            if (quotation?.seller_id !== profile.id) {
-                alert('Solo el vendedor dueno de la cotizacion puede convertirla a pedido.');
+            if (!canCloseQuotationSale(effectiveRole, profile.id, quotation?.seller_id)) {
+                alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
                 return;
             }
 
@@ -577,6 +582,7 @@ const QuotationOrderProof = () => {
     }, [
         buildOrderEmailPayload,
         clearDraft,
+        effectiveRole,
         getQuotationCreditDays,
         paymentProofFile,
         profile?.id,
