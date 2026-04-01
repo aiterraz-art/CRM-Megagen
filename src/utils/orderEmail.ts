@@ -48,7 +48,30 @@ export const sendOrderNotificationEmail = async (input: SendOrderNotificationEma
     });
 
     if (error) {
-        throw new Error(error.message || 'No se pudo enviar el pedido a facturación.');
+        const functionsError = error as any;
+        let detailedMessage: string | null = null;
+        if (functionsError?.context) {
+            try {
+                const response = functionsError.context as Response;
+                const payload = await response.clone().json();
+                if (payload?.error) {
+                    detailedMessage = String(payload.error);
+                }
+            } catch {
+                if (!detailedMessage) {
+                    try {
+                    const response = functionsError.context as Response;
+                    const text = await response.clone().text();
+                    if (text) {
+                            detailedMessage = text;
+                        }
+                    } catch {
+                        // Fallback to original message below.
+                    }
+                }
+            }
+        }
+        throw new Error(detailedMessage || error.message || 'No se pudo enviar el pedido a facturación.');
     }
     if (!data || data.error) {
         throw new Error(data?.error || 'No se pudo enviar el pedido a facturación.');

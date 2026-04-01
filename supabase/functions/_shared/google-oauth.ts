@@ -117,7 +117,7 @@ export const refreshGoogleAccessTokenForUser = async (serviceClient: SupabaseCli
 };
 
 export const toWebSafeBase64 = (value: string) =>
-  btoa(value)
+  encodeUtf8Base64(value)
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
