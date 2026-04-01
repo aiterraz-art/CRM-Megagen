@@ -893,11 +893,8 @@ const Quotations: React.FC = () => {
     useEffect(() => {
         if (quotationPendingOrder?.id) {
             savePaymentProofModalDraft(quotationPendingOrder.id);
-            return;
         }
-
-        clearPaymentProofModalDraft();
-    }, [clearPaymentProofModalDraft, quotationPendingOrder?.id, savePaymentProofModalDraft]);
+    }, [quotationPendingOrder?.id, savePaymentProofModalDraft]);
 
     useEffect(() => {
         if (isInteractionModalOpen) {
