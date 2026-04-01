@@ -42,6 +42,14 @@ const toWholeMoney = (value: unknown) => {
     return Math.max(0, Math.round(parsed));
 };
 
+const createAttemptId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+
+    return `attempt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
 const QuotationOrderProof = () => {
     const navigate = useNavigate();
     const { quotationId } = useParams<{ quotationId: string }>();
@@ -300,64 +308,95 @@ const QuotationOrderProof = () => {
     }, [saveDraft, validatePaymentProofFile]);
 
     const executeConvertToOrder = useCallback(async () => {
-        if (!quotation || !profile?.id) return;
-        if (quotation?.seller_id !== profile.id) {
-            alert('Solo el vendedor dueno de la cotizacion puede convertirla a pedido.');
-            return;
-        }
-
-        const creditDays = getQuotationCreditDays(quotation);
-        const requiresProof = creditDays === 0;
-        const attemptId = crypto.randomUUID();
-        let normalizedProofFile = paymentProofFile;
+        const attemptId = createAttemptId();
         let uploadedProof: { path: string; name: string; mimeType: string } | null = null;
         let createdOrderId: string | null = null;
 
-        if (requiresProof && !paymentProofFile) {
-            const validationError = 'Debes adjuntar el comprobante de pago.';
-            setPaymentProofError(validationError);
-            await logQuotationOrderConversionSafe({
-                attemptId,
-                quotationId: quotation.id,
-                actorId: profile.id,
-                stage: 'payment_proof_upload',
-                status: 'failed',
-                message: validationError,
-                metadata: {
-                    requiresProof,
-                    quotationFolio: quotation?.folio || null,
-                },
-            });
-            return;
-        }
-
-        if (requiresProof && paymentProofFile) {
-            try {
-                setPaymentProofPreparing(true);
-                setOrderConversionStage(isHeicLikeFile(paymentProofFile) ? 'Convirtiendo comprobante HEIC a JPG...' : 'Validando comprobante de pago...');
-                normalizedProofFile = await convertHeicToJpeg(paymentProofFile);
-                const validationError = validatePaymentProofFile(normalizedProofFile);
-                if (validationError) {
-                    setPaymentProofFile(null);
-                    setPaymentProofError(validationError);
-                    return;
-                }
-                setPaymentProofFile(normalizedProofFile);
-                setPaymentProofError(isHeicLikeFile(paymentProofFile) ? 'Archivo HEIC convertido automaticamente a JPG para compatibilidad.' : null);
-            } catch (proofPreparationError: any) {
-                setPaymentProofFile(null);
-                setPaymentProofError(proofPreparationError?.message || 'No se pudo procesar el comprobante seleccionado.');
-                return;
-            } finally {
-                setPaymentProofPreparing(false);
-            }
-        }
-
-        setSubmitting(true);
-        setPaymentProofError(null);
-        setOrderConversionStage(requiresProof ? 'Subiendo comprobante de pago...' : 'Generando pedido...');
-
         try {
+            if (!quotation || !profile?.id) return;
+            if (quotation?.seller_id !== profile.id) {
+                alert('Solo el vendedor dueno de la cotizacion puede convertirla a pedido.');
+                return;
+            }
+
+            const creditDays = getQuotationCreditDays(quotation);
+            const requiresProof = creditDays === 0;
+            let normalizedProofFile = paymentProofFile;
+
+            if (requiresProof && !paymentProofFile) {
+                const validationError = 'Debes adjuntar el comprobante de pago.';
+                setPaymentProofError(validationError);
+                await logQuotationOrderConversionSafe({
+                    attemptId,
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    stage: 'payment_proof_upload',
+                    status: 'failed',
+                    message: validationError,
+                    metadata: {
+                        requiresProof,
+                        quotationFolio: quotation?.folio || null,
+                        source: 'android_dedicated_screen',
+                    },
+                });
+                return;
+            }
+
+            if (requiresProof && paymentProofFile) {
+                try {
+                    setPaymentProofPreparing(true);
+                    setOrderConversionStage(isHeicLikeFile(paymentProofFile) ? 'Convirtiendo comprobante HEIC a JPG...' : 'Validando comprobante de pago...');
+                    normalizedProofFile = await convertHeicToJpeg(paymentProofFile);
+                    const validationError = validatePaymentProofFile(normalizedProofFile);
+                    if (validationError) {
+                        setPaymentProofFile(null);
+                        setPaymentProofError(validationError);
+                        await logQuotationOrderConversionSafe({
+                            attemptId,
+                            quotationId: quotation.id,
+                            actorId: profile.id,
+                            stage: 'payment_proof_upload',
+                            status: 'failed',
+                            message: validationError,
+                            metadata: {
+                                requiresProof,
+                                quotationFolio: quotation?.folio || null,
+                                source: 'android_dedicated_screen',
+                                fileName: normalizedProofFile?.name || paymentProofFile.name,
+                            },
+                        });
+                        return;
+                    }
+                    setPaymentProofFile(normalizedProofFile);
+                    setPaymentProofError(isHeicLikeFile(paymentProofFile) ? 'Archivo HEIC convertido automaticamente a JPG para compatibilidad.' : null);
+                } catch (proofPreparationError: any) {
+                    const message = proofPreparationError?.message || 'No se pudo procesar el comprobante seleccionado.';
+                    setPaymentProofFile(null);
+                    setPaymentProofError(message);
+                    await logQuotationOrderConversionSafe({
+                        attemptId,
+                        quotationId: quotation.id,
+                        actorId: profile.id,
+                        stage: 'payment_proof_upload',
+                        status: 'failed',
+                        message,
+                        metadata: {
+                            requiresProof,
+                            quotationFolio: quotation?.folio || null,
+                            source: 'android_dedicated_screen',
+                            fileName: paymentProofFile?.name || null,
+                        },
+                    });
+                    return;
+                } finally {
+                    setPaymentProofPreparing(false);
+                }
+            }
+
+            setSubmitting(true);
+            setPaymentProofError(null);
+            setOrderConversionStage(requiresProof ? 'Subiendo comprobante de pago...' : 'Generando pedido...');
+
             await logQuotationOrderConversionSafe({
                 attemptId,
                 quotationId: quotation.id,
@@ -374,31 +413,95 @@ const QuotationOrderProof = () => {
             });
 
             if (requiresProof && normalizedProofFile) {
-                uploadedProof = await withTimeout(
-                    uploadPaymentProof(quotation, normalizedProofFile),
-                    ORDER_CONVERSION_TIMEOUT_MS,
-                    'La subida del comprobante tardo demasiado. Revisa tu conexion e intentalo nuevamente.',
-                );
+                try {
+                    uploadedProof = await withTimeout(
+                        uploadPaymentProof(quotation, normalizedProofFile),
+                        ORDER_CONVERSION_TIMEOUT_MS,
+                        'La subida del comprobante tardo demasiado. Revisa tu conexion e intentalo nuevamente.',
+                    );
+                    await logQuotationOrderConversionSafe({
+                        attemptId,
+                        quotationId: quotation.id,
+                        actorId: profile.id,
+                        stage: 'payment_proof_upload',
+                        status: 'success',
+                        message: 'Comprobante subido correctamente.',
+                        metadata: {
+                            path: uploadedProof.path,
+                            mimeType: uploadedProof.mimeType,
+                            name: uploadedProof.name,
+                            source: 'android_dedicated_screen',
+                        },
+                    });
+                } catch (proofError: any) {
+                    await logQuotationOrderConversionSafe({
+                        attemptId,
+                        quotationId: quotation.id,
+                        actorId: profile.id,
+                        stage: 'payment_proof_upload',
+                        status: 'failed',
+                        message: proofError?.message || 'Error subiendo comprobante.',
+                        metadata: {
+                            source: 'android_dedicated_screen',
+                            fileName: normalizedProofFile.name,
+                            fileSize: normalizedProofFile.size,
+                            fileType: normalizedProofFile.type || null,
+                        },
+                    });
+                    throw proofError;
+                }
             }
 
             setOrderConversionStage('Generando pedido...');
-            const rpcResponse = await withTimeout(
-                (async () => await supabase.rpc('convert_quotation_to_order', {
-                    p_quotation_id: quotation.id,
-                    p_user_id: profile.id,
-                    p_payment_proof_path: uploadedProof?.path ?? null,
-                    p_payment_proof_name: uploadedProof?.name ?? null,
-                    p_payment_proof_mime_type: uploadedProof?.mimeType ?? null,
-                }))(),
-                ORDER_CONVERSION_TIMEOUT_MS,
-                'La generacion del pedido tardo demasiado. Revisa Pedidos antes de reintentar.',
-            ) as any;
+            let rpcResponse: any = null;
+            try {
+                rpcResponse = await withTimeout(
+                    (async () => await supabase.rpc('convert_quotation_to_order', {
+                        p_quotation_id: quotation.id,
+                        p_user_id: profile.id,
+                        p_payment_proof_path: uploadedProof?.path ?? null,
+                        p_payment_proof_name: uploadedProof?.name ?? null,
+                        p_payment_proof_mime_type: uploadedProof?.mimeType ?? null,
+                    }))(),
+                    ORDER_CONVERSION_TIMEOUT_MS,
+                    'La generacion del pedido tardo demasiado. Revisa Pedidos antes de reintentar.',
+                ) as any;
 
-            if (rpcResponse.error) throw rpcResponse.error;
+                if (rpcResponse.error) throw rpcResponse.error;
+            } catch (orderError: any) {
+                await logQuotationOrderConversionSafe({
+                    attemptId,
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    stage: 'order_creation',
+                    status: 'failed',
+                    message: orderError?.message || 'Error creando pedido.',
+                    metadata: {
+                        uploadedProofPath: uploadedProof?.path || null,
+                        source: 'android_dedicated_screen',
+                    },
+                });
+                throw orderError;
+            }
 
             const response = (rpcResponse.data || {}) as any;
             createdOrderId = response?.order_id || null;
             const orderFolio = response?.order_folio || response?.order_id?.slice?.(0, 8) || 'N/A';
+
+            await logQuotationOrderConversionSafe({
+                attemptId,
+                quotationId: quotation.id,
+                actorId: profile.id,
+                orderId: response?.order_id || null,
+                stage: 'order_creation',
+                status: 'success',
+                message: response?.already_exists ? 'La cotizacion ya tenia pedido asociado.' : 'Pedido creado correctamente.',
+                metadata: {
+                    orderFolio,
+                    alreadyExists: Boolean(response?.already_exists),
+                    source: 'android_dedicated_screen',
+                },
+            });
 
             if (response?.already_exists) {
                 clearDraft();
@@ -414,10 +517,50 @@ const QuotationOrderProof = () => {
                     requestSource: 'quotation_conversion',
                     order: buildOrderEmailPayload(quotation, orderFolio),
                 }), ORDER_CONVERSION_TIMEOUT_MS, 'El correo a facturacion tardo demasiado. El pedido se genero igual y puedes reenviarlo desde Pedidos.');
+                await logQuotationOrderConversionSafe({
+                    attemptId,
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    orderId: createdOrderId || response?.order_id || null,
+                    stage: 'notification',
+                    status: 'success',
+                    message: 'Correo a facturacion enviado correctamente.',
+                    metadata: {
+                        orderFolio,
+                        source: 'android_dedicated_screen',
+                    },
+                });
                 alert('Pedido generado y correo enviado a facturacion correctamente.');
             } catch (emailError: any) {
+                await logQuotationOrderConversionSafe({
+                    attemptId,
+                    quotationId: quotation.id,
+                    actorId: profile.id,
+                    orderId: createdOrderId || response?.order_id || null,
+                    stage: 'notification',
+                    status: 'failed',
+                    message: emailError?.message || 'Error enviando correo a facturacion.',
+                    metadata: {
+                        orderFolio,
+                        source: 'android_dedicated_screen',
+                    },
+                });
                 alert(`Pedido generado, pero el correo a facturacion fallo. ${emailError?.message || 'Puedes reenviarlo desde Pedidos.'}`);
             }
+
+            await logQuotationOrderConversionSafe({
+                attemptId,
+                quotationId: quotation.id,
+                actorId: profile.id,
+                orderId: createdOrderId || response?.order_id || null,
+                stage: 'completed',
+                status: 'success',
+                message: 'Conversion de cotizacion a pedido finalizada.',
+                metadata: {
+                    orderFolio,
+                    source: 'android_dedicated_screen',
+                },
+            });
 
             clearDraft();
             navigate('/orders', { replace: true });
