@@ -15,6 +15,7 @@ import { convertHeicToJpeg, isHeicLikeFile } from '../utils/heic';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import { generateQuotationPdfFile } from '../utils/quotationPdf';
+import { uploadFileToStorage } from '../utils/storageUpload';
 import QuotationOrderConversionHistoryModal from '../components/modals/QuotationOrderConversionHistoryModal';
 import { Database } from '../types/supabase';
 
@@ -669,15 +670,13 @@ const Quotations: React.FC = () => {
             .slice(0, 80) || 'comprobante';
         const filePath = `${profile.id}/${quotation.id}/${Date.now()}_${safeBaseName}.${fileExt}`;
 
-        const { error } = await supabase.storage
-            .from(PAYMENT_PROOFS_BUCKET)
-            .upload(filePath, file, {
-                cacheControl: '3600',
-                upsert: false,
-                contentType: file.type || undefined
-            });
-
-        if (error) throw error;
+        await uploadFileToStorage({
+            bucket: PAYMENT_PROOFS_BUCKET,
+            path: filePath,
+            file,
+            cacheControl: '3600',
+            upsert: false,
+        });
 
         return {
             path: filePath,

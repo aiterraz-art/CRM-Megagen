@@ -7,6 +7,7 @@ import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { logQuotationOrderConversionSafe } from '../utils/quotationOrderConversionLog';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 import { convertHeicToJpeg, isHeicLikeFile } from '../utils/heic';
+import { uploadFileToStorage } from '../utils/storageUpload';
 
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
 const PAYMENT_PROOF_MAX_BYTES = 20 * 1024 * 1024;
@@ -142,15 +143,13 @@ const QuotationOrderProof = () => {
             .slice(0, 80) || 'comprobante';
         const filePath = `${profile.id}/${quote.id}/${Date.now()}_${safeBaseName}.${fileExt}`;
 
-        const { error } = await supabase.storage
-            .from(PAYMENT_PROOFS_BUCKET)
-            .upload(filePath, file, {
-                cacheControl: '3600',
-                upsert: false,
-                contentType: file.type || undefined,
-            });
-
-        if (error) throw error;
+        await uploadFileToStorage({
+            bucket: PAYMENT_PROOFS_BUCKET,
+            path: filePath,
+            file,
+            cacheControl: '3600',
+            upsert: false,
+        });
 
         return {
             path: filePath,
