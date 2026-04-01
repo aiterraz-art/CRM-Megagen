@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2, AlertCircle, Eye, Printer, X as XIcon, User, MapPin, Navigation, Trash2, Edit2, MessageSquare, Phone, Mail, Upload, Share2, History } from 'lucide-react';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
@@ -59,6 +59,7 @@ const DISPATCH_SERVICE_NAME_KEY = normalizeProductKey(DISPATCH_SERVICE_NAME);
 const DISPATCH_SERVICE_SKU_KEY = normalizeProductKey(DISPATCH_SERVICE_SKU);
 const ORDER_CONVERSION_TIMEOUT_MS = 60_000;
 const PAYMENT_PROOF_MODAL_DRAFT_KEY = 'quotation_payment_proof_modal';
+const PAYMENT_PROOF_RESTORE_MESSAGE = 'La app se recargó mientras seleccionabas el comprobante. Debes volver a elegir el archivo antes de generar el pedido.';
 
 const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
 const isBillingBackofficeRole = (role: string | null | undefined) =>
@@ -138,6 +139,9 @@ const Quotations: React.FC = () => {
     const [conversionHistoryLogs, setConversionHistoryLogs] = useState<QuotationOrderConversionLog[]>([]);
     const [conversionHistoryLoading, setConversionHistoryLoading] = useState(false);
     const [conversionHistoryError, setConversionHistoryError] = useState<string | null>(null);
+    const paymentProofImageInputRef = useRef<HTMLInputElement | null>(null);
+    const paymentProofCameraInputRef = useRef<HTMLInputElement | null>(null);
+    const paymentProofPdfInputRef = useRef<HTMLInputElement | null>(null);
 
     // Form State
     const [formItems, setFormItems] = useState<any[]>([{ productId: null, code: '', detail: '', qty: 1, price: 0, discountPct: 0, netPrice: 0 }]);
@@ -151,6 +155,10 @@ const Quotations: React.FC = () => {
 
     const { profile, isSupervisor, hasPermission, permissions, effectiveRole } = useUser();
     const { activeVisit } = useVisit();
+    const isAndroidDevice = useMemo(() => {
+        if (typeof navigator === 'undefined') return false;
+        return /Android/i.test(navigator.userAgent || '');
+    }, []);
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewOrderConversionTrace = effectiveRole === 'admin' && profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
@@ -881,7 +889,7 @@ const Quotations: React.FC = () => {
         setPaymentProofFile(null);
         setPaymentProofPreparing(false);
         setOrderConversionStage(null);
-        setPaymentProofError('La app se recargó mientras seleccionabas el comprobante. Debes volver a elegir el archivo antes de generar el pedido.');
+        setPaymentProofError(PAYMENT_PROOF_RESTORE_MESSAGE);
     }, [
         clearPaymentProofModalDraft,
         loadPaymentProofModalDraft,
@@ -895,6 +903,24 @@ const Quotations: React.FC = () => {
             savePaymentProofModalDraft(quotationPendingOrder.id);
         }
     }, [quotationPendingOrder?.id, savePaymentProofModalDraft]);
+
+    const openPaymentProofPicker = useCallback((picker: 'image' | 'camera' | 'pdf') => {
+        if (paymentProofError === PAYMENT_PROOF_RESTORE_MESSAGE) {
+            setPaymentProofError(null);
+        }
+
+        if (picker === 'camera') {
+            paymentProofCameraInputRef.current?.click();
+            return;
+        }
+
+        if (picker === 'pdf') {
+            paymentProofPdfInputRef.current?.click();
+            return;
+        }
+
+        paymentProofImageInputRef.current?.click();
+    }, [paymentProofError]);
 
     useEffect(() => {
         if (isInteractionModalOpen) {
@@ -2157,14 +2183,60 @@ const Quotations: React.FC = () => {
                                     <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Archivos permitidos</p>
                                     <p className="mt-1 text-sm font-bold text-gray-700">PDF, JPG, JPEG, PNG, WEBP, HEIC hasta 20MB</p>
                                     <p className="mt-1 text-xs text-gray-500">Los archivos HEIC/HEIF se convierten automáticamente a JPG.</p>
+                                    {isAndroidDevice && (
+                                        <p className="mt-2 text-xs font-medium text-amber-700">
+                                            En Android usa preferentemente "Elegir imagen" o "Tomar foto" para evitar el explorador genérico.
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="space-y-3">
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => openPaymentProofPicker('image')}
+                                            className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 transition-all hover:bg-emerald-100"
+                                        >
+                                            Elegir imagen
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => openPaymentProofPicker('pdf')}
+                                            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition-all hover:bg-slate-100"
+                                        >
+                                            Elegir PDF
+                                        </button>
+                                        {isAndroidDevice && (
+                                            <button
+                                                type="button"
+                                                onClick={() => openPaymentProofPicker('camera')}
+                                                className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700 transition-all hover:bg-blue-100 sm:col-span-2"
+                                            >
+                                                Tomar foto
+                                            </button>
+                                        )}
+                                    </div>
                                     <input
+                                        ref={paymentProofImageInputRef}
                                         type="file"
-                                        accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"
+                                        accept="image/*,.heic,.heif"
                                         onChange={handlePaymentProofFileChange}
-                                        className="block w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-emerald-600 file:px-4 file:py-3 file:font-bold file:text-white hover:file:bg-emerald-700"
+                                        className="hidden"
+                                    />
+                                    <input
+                                        ref={paymentProofPdfInputRef}
+                                        type="file"
+                                        accept="application/pdf,.pdf"
+                                        onChange={handlePaymentProofFileChange}
+                                        className="hidden"
+                                    />
+                                    <input
+                                        ref={paymentProofCameraInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        capture="environment"
+                                        onChange={handlePaymentProofFileChange}
+                                        className="hidden"
                                     />
                                     {paymentProofFile && (
                                         <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3">
