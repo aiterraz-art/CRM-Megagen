@@ -1881,8 +1881,8 @@ const Quotations: React.FC = () => {
                                     {q.status !== 'approved' && (
                                         <button
                                             onClick={() => handleConvertToOrder(q)}
-                                            disabled={submitting || q.status === 'rejected' || hasPendingDiscountBlock || !canConvertOrder}
-                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || q.status === 'rejected' || hasPendingDiscountBlock || !canConvertOrder
+                                            disabled={submitting || hasPendingDiscountBlock || !canConvertOrder}
+                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || hasPendingDiscountBlock || !canConvertOrder
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
                                                 }`}
