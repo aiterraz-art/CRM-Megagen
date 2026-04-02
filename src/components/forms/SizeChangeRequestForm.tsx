@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Package, Plus, Search, Trash2, User, X } from 'lucide-react';
 import { Database } from '../../types/supabase';
+import { SizeChangeFormDraft } from '../../utils/sizeChangeModalDraft';
 
 type ClientRow = Database['public']['Tables']['clients']['Row'];
 type InventoryRow = Database['public']['Tables']['inventory']['Row'];
@@ -28,6 +29,8 @@ type SizeChangeRequestFormProps = {
             unitPrice: number;
         }>;
     } | null;
+    initialDraftState?: SizeChangeFormDraft | null;
+    onDraftChange?: (draft: SizeChangeFormDraft) => void;
     onClose: () => void;
     onSubmit: (payload: {
         clientId: string;
@@ -69,6 +72,8 @@ const SizeChangeRequestForm = ({
     currentUserProfile,
     effectiveRole,
     initialRequest,
+    initialDraftState,
+    onDraftChange,
     onClose,
     onSubmit,
 }: SizeChangeRequestFormProps) => {
@@ -85,7 +90,23 @@ const SizeChangeRequestForm = ({
     useEffect(() => {
         if (!isOpen) return;
 
-        if (initialRequest) {
+        if (initialDraftState) {
+            setClientId(initialDraftState.clientId || '');
+            setClientSearch(initialDraftState.clientSearch || '');
+            setSellerId(initialDraftState.sellerId || (isAdmin ? '' : (currentUserProfile?.id || '')));
+            setRequestComment(initialDraftState.requestComment || '');
+            setLines(
+                initialDraftState.lines.length > 0
+                    ? initialDraftState.lines.map((line) => ({
+                        localId: line.localId || crypto.randomUUID(),
+                        productId: line.productId || '',
+                        productSearch: line.productSearch || '',
+                        qty: Number(line.qty || 1),
+                        unitPrice: Number(line.unitPrice || 0),
+                    }))
+                    : [buildEmptyLine()]
+            );
+        } else if (initialRequest) {
             const selectedClient = clients.find((client) => client.id === initialRequest.clientId);
             setClientId(initialRequest.clientId);
             setClientSearch(selectedClient?.name || '');
@@ -113,7 +134,18 @@ const SizeChangeRequestForm = ({
         setError(null);
         setClientSuggestionsOpen(false);
         setActiveProductRowId(null);
-    }, [clients, currentUserProfile?.id, initialRequest, isAdmin, isOpen]);
+    }, [clients, currentUserProfile?.id, initialDraftState, initialRequest, isAdmin, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen || !onDraftChange) return;
+        onDraftChange({
+            clientId,
+            clientSearch,
+            sellerId,
+            requestComment,
+            lines,
+        });
+    }, [clientId, clientSearch, isOpen, lines, onDraftChange, requestComment, sellerId]);
 
     const selectedClient = useMemo(
         () => clients.find((client) => client.id === clientId) || null,

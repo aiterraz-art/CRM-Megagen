@@ -6,6 +6,7 @@ import { Database } from '../types/supabase';
 import SizeChangeRequestForm from '../components/forms/SizeChangeRequestForm';
 import SizeChangeRequestDetailModal from '../components/modals/SizeChangeRequestDetailModal';
 import { sendSizeChangeNotificationEmail } from '../utils/sizeChangeEmail';
+import { clearSizeChangeModalDraft, loadSizeChangeModalDraft, saveSizeChangeModalDraft, SizeChangeFormDraft } from '../utils/sizeChangeModalDraft';
 
 type SizeChangeRequestRow = Database['public']['Tables']['size_change_requests']['Row'];
 type SizeChangeRequestItemRow = Database['public']['Tables']['size_change_request_items']['Row'];
@@ -72,9 +73,12 @@ const SizeChanges: React.FC = () => {
     const [profiles, setProfiles] = useState<ProfileRow[]>([]);
     const [showFormModal, setShowFormModal] = useState(false);
     const [editingRequest, setEditingRequest] = useState<EnrichedRequest | null>(null);
+    const [formDraftState, setFormDraftState] = useState<SizeChangeFormDraft | null>(null);
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [actionModal, setActionModal] = useState<{ type: ActionType; request: EnrichedRequest } | null>(null);
     const [actionNote, setActionNote] = useState('');
+    const [draftRestoreDone, setDraftRestoreDone] = useState(false);
+    const [draftRestoreNotice, setDraftRestoreNotice] = useState<string | null>(null);
 
     const profilesById = useMemo(() => new Map(profiles.map((row) => [row.id, row])), [profiles]);
     const actorNames = useMemo(() => {
@@ -195,25 +199,125 @@ const SizeChanges: React.FC = () => {
         void fetchData();
     }, [canViewSizeChanges, canCreateSizeChanges]);
 
+    useEffect(() => {
+        if (!canViewSizeChanges || !profile?.id || loading || draftRestoreDone) return;
+
+        const draft = loadSizeChangeModalDraft();
+        if (!draft || draft.actorId !== profile.id) {
+            setDraftRestoreDone(true);
+            return;
+        }
+
+        if (draft.modal === 'detail' && draft.selectedRequestId) {
+            const request = enrichedRequests.find((row) => row.id === draft.selectedRequestId);
+            if (request) {
+                setSelectedRequestId(request.id);
+                setDraftRestoreNotice('Se restauró la ventana de detalle de cambio de medida.');
+            } else {
+                clearSizeChangeModalDraft();
+            }
+        } else if (draft.modal === 'form') {
+            if (draft.formMode === 'edit' && draft.editingRequestId) {
+                const request = enrichedRequests.find((row) => row.id === draft.editingRequestId);
+                if (request) {
+                    setEditingRequest(request);
+                    setFormDraftState(draft.formDraft || null);
+                    setShowFormModal(true);
+                    setDraftRestoreNotice('Se restauró la edición del cambio de medida.');
+                } else {
+                    clearSizeChangeModalDraft();
+                }
+            } else {
+                setEditingRequest(null);
+                setFormDraftState(draft.formDraft || null);
+                setShowFormModal(true);
+                setDraftRestoreNotice('Se restauró la creación del cambio de medida.');
+            }
+        } else if (draft.modal === 'action' && draft.actionType && draft.actionRequestId) {
+            const request = enrichedRequests.find((row) => row.id === draft.actionRequestId);
+            if (request) {
+                setActionModal({ type: draft.actionType, request });
+                setActionNote(draft.actionNote || '');
+                setDraftRestoreNotice('Se restauró la acción pendiente del cambio de medida.');
+            } else {
+                clearSizeChangeModalDraft();
+            }
+        } else {
+            clearSizeChangeModalDraft();
+        }
+
+        setDraftRestoreDone(true);
+    }, [canViewSizeChanges, draftRestoreDone, enrichedRequests, loading, profile?.id]);
+
+    useEffect(() => {
+        if (!profile?.id) return;
+
+        if (actionModal) {
+            saveSizeChangeModalDraft({
+                actorId: profile.id,
+                modal: 'action',
+                actionType: actionModal.type,
+                actionRequestId: actionModal.request.id,
+                actionNote,
+                updatedAt: new Date().toISOString(),
+            });
+            return;
+        }
+
+        if (showFormModal) {
+            saveSizeChangeModalDraft({
+                actorId: profile.id,
+                modal: 'form',
+                formMode: editingRequest ? 'edit' : 'create',
+                editingRequestId: editingRequest?.id || null,
+                formDraft: formDraftState,
+                updatedAt: new Date().toISOString(),
+            });
+            return;
+        }
+
+        if (selectedRequestId) {
+            saveSizeChangeModalDraft({
+                actorId: profile.id,
+                modal: 'detail',
+                selectedRequestId,
+                updatedAt: new Date().toISOString(),
+            });
+            return;
+        }
+
+        clearSizeChangeModalDraft();
+    }, [actionModal, actionNote, editingRequest, formDraftState, profile?.id, selectedRequestId, showFormModal]);
+
     const openCreateModal = () => {
         setEditingRequest(null);
+        setFormDraftState(null);
+        setSelectedRequestId(null);
+        setActionModal(null);
+        setActionNote('');
         setShowFormModal(true);
     };
 
     const openEditModal = (request: EnrichedRequest) => {
         setEditingRequest(request);
+        setFormDraftState(null);
         setSelectedRequestId(null);
+        setActionModal(null);
+        setActionNote('');
         setShowFormModal(true);
     };
 
     const closeFormModal = () => {
         setShowFormModal(false);
         setEditingRequest(null);
+        setFormDraftState(null);
+        clearSizeChangeModalDraft();
     };
 
     const closeActionModal = () => {
         setActionModal(null);
         setActionNote('');
+        clearSizeChangeModalDraft();
     };
 
     const canEditRequest = (request: EnrichedRequest) => {
@@ -406,6 +510,19 @@ const SizeChanges: React.FC = () => {
                 />
             </div>
 
+            {draftRestoreNotice && (
+                <div className="rounded-3xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm font-bold text-indigo-700 flex items-center justify-between gap-3">
+                    <span>{draftRestoreNotice}</span>
+                    <button
+                        type="button"
+                        onClick={() => setDraftRestoreNotice(null)}
+                        className="rounded-2xl border border-indigo-200 bg-white px-3 py-1.5 text-xs font-black text-indigo-700 hover:bg-indigo-100 transition-colors"
+                    >
+                        Ocultar
+                    </button>
+                </div>
+            )}
+
             {loading ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {Array.from({ length: 6 }).map((_, index) => (
@@ -533,6 +650,7 @@ const SizeChanges: React.FC = () => {
                 sellerOptions={sellerOptions}
                 currentUserProfile={profile as ProfileRow | null}
                 effectiveRole={effectiveRole}
+                initialDraftState={formDraftState}
                 initialRequest={editingRequest ? {
                     clientId: editingRequest.client_id,
                     sellerId: editingRequest.seller_id,
@@ -545,6 +663,7 @@ const SizeChanges: React.FC = () => {
                         unitPrice: Number(item.unit_price || 0),
                     })),
                 } : null}
+                onDraftChange={setFormDraftState}
                 onClose={closeFormModal}
                 onSubmit={handleSubmitForm}
             />
@@ -558,7 +677,10 @@ const SizeChanges: React.FC = () => {
                 canMarkSent={selectedRequest ? canMarkSentRequest(selectedRequest) : false}
                 canCloseRequest={selectedRequest ? canCloseRequest(selectedRequest) : false}
                 canCancel={selectedRequest ? canCancelRequest(selectedRequest) : false}
-                onClose={() => setSelectedRequestId(null)}
+                onClose={() => {
+                    setSelectedRequestId(null);
+                    clearSizeChangeModalDraft();
+                }}
                 onEdit={() => selectedRequest && openEditModal(selectedRequest)}
                 onMarkSent={() => {
                     if (!selectedRequest) return;
