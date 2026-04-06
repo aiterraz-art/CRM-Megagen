@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardList, Edit2, Plus, RefreshCw, Search, Send, XCircle } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
@@ -74,6 +74,7 @@ const SizeChanges: React.FC = () => {
     const [showFormModal, setShowFormModal] = useState(false);
     const [editingRequest, setEditingRequest] = useState<EnrichedRequest | null>(null);
     const [formDraftState, setFormDraftState] = useState<SizeChangeFormDraft | null>(null);
+    const formDraftStateRef = useRef<SizeChangeFormDraft | null>(null);
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [actionModal, setActionModal] = useState<{ type: ActionType; request: EnrichedRequest } | null>(null);
     const [actionNote, setActionNote] = useState('');
@@ -222,6 +223,7 @@ const SizeChanges: React.FC = () => {
                 if (request) {
                     setEditingRequest(request);
                     setFormDraftState(draft.formDraft || null);
+                    formDraftStateRef.current = draft.formDraft || null;
                     setShowFormModal(true);
                     setDraftRestoreNotice('Se restauró la edición del cambio de medida.');
                 } else {
@@ -230,6 +232,7 @@ const SizeChanges: React.FC = () => {
             } else {
                 setEditingRequest(null);
                 setFormDraftState(draft.formDraft || null);
+                formDraftStateRef.current = draft.formDraft || null;
                 setShowFormModal(true);
                 setDraftRestoreNotice('Se restauró la creación del cambio de medida.');
             }
@@ -270,7 +273,7 @@ const SizeChanges: React.FC = () => {
                 modal: 'form',
                 formMode: editingRequest ? 'edit' : 'create',
                 editingRequestId: editingRequest?.id || null,
-                formDraft: formDraftState,
+                formDraft: formDraftStateRef.current,
                 updatedAt: new Date().toISOString(),
             });
             return;
@@ -287,11 +290,27 @@ const SizeChanges: React.FC = () => {
         }
 
         clearSizeChangeModalDraft();
-    }, [actionModal, actionNote, editingRequest, formDraftState, profile?.id, selectedRequestId, showFormModal]);
+    }, [actionModal, actionNote, editingRequest, profile?.id, selectedRequestId, showFormModal]);
+
+    const handleFormDraftChange = useCallback((draft: SizeChangeFormDraft) => {
+        formDraftStateRef.current = draft;
+
+        if (!profile?.id || !showFormModal) return;
+
+        saveSizeChangeModalDraft({
+            actorId: profile.id,
+            modal: 'form',
+            formMode: editingRequest ? 'edit' : 'create',
+            editingRequestId: editingRequest?.id || null,
+            formDraft: draft,
+            updatedAt: new Date().toISOString(),
+        });
+    }, [editingRequest, profile?.id, showFormModal]);
 
     const openCreateModal = () => {
         setEditingRequest(null);
         setFormDraftState(null);
+        formDraftStateRef.current = null;
         setSelectedRequestId(null);
         setActionModal(null);
         setActionNote('');
@@ -301,6 +320,7 @@ const SizeChanges: React.FC = () => {
     const openEditModal = (request: EnrichedRequest) => {
         setEditingRequest(request);
         setFormDraftState(null);
+        formDraftStateRef.current = null;
         setSelectedRequestId(null);
         setActionModal(null);
         setActionNote('');
@@ -311,6 +331,7 @@ const SizeChanges: React.FC = () => {
         setShowFormModal(false);
         setEditingRequest(null);
         setFormDraftState(null);
+        formDraftStateRef.current = null;
         clearSizeChangeModalDraft();
     };
 
@@ -663,7 +684,7 @@ const SizeChanges: React.FC = () => {
                         unitPrice: Number(item.unit_price || 0),
                     })),
                 } : null}
-                onDraftChange={setFormDraftState}
+                onDraftChange={handleFormDraftChange}
                 onClose={closeFormModal}
                 onSubmit={handleSubmitForm}
             />
