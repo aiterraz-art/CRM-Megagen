@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Package, Plus, Search, Trash2, User, X } from 'lucide-react';
 import { Database } from '../../types/supabase';
 import { SizeChangeFormDraft } from '../../utils/sizeChangeModalDraft';
@@ -78,6 +78,7 @@ const SizeChangeRequestForm = ({
     onSubmit,
 }: SizeChangeRequestFormProps) => {
     const isAdmin = effectiveRole === 'admin';
+    const hasInitializedWhileOpenRef = useRef(false);
     const [clientSearch, setClientSearch] = useState('');
     const [clientId, setClientId] = useState('');
     const [sellerId, setSellerId] = useState('');
@@ -88,7 +89,12 @@ const SizeChangeRequestForm = ({
     const [activeProductRowId, setActiveProductRowId] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!isOpen) return;
+        if (!isOpen) {
+            hasInitializedWhileOpenRef.current = false;
+            return;
+        }
+
+        if (hasInitializedWhileOpenRef.current) return;
 
         if (initialDraftState) {
             setClientId(initialDraftState.clientId || '');
@@ -134,6 +140,7 @@ const SizeChangeRequestForm = ({
         setError(null);
         setClientSuggestionsOpen(false);
         setActiveProductRowId(null);
+        hasInitializedWhileOpenRef.current = true;
     }, [clients, currentUserProfile?.id, initialDraftState, initialRequest, isAdmin, isOpen]);
 
     useEffect(() => {
