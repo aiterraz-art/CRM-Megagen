@@ -28,6 +28,9 @@ const Inventory = () => {
     const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
     const [editingPriceValue, setEditingPriceValue] = useState('');
     const [savingPriceId, setSavingPriceId] = useState<string | null>(null);
+    const [editingStockId, setEditingStockId] = useState<string | null>(null);
+    const [editingStockValue, setEditingStockValue] = useState('');
+    const [savingStockId, setSavingStockId] = useState<string | null>(null);
     const [newProduct, setNewProduct] = useState({
         sku: '',
         name: '',
@@ -395,6 +398,9 @@ const Inventory = () => {
     };
 
     const startPriceEdit = (item: InventoryItem) => {
+        setEditingStockId(null);
+        setEditingStockValue('');
+        setSavingStockId(null);
         setEditingPriceId(item.id);
         setEditingPriceValue(String(Math.max(0, Number(item.price || 0))));
     };
@@ -403,6 +409,20 @@ const Inventory = () => {
         setEditingPriceId(null);
         setEditingPriceValue('');
         setSavingPriceId(null);
+    };
+
+    const startStockEdit = (item: InventoryItem) => {
+        setEditingPriceId(null);
+        setEditingPriceValue('');
+        setSavingPriceId(null);
+        setEditingStockId(item.id);
+        setEditingStockValue(String(Math.max(0, Math.trunc(Number(item.stock_qty || 0)))));
+    };
+
+    const cancelStockEdit = () => {
+        setEditingStockId(null);
+        setEditingStockValue('');
+        setSavingStockId(null);
     };
 
     const saveManualPrice = async (item: InventoryItem) => {
@@ -434,6 +454,39 @@ const Inventory = () => {
             console.error('Error updating inventory price:', error);
             alert(`No se pudo actualizar el precio: ${error.message}`);
             setSavingPriceId(null);
+        }
+    };
+
+    const saveManualStock = async (item: InventoryItem) => {
+        if (!canManageInventory) return;
+
+        const parsedStock = Number(editingStockValue || 0);
+        const nextStock = Math.max(0, Math.trunc(parsedStock));
+        if (!Number.isFinite(parsedStock)) {
+            alert('Debes ingresar un stock válido.');
+            return;
+        }
+
+        setSavingStockId(item.id);
+        try {
+            const { error } = await supabase
+                .from('inventory')
+                .update({ stock_qty: nextStock })
+                .eq('id', item.id);
+
+            if (error) throw error;
+
+            setItems((prev) => prev.map((row) => (
+                row.id === item.id
+                    ? { ...row, stock_qty: nextStock }
+                    : row
+            )));
+            cancelStockEdit();
+            alert('Stock actualizado manualmente.');
+        } catch (error: any) {
+            console.error('Error updating inventory stock:', error);
+            alert(`No se pudo actualizar el stock: ${error.message}`);
+            setSavingStockId(null);
         }
     };
 
@@ -617,9 +670,63 @@ const Inventory = () => {
                                         {item.sku || '---'}
                                     </td>
                                     <td className="px-6 py-5 text-center">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${(item.stock_qty || 0) < 5 ? 'bg-orange-50 text-orange-600 border-orange-100' : 'bg-green-50 text-green-600 border-green-100'}`}>
-                                            {item.stock_qty} uds
-                                        </span>
+                                        {canManageInventory && editingStockId === item.id ? (
+                                            <div className="flex items-center justify-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="1"
+                                                    className="w-24 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-sm font-bold text-center text-gray-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                    value={editingStockValue}
+                                                    onChange={(e) => setEditingStockValue(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                            void saveManualStock(item);
+                                                        }
+                                                        if (e.key === 'Escape') {
+                                                            e.preventDefault();
+                                                            cancelStockEdit();
+                                                        }
+                                                    }}
+                                                    autoFocus
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void saveManualStock(item)}
+                                                    disabled={savingStockId === item.id}
+                                                    className="rounded-lg bg-emerald-50 p-2 text-emerald-600 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                                                    title="Guardar stock"
+                                                >
+                                                    <Check size={16} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={cancelStockEdit}
+                                                    disabled={savingStockId === item.id}
+                                                    className="rounded-lg bg-gray-100 p-2 text-gray-500 transition-colors hover:bg-gray-200 disabled:opacity-50"
+                                                    title="Cancelar edición"
+                                                >
+                                                    <X size={16} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center justify-center gap-2">
+                                                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${(item.stock_qty || 0) < 5 ? 'bg-orange-50 text-orange-600 border-orange-100' : 'bg-green-50 text-green-600 border-green-100'}`}>
+                                                    {item.stock_qty} uds
+                                                </span>
+                                                {canManageInventory && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => startStockEdit(item)}
+                                                        className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                                        title="Editar stock manualmente"
+                                                    >
+                                                        <Pencil size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </td>
                                     {!isSellerReadOnly && (
                                         <td className="px-6 py-5 text-center text-sm font-bold text-gray-900">
