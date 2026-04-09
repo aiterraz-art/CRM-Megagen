@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, MapPin, ChevronRight, Phone, Mail, Trash2, Building2, Pencil, Send, Paperclip, X, FileText, Upload, AlertCircle, Users, UserCircle2, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, MapPin, ChevronRight, Phone, Mail, Trash2, Building2, Pencil, Send, Paperclip, X, FileText, Upload, AlertCircle, Users, UserCircle2, RefreshCw, CheckCircle2, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Database } from '../types/supabase';
 import { Link } from 'react-router-dom';
@@ -957,6 +957,58 @@ const ClientsContent = () => {
         XLSX.writeFile(wb, 'clientes_dias_credito.xlsx');
     };
 
+    const exportClientsList = () => {
+        if (filteredClients.length === 0) {
+            alert('No hay clientes visibles para exportar.');
+            return;
+        }
+
+        const exportRows = filteredClients.map((client) => ({
+            ID: client.id,
+            RUT: normalizeRut(client.rut || ''),
+            'Razón Social': client.name,
+            Estado: client.status || '',
+            Giro: client.giro || '',
+            Dirección: client.address || '',
+            'Oficina / Depto': client.office || '',
+            Comuna: client.comuna || '',
+            Teléfono: client.phone || '',
+            Email: client.email || '',
+            Contacto: client.purchase_contact || '',
+            'Días de Crédito': client.credit_days ?? 0,
+            'Última visita': client.last_visit_date ? new Date(client.last_visit_date).toLocaleDateString('es-CL') : '',
+            'Días sin visita': neglectedData[client.id] ?? '',
+            'Vendedor Asignado': ownersById[client.created_by || ''] || client.pending_seller_email || 'Sin asignar',
+            Notas: client.notes || ''
+        }));
+
+        const workbook = XLSX.utils.book_new();
+        const worksheet = XLSX.utils.json_to_sheet(exportRows, {
+            header: [
+                'ID',
+                'RUT',
+                'Razón Social',
+                'Estado',
+                'Giro',
+                'Dirección',
+                'Oficina / Depto',
+                'Comuna',
+                'Teléfono',
+                'Email',
+                'Contacto',
+                'Días de Crédito',
+                'Última visita',
+                'Días sin visita',
+                'Vendedor Asignado',
+                'Notas'
+            ]
+        });
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Clientes');
+
+        const timestamp = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(workbook, `clientes_export_${timestamp}.xlsx`);
+    };
+
     const handleCreditDaysUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -1191,6 +1243,15 @@ const ClientsContent = () => {
                             </button>
                         </>
                     )}
+
+                    <button
+                        onClick={exportClientsList}
+                        className="bg-white text-gray-700 px-4 py-4 rounded-2xl font-bold flex items-center border border-gray-200 hover:bg-gray-50 transition-all text-sm"
+                        title="Exportar clientes visibles"
+                    >
+                        <Download size={18} className="mr-2" />
+                        Exportar
+                    </button>
 
                     {canManageClientCredit && (
                         <>
