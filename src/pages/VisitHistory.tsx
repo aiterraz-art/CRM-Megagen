@@ -262,7 +262,6 @@ const VisitHistory = () => {
             setSellerScopeReady(false);
 
             try {
-                const { fromIso, toIso } = toRangeIso(filters.from, filters.to);
                 let scopedProfilesQuery = supabase
                     .from('profiles')
                     .select('id, full_name, email, role, supervisor_id');
@@ -281,8 +280,9 @@ const VisitHistory = () => {
                 let visitSellerIdsQuery = supabase
                     .from('visits')
                     .select('sales_rep_id')
-                    .gte('check_in_time', fromIso)
-                    .lte('check_in_time', toIso);
+                    .not('sales_rep_id', 'is', null)
+                    .order('check_in_time', { ascending: false })
+                    .limit(5000);
 
                 if (!canViewAllTeamVisits && scopeIds.length > 0) {
                     visitSellerIdsQuery = visitSellerIdsQuery.in('sales_rep_id', scopeIds);
