@@ -222,7 +222,9 @@ const VisitHistory = () => {
     const [loading, setLoading] = useState(true);
     const [filters, setFilters] = useState<VisitFilters>(() => parseFiltersFromSearchParams(searchParams));
 
-    const canViewAllTeamVisits = effectiveRole === 'admin' || hasPermission('VIEW_ALL_TEAM_STATS');
+    const canViewAllTeamVisits = effectiveRole === 'admin'
+        || effectiveRole === 'jefe'
+        || hasPermission('VIEW_ALL_TEAM_STATS');
     const canViewVisitSummary = effectiveRole === 'admin'
         || effectiveRole === 'jefe'
         || isSupervisor
