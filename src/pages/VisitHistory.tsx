@@ -51,6 +51,14 @@ interface SellerOption {
     email: string | null;
 }
 
+interface SellerProfileRow {
+    id: string;
+    full_name: string | null;
+    email: string | null;
+    role?: string | null;
+    supervisor_id?: string | null;
+}
+
 interface VisitFilters {
     from: string;
     to: string;
@@ -132,6 +140,15 @@ const isSellerLikeRole = (role: string | null | undefined) => {
 
 const getSellerDisplayName = (profile: { full_name?: string | null; email?: string | null } | null | undefined) =>
     profile?.full_name || profile?.email?.split('@')[0] || 'Vendedor';
+
+const mapProfileToSellerOption = (profile: SellerProfileRow | null | undefined): SellerOption | null => {
+    if (!profile?.id) return null;
+    return {
+        id: profile.id,
+        name: getSellerDisplayName(profile),
+        email: profile.email || null
+    };
+};
 
 const getVisitStatusLabel = (status: string | null | undefined) => {
     const normalized = normalizeVisitStatus(status);
@@ -259,48 +276,66 @@ const VisitHistory = () => {
                     new Set((scopedProfiles || []).map((item: any) => item.id).filter(Boolean))
                 );
 
-                let visitProfilesQuery = supabase
+                let visitSellerIdsQuery = supabase
                     .from('visits')
-                    .select('sales_rep_id, profiles:sales_rep_id(id, full_name, email, role)')
+                    .select('sales_rep_id')
                     .gte('check_in_time', fromIso)
                     .lte('check_in_time', toIso);
 
-                if (!canViewAllTeamVisits) {
-                    if (scopeIds.length === 0) {
-                        setSellerOptions([]);
-                        setSellerScopeIds([]);
-                        setSellerScopeReady(true);
-                        return;
-                    }
-
-                    visitProfilesQuery = visitProfilesQuery.in('sales_rep_id', scopeIds);
+                if (!canViewAllTeamVisits && scopeIds.length > 0) {
+                    visitSellerIdsQuery = visitSellerIdsQuery.in('sales_rep_id', scopeIds);
                 }
 
-                const { data: visitProfiles, error: visitProfilesError } = await visitProfilesQuery;
-                if (visitProfilesError) throw visitProfilesError;
+                const { data: visitSellerRows, error: visitSellerRowsError } = await visitSellerIdsQuery;
+                if (visitSellerRowsError) throw visitSellerRowsError;
+
+                const visitSellerIds = Array.from(
+                    new Set((visitSellerRows || []).map((row: any) => row.sales_rep_id).filter(Boolean))
+                );
+
+                let visitProfiles: SellerProfileRow[] = [];
+                if (visitSellerIds.length > 0) {
+                    const { data: visitProfilesData, error: visitProfilesError } = await supabase
+                        .from('profiles')
+                        .select('id, full_name, email, role, supervisor_id')
+                        .in('id', visitSellerIds);
+
+                    if (visitProfilesError) throw visitProfilesError;
+                    visitProfiles = (visitProfilesData || []) as SellerProfileRow[];
+                }
+
+                let fallbackProfiles: SellerProfileRow[] = [];
+                if (!canViewAllTeamVisits && scopeIds.length === 0) {
+                    const { data: fallbackProfilesData, error: fallbackProfilesError } = await supabase
+                        .from('profiles')
+                        .select('id, full_name, email, role, supervisor_id');
+
+                    if (fallbackProfilesError) throw fallbackProfilesError;
+                    fallbackProfiles = (fallbackProfilesData || []) as SellerProfileRow[];
+                }
 
                 const sellersById = new Map<string, SellerOption>();
 
                 (scopedProfiles || []).forEach((item: any) => {
                     if (!item?.id || !isSellerLikeRole(item.role)) return;
-                    sellersById.set(item.id, {
-                        id: item.id,
-                        name: getSellerDisplayName(item),
-                        email: item.email || null
-                    });
+                    const sellerOption = mapProfileToSellerOption(item);
+                    if (!sellerOption) return;
+                    sellersById.set(sellerOption.id, sellerOption);
                 });
 
-                (visitProfiles || []).forEach((row: any) => {
-                    const relatedProfile = getRelatedRecord<any>(row.profiles);
-                    const sellerId = row.sales_rep_id || relatedProfile?.id;
-                    if (!sellerId) return;
-                    if (!canViewAllTeamVisits && !scopeIds.includes(sellerId)) return;
+                visitProfiles.forEach((profileRow) => {
+                    if (!profileRow?.id) return;
+                    if (!canViewAllTeamVisits && scopeIds.length > 0 && !scopeIds.includes(profileRow.id)) return;
+                    const sellerOption = mapProfileToSellerOption(profileRow);
+                    if (!sellerOption) return;
+                    sellersById.set(sellerOption.id, sellerOption);
+                });
 
-                    sellersById.set(sellerId, {
-                        id: sellerId,
-                        name: getSellerDisplayName(relatedProfile),
-                        email: relatedProfile?.email || null
-                    });
+                fallbackProfiles.forEach((profileRow) => {
+                    if (!profileRow?.id || !isSellerLikeRole(profileRow.role)) return;
+                    const sellerOption = mapProfileToSellerOption(profileRow);
+                    if (!sellerOption) return;
+                    sellersById.set(sellerOption.id, sellerOption);
                 });
 
                 const nextOptions = Array.from(sellersById.values()).sort((left, right) =>
@@ -308,6 +343,7 @@ const VisitHistory = () => {
                 );
                 const nextScopeIds = Array.from(new Set([
                     ...scopeIds,
+                    ...visitSellerIds,
                     ...nextOptions.map((item) => item.id)
                 ]));
 
@@ -336,12 +372,6 @@ const VisitHistory = () => {
 
             try {
                 const { fromIso, toIso } = toRangeIso(filters.from, filters.to);
-
-                if (!canViewAllTeamVisits && sellerScopeIds.length === 0) {
-                    setVisits([]);
-                    return;
-                }
-
                 let query = supabase
                     .from('visits')
                     .select(`
@@ -365,7 +395,7 @@ const VisitHistory = () => {
 
                 if (filters.seller !== 'all') {
                     query = query.eq('sales_rep_id', filters.seller);
-                } else if (!canViewAllTeamVisits) {
+                } else if (!canViewAllTeamVisits && sellerScopeIds.length > 0) {
                     query = query.in('sales_rep_id', sellerScopeIds);
                 }
 
