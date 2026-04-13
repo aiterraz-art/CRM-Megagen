@@ -133,7 +133,7 @@ const allMenuEntries: MenuEntry[] = [
     },
     {
         id: 'visits',
-        label: 'Historial',
+        label: 'Historial de Visitas',
         path: '/visits',
         icon: <ClipboardList size={20} />,
         group: 'prospection',
