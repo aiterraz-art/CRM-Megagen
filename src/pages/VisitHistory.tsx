@@ -56,7 +56,6 @@ interface SellerProfileRow {
     full_name: string | null;
     email: string | null;
     role?: string | null;
-    supervisor_id?: string | null;
 }
 
 interface VisitFilters {
@@ -264,7 +263,7 @@ const VisitHistory = () => {
             try {
                 let scopedProfilesQuery = supabase
                     .from('profiles')
-                    .select('id, full_name, email, role, supervisor_id');
+                    .select('id, full_name, email, role');
 
                 if (!canViewAllTeamVisits) {
                     scopedProfilesQuery = scopedProfilesQuery.eq('supervisor_id', profile.id);
@@ -299,7 +298,7 @@ const VisitHistory = () => {
                 if (visitSellerIds.length > 0) {
                     const { data: visitProfilesData, error: visitProfilesError } = await supabase
                         .from('profiles')
-                        .select('id, full_name, email, role, supervisor_id')
+                        .select('id, full_name, email, role')
                         .in('id', visitSellerIds);
 
                     if (visitProfilesError) throw visitProfilesError;
@@ -310,7 +309,7 @@ const VisitHistory = () => {
                 if (!canViewAllTeamVisits && scopeIds.length === 0) {
                     const { data: fallbackProfilesData, error: fallbackProfilesError } = await supabase
                         .from('profiles')
-                        .select('id, full_name, email, role, supervisor_id');
+                        .select('id, full_name, email, role');
 
                     if (fallbackProfilesError) throw fallbackProfilesError;
                     fallbackProfiles = (fallbackProfilesData || []) as SellerProfileRow[];
