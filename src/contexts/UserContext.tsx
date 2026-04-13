@@ -89,17 +89,25 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user) {
                 const email = session.user.email?.toLowerCase();
+                const normalizedSessionEmail = (session.user.email || '').toLowerCase();
 
                 // DOMAIN RESTRICTION CHECK
                 const allowedDomain = import.meta.env.VITE_ALLOWED_DOMAIN || '@imegagen.cl';
                 const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
 
+                const { data: whitelistEntry } = await supabase
+                    .from('user_whitelist')
+                    .select('role')
+                    .eq('email', normalizedSessionEmail)
+                    .maybeSingle();
+
                 const isOwner = email === ownerEmail;
                 const isAllowedDomain = email?.endsWith(allowedDomain);
+                const isInvitedEmail = !!whitelistEntry?.role;
 
-                if (!isOwner && !isAllowedDomain) {
+                if (!isOwner && !isAllowedDomain && !isInvitedEmail) {
                     await supabase.auth.signOut();
-                    alert(`ACCESO DENEGADO\n\nEsta es una plataforma privada.\nSolo se permiten cuentas corporativas ${allowedDomain}`);
+                    alert(`ACCESO DENEGADO\n\nEsta es una plataforma privada.\nSolo se permiten cuentas corporativas ${allowedDomain} o correos previamente invitados.`);
                     window.location.href = '/';
                     return;
                 }
@@ -109,7 +117,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 if (data && data.length > 0) {
                     let userProfile = data[0] as any as Profile;
-                    const normalizedSessionEmail = (session.user.email || '').toLowerCase();
 
                     const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
                     if (session.user.email === ownerEmail) {
@@ -119,12 +126,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                             role: 'admin'
                         };
                     } else if (userProfile.status === 'pending') {
-                        const { data: whitelistEntry } = await supabase
-                            .from('user_whitelist')
-                            .select('role')
-                            .eq('email', normalizedSessionEmail)
-                            .maybeSingle();
-
                         if (whitelistEntry) {
                             await supabase.from('profiles').update({
                                 status: 'active',
@@ -145,13 +146,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     };
                     setProfile(ownerProfile as any as Profile);
                 } else {
-                    // 2. CHECK WHITELIST (Security & Onboarding)
-                    const { data: whitelistEntry } = await supabase
-                        .from('user_whitelist')
-                        .select('role')
-                        .eq('email', (session.user.email || '').toLowerCase())
-                        .maybeSingle();
-
                     if (whitelistEntry) {
                         const newProfile = {
                             id: session.user.id,

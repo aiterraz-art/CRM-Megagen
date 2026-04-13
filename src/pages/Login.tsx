@@ -51,7 +51,7 @@ const Login = () => {
                     </button>
 
                     <p className="text-[10px] text-center text-gray-400 font-bold uppercase tracking-[0.1em] mt-4">
-                        Acceso Exclusivo {import.meta.env.VITE_ALLOWED_DOMAIN || "@imegagen.cl"}
+                        Acceso corporativo o por invitacion aprobada
                     </p>
                 </div>
 
