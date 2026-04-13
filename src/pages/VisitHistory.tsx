@@ -4,6 +4,7 @@ import { useUser } from '../contexts/UserContext';
 import {
     Calendar as CalendarIcon,
     ClipboardList,
+    Download,
     ExternalLink,
     Filter,
     MapPin,
@@ -16,6 +17,7 @@ import {
 import { differenceInMinutes, format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Navigate, useSearchParams } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import { isProspectStatus } from '../utils/prospect';
 
 type VisitStatusFilter = 'all' | 'in_progress' | 'completed' | 'cancelled';
@@ -467,6 +469,39 @@ const VisitHistory = () => {
             || buildLocationLabel(visit).toLowerCase().includes(query);
     });
 
+    const handleExportExcel = () => {
+        if (filteredVisits.length === 0) {
+            alert('No hay visitas para exportar con los filtros actuales.');
+            return;
+        }
+
+        const rows = filteredVisits.map((visit) => ({
+            fecha: format(parseISO(visit.check_in_time), 'yyyy-MM-dd'),
+            hora_inicio: formatHour(visit.check_in_time),
+            hora_termino: formatHour(visit.check_out_time),
+            duracion: calculateDuration(visit.check_in_time, visit.check_out_time, visit.status),
+            vendedor: visit.sales_rep_name,
+            email_vendedor: visit.sales_rep_email || '',
+            tipo_visita: getVisitTypeLabel(visit),
+            cliente: visit.client_name,
+            doctor: visit.doctor_name || '',
+            ubicacion: buildLocationLabel(visit),
+            estado: getVisitStatusLabel(visit.status),
+            notas: visit.notes || '',
+            lat_checkin: visit.lat ?? '',
+            lng_checkin: visit.lng ?? '',
+            lat_checkout: visit.check_out_lat ?? '',
+            lng_checkout: visit.check_out_lng ?? ''
+        }));
+
+        const workbook = XLSX.utils.book_new();
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Visitas');
+
+        const scopeLabel = filters.type === 'cold_visit' ? 'visitas_frio' : 'visitas';
+        XLSX.writeFile(workbook, `${scopeLabel}_${filters.from}_${filters.to}.xlsx`);
+    };
+
     if (!canViewVisitSummary) return <Navigate to="/" replace />;
 
     return (
@@ -476,8 +511,19 @@ const VisitHistory = () => {
                     <h1 className="text-4xl font-black text-gray-900 tracking-tight mb-2">Historial de Visitas</h1>
                     <p className="text-gray-500 font-medium">Seguimiento diario del equipo con foco en visitas en frio.</p>
                 </div>
-                <div className="text-xs font-black uppercase tracking-widest text-dental-600 bg-dental-50 px-4 py-3 rounded-2xl border border-dental-100">
-                    {filteredVisits.length} registros
+                <div className="flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={handleExportExcel}
+                        disabled={loading || filteredVisits.length === 0}
+                        className="px-4 py-3 bg-white border border-gray-100 rounded-2xl text-gray-700 font-black text-xs uppercase tracking-widest shadow-sm hover:bg-gray-50 transition-all inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <Download size={16} />
+                        Excel
+                    </button>
+                    <div className="text-xs font-black uppercase tracking-widest text-dental-600 bg-dental-50 px-4 py-3 rounded-2xl border border-dental-100">
+                        {filteredVisits.length} registros
+                    </div>
                 </div>
             </div>
 
