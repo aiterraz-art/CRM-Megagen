@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     AlertTriangle,
@@ -47,6 +47,16 @@ type ShipmentItemFormRow = {
     skuSnapshot: string;
     productNameSnapshot: string;
     qty: number;
+};
+
+type ShipmentFormState = ReturnType<typeof createEmptyShipmentForm>;
+
+type PersistedShipmentDraft = {
+    activeTab: ProcurementTab;
+    editingShipment: ShipmentRow | null;
+    shipmentForm: ShipmentFormState;
+    shipmentPasteInput: string;
+    showShipmentModal: boolean;
 };
 
 const REQUEST_REASON_LABELS: Record<RequestReason, string> = {
@@ -117,6 +127,34 @@ const createEmptyShipmentForm = () => ({
     status: 'in_transit' as ShipmentStatus,
     notes: '',
     items: [{ localId: crypto.randomUUID(), productId: '', skuSnapshot: '', productNameSnapshot: '', qty: 1 }] as ShipmentItemFormRow[]
+});
+
+const PROCUREMENT_SHIPMENT_DRAFT_KEY = 'procurement-shipment-draft';
+
+const normalizeShipmentItems = (items?: ShipmentItemFormRow[]) => {
+    if (!Array.isArray(items) || items.length === 0) {
+        return createEmptyShipmentForm().items;
+    }
+
+    return items.map((item) => ({
+        localId: item.localId || crypto.randomUUID(),
+        productId: item.productId || '',
+        skuSnapshot: item.skuSnapshot || '',
+        productNameSnapshot: item.productNameSnapshot || '',
+        qty: Math.max(1, Number(item.qty || 1))
+    }));
+};
+
+const normalizeShipmentForm = (value?: Partial<ShipmentFormState>): ShipmentFormState => ({
+    supplierName: value?.supplierName || '',
+    originCountry: value?.originCountry || '',
+    originCity: value?.originCity || '',
+    transportMode: value?.transportMode === 'air' ? 'air' : 'sea',
+    departureDate: value?.departureDate || '',
+    etaDate: value?.etaDate || '',
+    status: value?.status || 'in_transit',
+    notes: value?.notes || '',
+    items: normalizeShipmentItems(value?.items)
 });
 
 const formatDate = (value?: string | null) => {
@@ -228,6 +266,7 @@ const Procurement: React.FC = () => {
         linkedShipmentId: '',
         managerNote: ''
     });
+    const hasRestoredShipmentDraft = useRef(false);
 
     const profilesById = useMemo(() => new Map(profiles.map((row) => [row.id, row])), [profiles]);
     const shipmentsById = useMemo(() => new Map(shipments.map((row) => [row.id, row])), [shipments]);
@@ -310,6 +349,59 @@ const Procurement: React.FC = () => {
 
         navigate(location.pathname, { replace: true, state: null });
     }, [location.pathname, location.state, navigate]);
+
+    useEffect(() => {
+        if (hasRestoredShipmentDraft.current || typeof window === 'undefined') return;
+
+        hasRestoredShipmentDraft.current = true;
+
+        const rawDraft = window.sessionStorage.getItem(PROCUREMENT_SHIPMENT_DRAFT_KEY);
+        if (!rawDraft) return;
+
+        try {
+            const parsedDraft = JSON.parse(rawDraft) as Partial<PersistedShipmentDraft>;
+
+            if (parsedDraft.activeTab === 'requests' || parsedDraft.activeTab === 'shipments') {
+                setActiveTab(parsedDraft.activeTab);
+            }
+
+            if (parsedDraft.editingShipment) {
+                setEditingShipment(parsedDraft.editingShipment);
+            }
+
+            if (parsedDraft.shipmentForm) {
+                setShipmentForm(normalizeShipmentForm(parsedDraft.shipmentForm));
+            }
+
+            if (typeof parsedDraft.shipmentPasteInput === 'string') {
+                setShipmentPasteInput(parsedDraft.shipmentPasteInput);
+            }
+
+            setShowShipmentModal(Boolean(parsedDraft.showShipmentModal));
+        } catch (error) {
+            console.error('Error restoring procurement shipment draft:', error);
+            window.sessionStorage.removeItem(PROCUREMENT_SHIPMENT_DRAFT_KEY);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!hasRestoredShipmentDraft.current || typeof window === 'undefined') return;
+
+        if (!showShipmentModal) {
+            window.sessionStorage.removeItem(PROCUREMENT_SHIPMENT_DRAFT_KEY);
+            return;
+        }
+
+        const draftToPersist: PersistedShipmentDraft = {
+            activeTab,
+            editingShipment,
+            shipmentForm,
+            shipmentPasteInput,
+            showShipmentModal: true
+        };
+
+        window.sessionStorage.setItem(PROCUREMENT_SHIPMENT_DRAFT_KEY, JSON.stringify(draftToPersist));
+    }, [activeTab, editingShipment, shipmentForm, shipmentPasteInput, showShipmentModal]);
 
     const activeShipments = useMemo(
         () => shipments.filter((shipment) => shipment.status !== 'in_warehouse'),
@@ -402,6 +494,17 @@ const Procurement: React.FC = () => {
         }
         setShipmentPasteInput('');
         setShowShipmentModal(true);
+    };
+
+    const closeShipmentModal = () => {
+        setShowShipmentModal(false);
+        setEditingShipment(null);
+        setShipmentForm(createEmptyShipmentForm());
+        setShipmentPasteInput('');
+
+        if (typeof window !== 'undefined') {
+            window.sessionStorage.removeItem(PROCUREMENT_SHIPMENT_DRAFT_KEY);
+        }
     };
 
     const handleSaveRequest = async (event: React.FormEvent) => {
@@ -631,10 +734,7 @@ const Procurement: React.FC = () => {
                 if (insertItemsError) throw insertItemsError;
             }
 
-            setShowShipmentModal(false);
-            setEditingShipment(null);
-            setShipmentForm(createEmptyShipmentForm());
-            setShipmentPasteInput('');
+            closeShipmentModal();
             await fetchProcurementData();
         } catch (error: any) {
             console.error('Error saving inbound shipment:', error);
@@ -1382,14 +1482,14 @@ const Procurement: React.FC = () => {
             )}
 
             {showShipmentModal && canManageProcurement && (
-                <div className="fixed inset-0 z-[225] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowShipmentModal(false)}>
+                <div className="fixed inset-0 z-[225] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeShipmentModal}>
                     <div className="w-full max-w-4xl rounded-[2rem] bg-white shadow-2xl max-h-[92vh] overflow-hidden" onClick={(event) => event.stopPropagation()}>
                         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
                             <div>
                                 <p className="text-[11px] font-black uppercase tracking-[0.3em] text-sky-500">{editingShipment ? 'Editar' : 'Nueva'}</p>
                                 <h3 className="text-2xl font-black text-slate-900">Importación en tránsito</h3>
                             </div>
-                            <button onClick={() => setShowShipmentModal(false)} className="rounded-2xl bg-slate-100 p-3 text-slate-500 transition-all hover:bg-slate-200">
+                            <button onClick={closeShipmentModal} className="rounded-2xl bg-slate-100 p-3 text-slate-500 transition-all hover:bg-slate-200">
                                 <X size={18} />
                             </button>
                         </div>
@@ -1592,7 +1692,7 @@ const Procurement: React.FC = () => {
                             </div>
 
                             <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:justify-end">
-                                <button type="button" onClick={() => setShowShipmentModal(false)} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">
+                                <button type="button" onClick={closeShipmentModal} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">
                                     Cancelar
                                 </button>
                                 <button type="submit" disabled={savingShipment} className="rounded-2xl bg-slate-900 px-5 py-3 font-black text-white shadow-lg shadow-slate-200 disabled:opacity-60">
