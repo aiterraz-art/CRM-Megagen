@@ -723,6 +723,18 @@ const Quotations: React.FC = () => {
         };
     }, [getQuotationCreditDays]);
 
+    const syncOrderNotesFromQuotation = useCallback(async (orderId: string | null | undefined, quotation: any) => {
+        const normalizedComments = String(quotation?.comments || '').trim();
+        if (!orderId || !normalizedComments) return;
+
+        const { error } = await supabase
+            .from('orders')
+            .update({ notes: normalizedComments })
+            .eq('id', orderId);
+
+        if (error) throw error;
+    }, []);
+
     const openConversionHistory = useCallback(async (quotation: any) => {
         if (!canViewOrderConversionTrace) return;
         setConversionHistoryQuotation(quotation);
@@ -1399,6 +1411,7 @@ const Quotations: React.FC = () => {
             }
 
             createdOrderId = response?.order_id || null;
+            await syncOrderNotesFromQuotation(createdOrderId, quotation);
             const orderFolio = response?.order_folio || response?.order_id?.slice?.(0, 8) || 'N/A';
 
             try {
@@ -1527,6 +1540,7 @@ const Quotations: React.FC = () => {
         getQuotationCreditDays,
         effectiveRole,
         profile?.id,
+        syncOrderNotesFromQuotation,
         uploadPaymentProof,
         validatePaymentProofFile
     ]);

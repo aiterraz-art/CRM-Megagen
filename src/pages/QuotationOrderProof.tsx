@@ -196,6 +196,18 @@ const QuotationOrderProof = () => {
         };
     }, [getQuotationCreditDays]);
 
+    const syncOrderNotesFromQuotation = useCallback(async (orderId: string | null | undefined, quote: any) => {
+        const normalizedComments = String(quote?.comments || '').trim();
+        if (!orderId || !normalizedComments) return;
+
+        const { error } = await supabase
+            .from('orders')
+            .update({ notes: normalizedComments })
+            .eq('id', orderId);
+
+        if (error) throw error;
+    }, []);
+
     useEffect(() => {
         const fetchQuotation = async () => {
             if (!quotationId) {
@@ -491,6 +503,7 @@ const QuotationOrderProof = () => {
 
             const response = (rpcResponse.data || {}) as any;
             createdOrderId = response?.order_id || null;
+            await syncOrderNotesFromQuotation(createdOrderId, quotation);
             const orderFolio = response?.order_folio || response?.order_id?.slice?.(0, 8) || 'N/A';
 
             await logQuotationOrderConversionSafe({
@@ -587,6 +600,7 @@ const QuotationOrderProof = () => {
         paymentProofFile,
         profile?.id,
         quotation,
+        syncOrderNotesFromQuotation,
         uploadPaymentProof,
         validatePaymentProofFile,
     ]);
