@@ -48,6 +48,31 @@ const sanitizeFileName = (value: string) =>
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-zA-Z0-9._-]+/g, '_');
 
+const normalizeSearchText = (value: string | null | undefined) =>
+    String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+const toComparableTime = (value: string | null | undefined) => {
+    if (!value) return 0;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const compareValues = (left: string | number, right: string | number, direction: 'asc' | 'desc') => {
+    let comparison = 0;
+
+    if (typeof left === 'number' && typeof right === 'number') {
+        comparison = left - right;
+    } else {
+        comparison = String(left).localeCompare(String(right), 'es', { sensitivity: 'base', numeric: true });
+    }
+
+    return direction === 'asc' ? comparison : comparison * -1;
+};
+
 const Collections = () => {
     const { profile, effectiveRole, hasPermission } = useUser();
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -71,7 +96,16 @@ const Collections = () => {
     const [proofUploadingId, setProofUploadingId] = useState<string | null>(null);
     const [proofOpeningId, setProofOpeningId] = useState<string | null>(null);
     const [sellerFilter, setSellerFilter] = useState<string>('all');
-    const [amountSort, setAmountSort] = useState<'highest' | 'lowest'>('highest');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchScope, setSearchScope] = useState<'all' | 'client' | 'invoice'>('all');
+    const [activeStatusFilter, setActiveStatusFilter] = useState<string>('all');
+    const [agingFilter, setAgingFilter] = useState<'all' | 'overdue' | 'upcoming' | 'critical_30' | 'critical_90'>('all');
+    const [commentFilter, setCommentFilter] = useState<'all' | 'with_comment' | 'without_comment'>('all');
+    const [proofFilter, setProofFilter] = useState<'all' | 'with_proof' | 'without_proof'>('all');
+    const [activeSortField, setActiveSortField] = useState<'outstanding_amount' | 'amount' | 'due_date' | 'aging_days' | 'client_name' | 'document_number'>('outstanding_amount');
+    const [activeSortDirection, setActiveSortDirection] = useState<'asc' | 'desc'>('desc');
+    const [paidSortField, setPaidSortField] = useState<'amount' | 'paid_detected_at' | 'due_date' | 'client_name' | 'document_number'>('paid_detected_at');
+    const [paidSortDirection, setPaidSortDirection] = useState<'asc' | 'desc'>('desc');
     const [existingClientRutSet, setExistingClientRutSet] = useState<Set<string>>(new Set());
     const [clientCreationContext, setClientCreationContext] = useState<{ row: any; sellerId: string } | null>(null);
     const [proofTargetRow, setProofTargetRow] = useState<any | null>(null);
@@ -122,32 +156,125 @@ const Collections = () => {
     }, [allPaidRows, isSeller, profile?.email, profile?.id]);
 
     const filteredRows = useMemo(() => {
+        const normalizedQuery = normalizeSearchText(searchQuery);
         const base = !canFilterBySeller || sellerFilter === 'all'
             ? rows
             : sellerFilter === '__unassigned__'
                 ? rows.filter((row) => !row.seller_id && !normalizeEmail(row.seller_email))
                 : rows.filter((row) => row.seller_id === sellerFilter);
 
-        return [...base].sort((a, b) => {
-            const aAmount = Number(a.outstanding_amount || a.amount || 0);
-            const bAmount = Number(b.outstanding_amount || b.amount || 0);
-            return amountSort === 'highest' ? bAmount - aAmount : aAmount - bAmount;
+        const filtered = base.filter((row) => {
+            const clientHaystack = normalizeSearchText([row.client_name, row.client_rut].filter(Boolean).join(' '));
+            const invoiceHaystack = normalizeSearchText([row.document_number, row.status].filter(Boolean).join(' '));
+            const genericHaystack = normalizeSearchText([
+                row.client_name,
+                row.client_rut,
+                row.document_number,
+                row.status,
+                row.seller_name,
+                row.seller_email,
+                row.seller_comment
+            ].filter(Boolean).join(' '));
+
+            if (normalizedQuery) {
+                if (searchScope === 'client' && !clientHaystack.includes(normalizedQuery)) return false;
+                if (searchScope === 'invoice' && !invoiceHaystack.includes(normalizedQuery)) return false;
+                if (searchScope === 'all' && !genericHaystack.includes(normalizedQuery)) return false;
+            }
+
+            if (activeStatusFilter !== 'all' && String(row.status || '') !== activeStatusFilter) return false;
+
+            const agingDays = Number(row.aging_days || 0);
+            if (agingFilter === 'overdue' && agingDays <= 0) return false;
+            if (agingFilter === 'upcoming' && agingDays > 0) return false;
+            if (agingFilter === 'critical_30' && agingDays < 30) return false;
+            if (agingFilter === 'critical_90' && agingDays < 90) return false;
+
+            const hasComment = Boolean(String(row.seller_comment || '').trim());
+            if (commentFilter === 'with_comment' && !hasComment) return false;
+            if (commentFilter === 'without_comment' && hasComment) return false;
+
+            const hasProof = Boolean(row.payment_proof_path);
+            if (proofFilter === 'with_proof' && !hasProof) return false;
+            if (proofFilter === 'without_proof' && hasProof) return false;
+
+            return true;
         });
-    }, [rows, canFilterBySeller, sellerFilter, amountSort]);
+
+        return [...filtered].sort((a, b) => {
+            switch (activeSortField) {
+                case 'amount':
+                    return compareValues(Number(a.amount || 0), Number(b.amount || 0), activeSortDirection);
+                case 'due_date':
+                    return compareValues(toComparableTime(a.due_date), toComparableTime(b.due_date), activeSortDirection);
+                case 'aging_days':
+                    return compareValues(Number(a.aging_days || 0), Number(b.aging_days || 0), activeSortDirection);
+                case 'client_name':
+                    return compareValues(String(a.client_name || ''), String(b.client_name || ''), activeSortDirection);
+                case 'document_number':
+                    return compareValues(String(a.document_number || ''), String(b.document_number || ''), activeSortDirection);
+                case 'outstanding_amount':
+                default:
+                    return compareValues(Number(a.outstanding_amount || a.amount || 0), Number(b.outstanding_amount || b.amount || 0), activeSortDirection);
+            }
+        });
+    }, [
+        rows,
+        canFilterBySeller,
+        sellerFilter,
+        searchQuery,
+        searchScope,
+        activeStatusFilter,
+        agingFilter,
+        commentFilter,
+        proofFilter,
+        activeSortField,
+        activeSortDirection
+    ]);
 
     const filteredPaidRows = useMemo(() => {
+        const normalizedQuery = normalizeSearchText(searchQuery);
         const base = !canFilterBySeller || sellerFilter === 'all'
             ? paidRows
             : sellerFilter === '__unassigned__'
                 ? paidRows.filter((row) => !row.seller_id && !normalizeEmail(row.seller_email))
                 : paidRows.filter((row) => row.seller_id === sellerFilter);
 
-        return [...base].sort((a, b) => {
-            const aAmount = Number(a.amount || 0);
-            const bAmount = Number(b.amount || 0);
-            return amountSort === 'highest' ? bAmount - aAmount : aAmount - bAmount;
+        const filtered = base.filter((row) => {
+            if (!normalizedQuery) return true;
+
+            const clientHaystack = normalizeSearchText([row.client_name, row.client_rut].filter(Boolean).join(' '));
+            const invoiceHaystack = normalizeSearchText([row.document_number].filter(Boolean).join(' '));
+            const genericHaystack = normalizeSearchText([
+                row.client_name,
+                row.client_rut,
+                row.document_number,
+                row.seller_name,
+                row.seller_email,
+                row.seller_comment
+            ].filter(Boolean).join(' '));
+
+            if (searchScope === 'client') return clientHaystack.includes(normalizedQuery);
+            if (searchScope === 'invoice') return invoiceHaystack.includes(normalizedQuery);
+            return genericHaystack.includes(normalizedQuery);
         });
-    }, [paidRows, canFilterBySeller, sellerFilter, amountSort]);
+
+        return [...filtered].sort((a, b) => {
+            switch (paidSortField) {
+                case 'due_date':
+                    return compareValues(toComparableTime(a.due_date), toComparableTime(b.due_date), paidSortDirection);
+                case 'client_name':
+                    return compareValues(String(a.client_name || ''), String(b.client_name || ''), paidSortDirection);
+                case 'document_number':
+                    return compareValues(String(a.document_number || ''), String(b.document_number || ''), paidSortDirection);
+                case 'amount':
+                    return compareValues(Number(a.amount || 0), Number(b.amount || 0), paidSortDirection);
+                case 'paid_detected_at':
+                default:
+                    return compareValues(toComparableTime(a.paid_detected_at), toComparableTime(b.paid_detected_at), paidSortDirection);
+            }
+        });
+    }, [paidRows, canFilterBySeller, sellerFilter, searchQuery, searchScope, paidSortField, paidSortDirection]);
 
     const filteredSummary = useMemo(() => {
         const base = !canFilterBySeller || sellerFilter === 'all'
@@ -177,6 +304,11 @@ const Collections = () => {
 
         return options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
     }, [sellerOptions, rows]);
+
+    const activeStatusOptions = useMemo(() => {
+        return Array.from(new Set(rows.map((row) => String(row.status || '').trim()).filter(Boolean)))
+            .sort((a, b) => a.localeCompare(b, 'es'));
+    }, [rows]);
 
     const fetchData = async () => {
         setLoading(true);
@@ -292,7 +424,7 @@ const Collections = () => {
     };
 
     const downloadCurrent = () => {
-        const exportRows = rows.map((row) => ({
+        const exportRows = filteredRows.map((row) => ({
             seller_email: row.seller_email || '',
             seller_name: row.seller_name || '',
             client_name: row.client_name || '',
@@ -309,6 +441,20 @@ const Collections = () => {
         const wb = utils.book_new();
         utils.book_append_sheet(wb, ws, 'cobranzas_activas');
         writeFile(wb, isSeller ? 'mis_cobranzas.xlsx' : 'cobranzas_activas.xlsx');
+    };
+
+    const resetFilters = () => {
+        setSellerFilter('all');
+        setSearchQuery('');
+        setSearchScope('all');
+        setActiveStatusFilter('all');
+        setAgingFilter('all');
+        setCommentFilter('all');
+        setProofFilter('all');
+        setActiveSortField('outstanding_amount');
+        setActiveSortDirection('desc');
+        setPaidSortField('paid_detected_at');
+        setPaidSortDirection('desc');
     };
 
     const downloadRejected = () => {
@@ -686,13 +832,46 @@ const Collections = () => {
 
             </div>
 
-            {canFilterBySeller && (
-                <div className="bg-white border rounded-2xl p-4 space-y-3">
+            <div className="bg-white border rounded-2xl p-4 space-y-4">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div>
                         <h3 className="font-black text-lg">Filtros y orden</h3>
-                        <p className="text-sm text-gray-500">Disponible para tesorería, facturación, admins y jefaturas comerciales.</p>
+                        <p className="text-sm text-gray-500">Busca por cliente o factura, prioriza montos y depura cartera activa e historial pagado.</p>
                     </div>
-                    <div className="grid md:grid-cols-2 gap-3">
+                    <button
+                        onClick={resetFilters}
+                        className="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700"
+                    >
+                        Limpiar filtros
+                    </button>
+                </div>
+
+                <div className="grid md:grid-cols-3 gap-3">
+                    <div className="md:col-span-2">
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Buscar</label>
+                        <input
+                            value={searchQuery}
+                            onChange={(ev) => setSearchQuery(ev.target.value)}
+                            placeholder="Cliente, RUT, factura, vendedor o comentario..."
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Campo de búsqueda</label>
+                        <select
+                            value={searchScope}
+                            onChange={(ev) => setSearchScope(ev.target.value as 'all' | 'client' | 'invoice')}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="all">Todos los campos</option>
+                            <option value="client">Solo cliente</option>
+                            <option value="invoice">Solo factura / documento</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+                    {canFilterBySeller && (
                         <div>
                             <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Filtrar por vendedor</label>
                             <select
@@ -707,20 +886,129 @@ const Collections = () => {
                                 ))}
                             </select>
                         </div>
-                        <div>
-                            <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Ordenar por cobranza</label>
-                            <select
-                                value={amountSort}
-                                onChange={(ev) => setAmountSort(ev.target.value as 'highest' | 'lowest')}
-                                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
-                            >
-                                <option value="highest">Mayor saldo primero</option>
-                                <option value="lowest">Menor saldo primero</option>
-                            </select>
-                        </div>
+                    )}
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Estado documento</label>
+                        <select
+                            value={activeStatusFilter}
+                            onChange={(ev) => setActiveStatusFilter(ev.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="all">Todos los estados</option>
+                            {activeStatusOptions.map((status) => (
+                                <option key={status} value={status}>{status}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Antigüedad</label>
+                        <select
+                            value={agingFilter}
+                            onChange={(ev) => setAgingFilter(ev.target.value as 'all' | 'overdue' | 'upcoming' | 'critical_30' | 'critical_90')}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="all">Todas</option>
+                            <option value="overdue">Solo vencidas</option>
+                            <option value="upcoming">Aún no vencidas</option>
+                            <option value="critical_30">Mora 30+ días</option>
+                            <option value="critical_90">Mora 90+ días</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Comprobante</label>
+                        <select
+                            value={proofFilter}
+                            onChange={(ev) => setProofFilter(ev.target.value as 'all' | 'with_proof' | 'without_proof')}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="all">Todos</option>
+                            <option value="with_proof">Con comprobante</option>
+                            <option value="without_proof">Sin comprobante</option>
+                        </select>
                     </div>
                 </div>
-            )}
+
+                <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Descargo</label>
+                        <select
+                            value={commentFilter}
+                            onChange={(ev) => setCommentFilter(ev.target.value as 'all' | 'with_comment' | 'without_comment')}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="all">Todos</option>
+                            <option value="with_comment">Con descargo</option>
+                            <option value="without_comment">Sin descargo</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Orden activos por</label>
+                        <select
+                            value={activeSortField}
+                            onChange={(ev) => setActiveSortField(ev.target.value as 'outstanding_amount' | 'amount' | 'due_date' | 'aging_days' | 'client_name' | 'document_number')}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="outstanding_amount">Saldo pendiente</option>
+                            <option value="amount">Monto documento</option>
+                            <option value="due_date">Fecha vencimiento</option>
+                            <option value="aging_days">Días de mora</option>
+                            <option value="client_name">Cliente</option>
+                            <option value="document_number">Factura / documento</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Dirección activos</label>
+                        <select
+                            value={activeSortDirection}
+                            onChange={(ev) => setActiveSortDirection(ev.target.value as 'asc' | 'desc')}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="desc">Descendente</option>
+                            <option value="asc">Ascendente</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Orden historial por</label>
+                        <select
+                            value={paidSortField}
+                            onChange={(ev) => setPaidSortField(ev.target.value as 'amount' | 'paid_detected_at' | 'due_date' | 'client_name' | 'document_number')}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="paid_detected_at">Fecha pagado detectado</option>
+                            <option value="amount">Monto documento</option>
+                            <option value="due_date">Fecha vencimiento</option>
+                            <option value="client_name">Cliente</option>
+                            <option value="document_number">Factura / documento</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="grid md:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-xl bg-gray-50 border">
+                        <p className="text-xs text-gray-500">Activos filtrados</p>
+                        <p className="text-xl font-black">{filteredRows.length}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-gray-50 border">
+                        <p className="text-xs text-gray-500">Histórico filtrado</p>
+                        <p className="text-xl font-black">{filteredPaidRows.length}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-gray-50 border">
+                        <p className="text-xs text-gray-500">Saldo activo filtrado</p>
+                        <p className="text-xl font-black">${totals.outstanding.toLocaleString('es-CL')}</p>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 mb-2">Dirección historial</label>
+                        <select
+                            value={paidSortDirection}
+                            onChange={(ev) => setPaidSortDirection(ev.target.value as 'asc' | 'desc')}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        >
+                            <option value="desc">Descendente</option>
+                            <option value="asc">Ascendente</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
 
             <div className="grid lg:grid-cols-3 gap-4">
                 <div className="bg-white border rounded-2xl p-4 lg:col-span-1">
