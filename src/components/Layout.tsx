@@ -431,6 +431,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                                     <option value="" className="text-gray-800">Ver como Admin</option>
                                     <option value="seller" className="text-gray-800">Ver como Vendedor</option>
                                     <option value="jefe" className="text-gray-800">Ver como Jefe</option>
+                                    <option value="bodega" className="text-gray-800">Ver como Bodega</option>
                                     <option value="facturador" className="text-gray-800">Ver como Facturador</option>
                                     <option value="tesorero" className="text-gray-800">Ver como Tesorero</option>
                                     <option value="driver" className="text-gray-800">Ver como Repartidor</option>

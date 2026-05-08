@@ -14,6 +14,7 @@ type InvitePayload = {
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
     jefe: ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS'],
+    bodega: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT'],
     facturador: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
     tesorero: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
     seller: ['VIEW_METAS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES'],
@@ -57,7 +58,7 @@ const Settings: React.FC = () => {
         if (normalized === 'administrativo') return 'facturador';
         return normalized;
     };
-    const roles = ['admin', 'jefe', 'facturador', 'tesorero', 'seller', 'driver'];
+    const roles = ['admin', 'jefe', 'bodega', 'facturador', 'tesorero', 'seller', 'driver'];
     const permissionList = [
         { key: 'UPLOAD_EXCEL', label: 'Cargar Excel', desc: 'Permite subir archivos de inventario, precios y despacho.' },
         { key: 'MANAGE_INVENTORY', label: 'Gestión Inventario', desc: 'Crear, editar y eliminar productos.' },
@@ -744,6 +745,7 @@ const Settings: React.FC = () => {
                                         className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black appearance-none focus:ring-4 focus:ring-indigo-500/10 transition-all uppercase"
                                     >
                                         <option value="seller">Vendedor</option>
+                                        <option value="bodega">Bodega</option>
                                         <option value="facturador">Facturador</option>
                                         <option value="tesorero">Tesorero</option>
                                         <option value="jefe">Jefe de Ventas</option>
