@@ -123,8 +123,6 @@ type RouteDetailItem = {
     address_source: 'client' | 'excel' | string | null;
 } & OrderFlowSnapshot;
 
-const ACTIVE_ROUTE_STATUSES = ['draft', 'in_progress', 'planning', 'active'];
-
 const normalizeText = (value: unknown) => String(value ?? '').trim();
 const normalizeInvoice = (value: unknown) => normalizeText(value);
 const normalizeRut = (value: unknown) => normalizeText(value).replace(/[^0-9kK]/g, '').toUpperCase();
@@ -443,7 +441,7 @@ const Dispatch: React.FC = () => {
         const { data: routesData, error: routesError } = await supabase
             .from('delivery_routes')
             .select('*')
-            .in('status', ACTIVE_ROUTE_STATUSES)
+            .neq('status', 'completed')
             .order('created_at', { ascending: false });
 
         if (routesError) throw routesError;
