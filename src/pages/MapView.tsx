@@ -545,7 +545,7 @@ const MapContent = () => {
                                         className="p-4 bg-gray-50 border border-transparent hover:border-indigo-100 hover:bg-white rounded-2xl cursor-pointer transition-all group"
                                     >
                                         <div className="flex justify-between items-start mb-2">
-                                        <p className="text-xs font-black text-gray-900">{loc.profile?.email?.split('@')?.[0] || 'sin email'}</p>
+                                            <p className="text-xs font-black text-gray-900">{loc.profile?.email?.split('@')?.[0] || 'sin email'}</p>
                                             <div className="flex items-center text-[10px] text-gray-400 font-bold bg-white px-2 py-1 rounded-lg">
                                                 <Clock size={10} className="mr-1" />
                                                 {formatTimestamp(loc.created_at)}
