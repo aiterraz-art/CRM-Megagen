@@ -100,7 +100,9 @@ const DeliveryRoute: React.FC = () => {
     const [activeRouteIds, setActiveRouteIds] = useState<string[]>([]);
     const [hasDraftRoutes, setHasDraftRoutes] = useState(false);
     const [startingRoute, setStartingRoute] = useState(false);
+    const [mapsApiLoaded, setMapsApiLoaded] = useState(false);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
+    const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
     const fetchRoute = async () => {
         setLoading(true);
@@ -243,6 +245,33 @@ const DeliveryRoute: React.FC = () => {
         alert(`📍 Teletransportado a: ${lat}, ${lng}`);
     };
 
+    const geocodeAddress = async (address: string) => {
+        const normalizedAddress = String(address || '').trim();
+        if (!normalizedAddress || typeof window === 'undefined' || !window.google?.maps?.Geocoder) return null;
+
+        const cacheKey = `delivery_geocode:${normalizedAddress.toLowerCase()}`;
+        const cached = typeof window !== 'undefined' ? window.sessionStorage.getItem(cacheKey) : null;
+        if (cached) {
+            try {
+                return JSON.parse(cached) as { lat: number; lng: number };
+            } catch {
+                // ignore invalid cache
+            }
+        }
+
+        const geocoder = new window.google.maps.Geocoder();
+        const addressForLookup = /chile/i.test(normalizedAddress) ? normalizedAddress : `${normalizedAddress}, Chile`;
+        const { results } = await geocoder.geocode({ address: addressForLookup });
+        const location = results?.[0]?.geometry?.location;
+        if (!location) return null;
+
+        const coords = { lat: location.lat(), lng: location.lng() };
+        if (typeof window !== 'undefined') {
+            window.sessionStorage.setItem(cacheKey, JSON.stringify(coords));
+        }
+        return coords;
+    };
+
     const handleStartRoutes = async () => {
         if (activeRouteIds.length === 0) return;
 
@@ -333,6 +362,55 @@ const DeliveryRoute: React.FC = () => {
             mounted = false;
         };
     }, [selectedOrder]);
+
+    useEffect(() => {
+        if (!mapsApiLoaded || orders.length === 0) return;
+
+        const ordersToResolve = orders.filter(
+            (order) => order?.client?.address && !order?.client?.coordsResolvedFromAddress && !order?.client?.coordsResolutionAttempted
+        );
+        if (ordersToResolve.length === 0) return;
+
+        let cancelled = false;
+
+        (async () => {
+            const resolvedEntries = await Promise.all(
+                ordersToResolve.map(async (order) => {
+                    try {
+                        const coords = await geocodeAddress(order.client.address);
+                        return [order.id, coords] as const;
+                    } catch (error) {
+                        console.warn('Address geocoding failed for delivery route:', order.client.address, error);
+                        return [order.id, null] as const;
+                    }
+                })
+            );
+
+            if (cancelled) return;
+
+            const resolvedMap = new Map<string, { lat: number; lng: number } | null>(resolvedEntries);
+            setOrders((prev) => prev.map((order) => {
+                const resolved = resolvedMap.get(order.id);
+                if (resolvedMap.has(order.id)) {
+                    return {
+                        ...order,
+                        client: {
+                            ...order.client,
+                            lat: resolved?.lat ?? order.client?.lat ?? null,
+                            lng: resolved?.lng ?? order.client?.lng ?? null,
+                            coordsResolvedFromAddress: Boolean(resolved),
+                            coordsResolutionAttempted: true
+                        }
+                    };
+                }
+                return order;
+            }));
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [mapsApiLoaded, orders]);
 
     const handleCompleteDelivery = async () => {
         if (!selectedOrder) return;
@@ -467,7 +545,12 @@ const DeliveryRoute: React.FC = () => {
     if (loading) return <div className="p-8 text-center">Cargando ruta...</div>;
 
     return (
-        <div className="pb-20">
+        <APIProvider
+            apiKey={googleMapsApiKey}
+            onLoad={() => setMapsApiLoaded(true)}
+            onError={(error) => console.error('Google Maps API failed to load in delivery route:', error)}
+        >
+            <div className="pb-20">
             {/* Header */}
             <div className="bg-slate-900 text-white p-6 rounded-b-[2rem] shadow-xl relative z-10">
                 <div className="flex justify-between items-center mb-4">
@@ -516,16 +599,17 @@ const DeliveryRoute: React.FC = () => {
             {/* Content */}
             {isMapMode ? (
                 <div className="h-[60vh] m-4 rounded-[2rem] overflow-hidden shadow-lg border border-gray-100">
-                    <APIProvider apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}>
-                        <GoogleMap
-                            defaultCenter={{ lat: -33.4489, lng: -70.6693 }}
-                            defaultZoom={12}
-                            mapId="DRIVER_MAP"
-                            className="w-full h-full"
-                        >
-                            <Directions orders={orders} userLocation={userLocation} />
+                    <GoogleMap
+                        defaultCenter={{ lat: -33.4489, lng: -70.6693 }}
+                        defaultZoom={12}
+                        mapId="DRIVER_MAP"
+                        className="w-full h-full"
+                    >
+                        <Directions orders={orders} userLocation={userLocation} />
 
-                            {orders.filter(o => o.client?.lat).map((order, index) => (
+                        {orders
+                            .filter((order) => Number.isFinite(Number(order.client?.lat)) && Number.isFinite(Number(order.client?.lng)))
+                            .map((order, index) => (
                                 <AdvancedMarker
                                     key={order.id}
                                     position={{ lat: Number(order.client.lat), lng: Number(order.client.lng) }}
@@ -546,8 +630,7 @@ const DeliveryRoute: React.FC = () => {
                                     />
                                 </AdvancedMarker>
                             ))}
-                        </GoogleMap>
-                    </APIProvider>
+                    </GoogleMap>
                 </div>
             ) : (
                 <div className="p-4 space-y-4">
@@ -685,7 +768,8 @@ const DeliveryRoute: React.FC = () => {
                     </div>
                 </div>
             )}
-        </div>
+            </div>
+        </APIProvider>
     );
 };
 
