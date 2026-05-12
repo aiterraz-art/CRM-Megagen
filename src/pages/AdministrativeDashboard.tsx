@@ -65,7 +65,7 @@ const AdministrativeDashboard = () => {
                 supabase
                     .from('delivery_routes')
                     .select('id, name, driver_id, created_at')
-                    .eq('status', 'in_progress')
+                    .in('status', ['draft', 'in_progress'])
                     .order('created_at', { ascending: false }),
                 supabase
                     .from('route_items')
@@ -83,7 +83,7 @@ const AdministrativeDashboard = () => {
                 supabase
                     .from('orders')
                     .select('id', { count: 'exact', head: true })
-                    .eq('delivery_status', 'out_for_delivery'),
+                    .in('delivery_status', ['assigned', 'out_for_delivery']),
                 supabase
                     .from('orders')
                     .select('id, folio, delivered_at, delivery_photo_url, client:clients(name, address)')

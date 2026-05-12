@@ -13,7 +13,7 @@ import OrderItemsPreviewModal, { type OrderItemsPreviewItem } from '../component
 import OrderPdfPreviewModal from '../components/modals/OrderPdfPreviewModal';
 
 type OrderStatusFilter = 'all' | 'completed' | 'cancelled';
-type DeliveryStatusFilter = 'all' | 'pending' | 'out_for_delivery' | 'delivered';
+type DeliveryStatusFilter = 'all' | 'pending' | 'assigned' | 'out_for_delivery' | 'delivered';
 type ViewMode = 'all' | 'mine';
 
 type EnrichedOrder = {
@@ -33,6 +33,7 @@ type EnrichedOrder = {
     payment_proof_path: string | null;
     payment_proof_name: string | null;
     payment_proof_mime_type: string | null;
+    delivery_photo_url: string | null;
 };
 
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString('es-CL')}`;
@@ -80,6 +81,32 @@ const getPaymentEmailStatusLabel = (status: string | null | undefined) => {
     }
 };
 
+const getDeliveryStatusStyles = (status: string | null | undefined) => {
+    switch ((status || '').toLowerCase()) {
+        case 'assigned':
+            return 'bg-amber-100 text-amber-700';
+        case 'out_for_delivery':
+            return 'bg-indigo-100 text-indigo-700';
+        case 'delivered':
+            return 'bg-emerald-100 text-emerald-700';
+        default:
+            return 'bg-gray-100 text-gray-600';
+    }
+};
+
+const getDeliveryStatusLabel = (status: string | null | undefined) => {
+    switch ((status || '').toLowerCase()) {
+        case 'assigned':
+            return 'Asignado';
+        case 'out_for_delivery':
+            return 'En reparto';
+        case 'delivered':
+            return 'Entregado';
+        default:
+            return status || 'Pendiente';
+    }
+};
+
 const Orders = () => {
     const { profile, effectiveRole, hasPermission, isSupervisor } = useUser();
     const [orders, setOrders] = useState<EnrichedOrder[]>([]);
@@ -96,6 +123,11 @@ const Orders = () => {
     const [proofFile, setProofFile] = useState<File | null>(null);
     const [proofBlobUrl, setProofBlobUrl] = useState<string | null>(null);
     const [proofError, setProofError] = useState<string | null>(null);
+    const [selectedDeliveryProofOrder, setSelectedDeliveryProofOrder] = useState<EnrichedOrder | null>(null);
+    const [deliveryProofPreviewState, setDeliveryProofPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+    const [deliveryProofFile, setDeliveryProofFile] = useState<File | null>(null);
+    const [deliveryProofBlobUrl, setDeliveryProofBlobUrl] = useState<string | null>(null);
+    const [deliveryProofError, setDeliveryProofError] = useState<string | null>(null);
     const [notificationLogsByOrderId, setNotificationLogsByOrderId] = useState<Record<string, OrderNotificationLog[]>>({});
     const [selectedNotificationOrder, setSelectedNotificationOrder] = useState<EnrichedOrder | null>(null);
     const [selectedItemsOrder, setSelectedItemsOrder] = useState<EnrichedOrder | null>(null);
@@ -124,7 +156,7 @@ const Orders = () => {
         try {
             let query = supabase
                 .from('orders')
-                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, total_amount, created_at, payment_email_status, payment_email_error, payment_proof_path, payment_proof_name, payment_proof_mime_type')
+                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, delivery_photo_url, total_amount, created_at, payment_email_status, payment_email_error, payment_proof_path, payment_proof_name, payment_proof_mime_type')
                 .not('quotation_id', 'is', null)
                 .order('created_at', { ascending: false });
 
@@ -202,7 +234,8 @@ const Orders = () => {
                     payment_email_error: order.payment_email_error ?? null,
                     payment_proof_path: order.payment_proof_path ?? null,
                     payment_proof_name: order.payment_proof_name ?? null,
-                    payment_proof_mime_type: order.payment_proof_mime_type ?? null
+                    payment_proof_mime_type: order.payment_proof_mime_type ?? null,
+                    delivery_photo_url: order.delivery_photo_url ?? null
                 };
             });
 
@@ -245,6 +278,14 @@ const Orders = () => {
 
     useEffect(() => {
         return () => {
+            if (deliveryProofBlobUrl) {
+                URL.revokeObjectURL(deliveryProofBlobUrl);
+            }
+        };
+    }, [deliveryProofBlobUrl]);
+
+    useEffect(() => {
+        return () => {
             if (orderPdfBlobUrl) {
                 URL.revokeObjectURL(orderPdfBlobUrl);
             }
@@ -255,6 +296,21 @@ const Orders = () => {
         cleanupProofPreview();
         setSelectedProofOrder(null);
     }, [cleanupProofPreview]);
+
+    const cleanupDeliveryProofPreview = useCallback(() => {
+        if (deliveryProofBlobUrl) {
+            URL.revokeObjectURL(deliveryProofBlobUrl);
+        }
+        setDeliveryProofBlobUrl(null);
+        setDeliveryProofFile(null);
+        setDeliveryProofError(null);
+        setDeliveryProofPreviewState('idle');
+    }, [deliveryProofBlobUrl]);
+
+    const closeDeliveryProofPreview = useCallback(() => {
+        cleanupDeliveryProofPreview();
+        setSelectedDeliveryProofOrder(null);
+    }, [cleanupDeliveryProofPreview]);
 
     const downloadProofFile = useCallback((file: File | null) => {
         if (!file) return;
@@ -325,6 +381,54 @@ const Orders = () => {
         setProofPreviewState('idle');
         await loadProofForOrder(order);
     }, [loadProofForOrder]);
+
+    const loadDeliveryProofForOrder = useCallback(async (order: EnrichedOrder) => {
+        if (!order.delivery_photo_url) {
+            setDeliveryProofPreviewState('error');
+            setDeliveryProofError('Este pedido no tiene una prueba de entrega guardada.');
+            return;
+        }
+
+        setDeliveryProofPreviewState('loading');
+        setDeliveryProofError(null);
+
+        try {
+            const response = await fetch(order.delivery_photo_url);
+            if (!response.ok) {
+                throw new Error('No se pudo descargar la prueba de entrega.');
+            }
+            const blob = await response.blob();
+
+            if (deliveryProofBlobUrl) {
+                URL.revokeObjectURL(deliveryProofBlobUrl);
+            }
+
+            const file = new File(
+                [blob],
+                `prueba_entrega_pedido_${order.folio ?? order.id}.jpg`,
+                { type: blob.type || 'image/jpeg' }
+            );
+            const blobUrl = URL.createObjectURL(file);
+            setDeliveryProofFile(file);
+            setDeliveryProofBlobUrl(blobUrl);
+            setDeliveryProofPreviewState('ready');
+        } catch (error: any) {
+            console.error('Error loading delivery proof:', error);
+            setDeliveryProofFile(null);
+            setDeliveryProofBlobUrl(null);
+            setDeliveryProofPreviewState('error');
+            setDeliveryProofError(error?.message || 'No se pudo descargar la prueba de entrega.');
+        }
+    }, [deliveryProofBlobUrl]);
+
+    const openDeliveryProofPreview = useCallback(async (order: EnrichedOrder) => {
+        setSelectedDeliveryProofOrder(order);
+        setDeliveryProofFile(null);
+        setDeliveryProofBlobUrl(null);
+        setDeliveryProofError(null);
+        setDeliveryProofPreviewState('idle');
+        await loadDeliveryProofForOrder(order);
+    }, [loadDeliveryProofForOrder]);
 
     const closeOrderItemsPreview = useCallback(() => {
         setSelectedItemsOrder(null);
@@ -665,7 +769,8 @@ const Orders = () => {
                     {([
                         { key: 'all', label: 'Despacho: Todos' },
                         { key: 'pending', label: 'Despacho: Pendiente' },
-                        { key: 'out_for_delivery', label: 'Despacho: En Ruta' },
+                        { key: 'assigned', label: 'Despacho: Asignado' },
+                        { key: 'out_for_delivery', label: 'Despacho: En reparto' },
                         { key: 'delivered', label: 'Despacho: Entregado' }
                     ] as Array<{ key: DeliveryStatusFilter; label: string }>).map((option) => (
                         <button
@@ -775,8 +880,8 @@ const Orders = () => {
                                             </div>
                                         </td>
                                         <td className="px-4 py-3">
-                                            <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${String(order.delivery_status || '').toLowerCase() === 'delivered' ? 'bg-emerald-100 text-emerald-700' : String(order.delivery_status || '').toLowerCase() === 'out_for_delivery' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
-                                                {order.delivery_status || 'pending'}
+                                            <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${getDeliveryStatusStyles(order.delivery_status)}`}>
+                                                {getDeliveryStatusLabel(order.delivery_status)}
                                             </span>
                                         </td>
                                         <td className="px-4 py-3 text-right font-black text-gray-900">{formatMoney(order.total_amount)}</td>
@@ -793,6 +898,18 @@ const Orders = () => {
                                                     </button>
                                                 ) : (
                                                     <span className="text-xs text-gray-400 font-medium">Sin comprobante</span>
+                                                )}
+
+                                                {order.delivery_photo_url ? (
+                                                    <button
+                                                        onClick={() => void openDeliveryProofPreview(order)}
+                                                        className="inline-flex items-center px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-[11px] font-black uppercase tracking-wider hover:bg-emerald-100 transition-all"
+                                                    >
+                                                        <Eye size={14} className="mr-2" />
+                                                        Ver entrega
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400 font-medium">Sin prueba de entrega</span>
                                                 )}
 
                                                 <button
@@ -844,6 +961,7 @@ const Orders = () => {
                 isOpen={Boolean(selectedProofOrder)}
                 orderFolio={selectedProofOrder?.folio ?? null}
                 clientName={selectedProofOrder?.client_name || 'Cliente'}
+                title="Comprobante de pago"
                 fileName={proofFile?.name || selectedProofOrder?.payment_proof_name || null}
                 blobUrl={proofBlobUrl}
                 fileType={proofFile?.type || selectedProofOrder?.payment_proof_mime_type || null}
@@ -857,6 +975,26 @@ const Orders = () => {
                     }
                 }}
                 onDownload={() => downloadProofFile(proofFile)}
+            />
+
+            <PaymentProofPreviewModal
+                isOpen={Boolean(selectedDeliveryProofOrder)}
+                orderFolio={selectedDeliveryProofOrder?.folio ?? null}
+                clientName={selectedDeliveryProofOrder?.client_name || 'Cliente'}
+                title="Prueba de entrega"
+                fileName={deliveryProofFile?.name || null}
+                blobUrl={deliveryProofBlobUrl}
+                fileType={deliveryProofFile?.type || 'image/jpeg'}
+                loading={deliveryProofPreviewState === 'loading'}
+                error={deliveryProofPreviewState === 'error' ? deliveryProofError : null}
+                canDownload={Boolean(deliveryProofFile)}
+                onClose={closeDeliveryProofPreview}
+                onRetry={() => {
+                    if (selectedDeliveryProofOrder) {
+                        void loadDeliveryProofForOrder(selectedDeliveryProofOrder);
+                    }
+                }}
+                onDownload={() => downloadProofFile(deliveryProofFile)}
             />
 
             <OrderPdfPreviewModal

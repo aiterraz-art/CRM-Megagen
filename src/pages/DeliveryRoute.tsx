@@ -97,6 +97,9 @@ const DeliveryRoute: React.FC = () => {
     const [deliveryGpsStatus, setDeliveryGpsStatus] = useState<'idle' | 'searching' | 'ready' | 'error'>('idle');
 
     const [routeName, setRouteName] = useState<string>("Ruta de Hoy");
+    const [activeRouteIds, setActiveRouteIds] = useState<string[]>([]);
+    const [hasDraftRoutes, setHasDraftRoutes] = useState(false);
+    const [startingRoute, setStartingRoute] = useState(false);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
 
     const fetchRoute = async () => {
@@ -109,7 +112,7 @@ const DeliveryRoute: React.FC = () => {
                 .from('delivery_routes')
                 .select('id, name, status')
                 .eq('driver_id', profile.id)
-                .eq('status', 'in_progress');
+                .in('status', ['draft', 'in_progress']);
 
             if (routeError) {
                 console.error("Error fetching routes:", routeError);
@@ -119,6 +122,8 @@ const DeliveryRoute: React.FC = () => {
             if (!myRoutes || myRoutes.length === 0) {
                 setOrders([]);
                 setRouteName("Sin Ruta Asignada");
+                setActiveRouteIds([]);
+                setHasDraftRoutes(false);
                 setLoading(false);
                 return;
             }
@@ -126,6 +131,8 @@ const DeliveryRoute: React.FC = () => {
             // Set Route Name
             const names = myRoutes.map(r => r.name).join(", ");
             setRouteName(names || "Ruta de Hoy");
+            setActiveRouteIds(myRoutes.map((route) => route.id));
+            setHasDraftRoutes(myRoutes.some((route) => String(route.status || '').toLowerCase() === 'draft'));
 
             const routeIds = myRoutes.map(r => r.id);
 
@@ -148,20 +155,49 @@ const DeliveryRoute: React.FC = () => {
                 throw error;
             }
 
+            const orderIds = (data || []).map((item: any) => item.order?.id).filter(Boolean);
+            const { data: queueRows, error: queueError } = orderIds.length === 0
+                ? { data: [], error: null }
+                : await supabase
+                    .from('dispatch_queue_items')
+                    .select('order_id, invoice_number, client_name_snapshot, client_address_snapshot, client_office_snapshot, client_phone_snapshot, client_lat_snapshot, client_lng_snapshot')
+                    .in('order_id', orderIds);
+
+            if (queueError) {
+                console.error("Error fetching dispatch queue snapshots:", queueError);
+                throw queueError;
+            }
+
+            const queueByOrderId = new Map<string, any>();
+            (queueRows || []).forEach((row: any) => {
+                queueByOrderId.set(row.order_id, row);
+            });
+
             // Map structure to flat format for component
             const mappedOrders = (data || []).map((item: any) => {
                 if (!item.order) {
                     console.warn("Item without order visible:", item);
                     return null;
                 }
+                const queue = queueByOrderId.get(item.order.id);
                 return {
                     id: item.order.id, // Keep order ID as primary key for actions
                     route_item_id: item.id,
                     route_id: item.route_id,
+                    route_status: myRoutes.find((route) => route.id === item.route_id)?.status || null,
                     status: item.status,
                     delivery_status: item.order.delivery_status,
-                    client: item.order.client || {}, // Safe fallback
-                    folio: item.order.folio
+                    client: {
+                        ...(item.order.client || {}),
+                        name: queue?.client_name_snapshot || item.order.client?.name || 'Cliente',
+                        address: queue?.client_address_snapshot || item.order.client?.address || '',
+                        office: queue?.client_office_snapshot || item.order.client?.office || null,
+                        phone: queue?.client_phone_snapshot || item.order.client?.phone || null,
+                        lat: queue?.client_lat_snapshot ?? item.order.client?.lat ?? null,
+                        lng: queue?.client_lng_snapshot ?? item.order.client?.lng ?? null
+                    },
+                    folio: item.order.folio,
+                    invoice_number: queue?.invoice_number || null
                 };
             }).filter(Boolean); // Remove nulls
 
@@ -205,6 +241,27 @@ const DeliveryRoute: React.FC = () => {
     const handleTeleport = (lat: number, lng: number) => {
         setUserLocation({ lat, lng });
         alert(`📍 Teletransportado a: ${lat}, ${lng}`);
+    };
+
+    const handleStartRoutes = async () => {
+        if (activeRouteIds.length === 0) return;
+
+        setStartingRoute(true);
+        try {
+            const { error } = await supabase.rpc('start_delivery_routes', {
+                p_route_ids: activeRouteIds
+            });
+
+            if (error) throw error;
+
+            await fetchRoute();
+            alert('Ruta iniciada correctamente.');
+        } catch (error: any) {
+            console.error("Error starting delivery routes:", error);
+            alert("No se pudo iniciar la ruta: " + error.message);
+        } finally {
+            setStartingRoute(false);
+        }
     };
 
     const validateGeofence = (order: any) => {
@@ -431,6 +488,15 @@ const DeliveryRoute: React.FC = () => {
                         </button>
                     )}
                 </div>
+                {hasDraftRoutes && (
+                    <button
+                        onClick={handleStartRoutes}
+                        disabled={startingRoute}
+                        className="w-full mb-4 py-3 rounded-2xl bg-amber-400 text-slate-900 font-black text-sm hover:bg-amber-300 transition-all disabled:opacity-60"
+                    >
+                        {startingRoute ? 'Iniciando ruta...' : 'Iniciar ruta'}
+                    </button>
+                )}
                 <div className="flex gap-2">
                     <button
                         onClick={() => setIsMapMode(false)}
@@ -464,6 +530,10 @@ const DeliveryRoute: React.FC = () => {
                                     key={order.id}
                                     position={{ lat: Number(order.client.lat), lng: Number(order.client.lng) }}
                                     onClick={() => {
+                                        if (String(order.route_status || '').toLowerCase() === 'draft') {
+                                            alert('La ruta está asignada, pero aún no se ha iniciado.');
+                                            return;
+                                        }
                                         if (validateGeofence(order)) setSelectedOrder(order);
                                     }}
                                 >
@@ -520,11 +590,15 @@ const DeliveryRoute: React.FC = () => {
 
                                 <button
                                     onClick={() => {
+                                        if (String(order.route_status || '').toLowerCase() === 'draft') {
+                                            alert('Debes iniciar la ruta antes de registrar entregas.');
+                                            return;
+                                        }
                                         if (validateGeofence(order)) setSelectedOrder(order);
                                     }}
                                     className="w-full mt-4 bg-slate-900 text-white py-3 rounded-xl font-bold text-sm shadow-lg active:bg-slate-800"
                                 >
-                                    Entregar
+                                    {String(order.route_status || '').toLowerCase() === 'draft' ? 'Ruta asignada' : 'Entregar'}
                                 </button>
 
                                 {/* Teleport Button (Debug) */}

@@ -623,6 +623,8 @@ export interface Database {
                     client_phone_snapshot: string | null
                     client_lat_snapshot: number | null
                     client_lng_snapshot: number | null
+                    imported_address_input: string | null
+                    address_source: string
                     seller_name_snapshot: string | null
                     seller_email_snapshot: string | null
                     order_total_snapshot: number | null
@@ -652,6 +654,8 @@ export interface Database {
                     client_phone_snapshot?: string | null
                     client_lat_snapshot?: number | null
                     client_lng_snapshot?: number | null
+                    imported_address_input?: string | null
+                    address_source?: string
                     seller_name_snapshot?: string | null
                     seller_email_snapshot?: string | null
                     order_total_snapshot?: number | null
@@ -681,6 +685,8 @@ export interface Database {
                     client_phone_snapshot?: string | null
                     client_lat_snapshot?: number | null
                     client_lng_snapshot?: number | null
+                    imported_address_input?: string | null
+                    address_source?: string
                     seller_name_snapshot?: string | null
                     seller_email_snapshot?: string | null
                     order_total_snapshot?: number | null

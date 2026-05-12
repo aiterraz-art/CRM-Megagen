@@ -5,6 +5,7 @@ type PaymentProofPreviewModalProps = {
     isOpen: boolean;
     orderFolio: number | null;
     clientName: string;
+    title?: string;
     fileName?: string | null;
     blobUrl: string | null;
     fileType: string | null;
@@ -33,6 +34,7 @@ const PaymentProofPreviewModal = ({
     isOpen,
     orderFolio,
     clientName,
+    title = 'Comprobante de pago',
     fileName,
     blobUrl,
     fileType,
@@ -54,7 +56,7 @@ const PaymentProofPreviewModal = ({
             <div className="w-full max-w-5xl max-h-[92vh] rounded-[2rem] bg-white shadow-2xl overflow-hidden flex flex-col">
                 <div className="flex items-start justify-between gap-4 px-5 py-4 md:px-6 md:py-5 border-b border-gray-100">
                     <div className="min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Comprobante de pago</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">{title}</p>
                         <h3 className="text-xl md:text-2xl font-black text-gray-900 mt-1">Pedido #{orderFolio ?? '-'}</h3>
                         <p className="text-sm font-medium text-gray-500 mt-1 truncate">{clientName}</p>
                         {fileName && <p className="text-xs font-bold text-gray-400 mt-2 truncate">{fileName}</p>}

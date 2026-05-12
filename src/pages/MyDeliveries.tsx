@@ -170,7 +170,7 @@ const StatusContent: React.FC = () => {
         const service = new routesLibrary.DirectionsService();
         const candidates = orders
             .filter((o) =>
-                (o.delivery_status || '').toLowerCase() === 'out_for_delivery' &&
+                ['assigned', 'out_for_delivery'].includes((o.delivery_status || '').toLowerCase()) &&
                 Number.isFinite(Number(o.client?.lat)) &&
                 Number.isFinite(Number(o.client?.lng))
             )
@@ -240,8 +240,8 @@ const StatusContent: React.FC = () => {
                                     <span className="text-[10px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md">
                                         Folio #{o.folio || o.id.slice(0, 8)}
                                     </span>
-                                    <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md ${status === 'delivered' ? 'bg-emerald-100 text-emerald-700' : status === 'out_for_delivery' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
-                                        {status === 'delivered' ? 'Entregado' : status === 'out_for_delivery' ? 'En Proceso' : 'Programado'}
+                                    <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md ${status === 'delivered' ? 'bg-emerald-100 text-emerald-700' : status === 'out_for_delivery' ? 'bg-indigo-100 text-indigo-700' : status === 'assigned' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                                        {status === 'delivered' ? 'Entregado' : status === 'out_for_delivery' ? 'En reparto' : status === 'assigned' ? 'Asignado' : 'Programado'}
                                     </span>
                                 </div>
                                 <h3 className="font-black text-gray-900">{o.client?.name || 'Cliente'}</h3>

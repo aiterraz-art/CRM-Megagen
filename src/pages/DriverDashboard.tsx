@@ -21,7 +21,7 @@ const DriverDashboard: React.FC = () => {
                 .from('delivery_routes')
                 .select('id')
                 .eq('driver_id', profile.id)
-                .eq('status', 'in_progress');
+                .in('status', ['draft', 'in_progress']);
 
             const routeIds = routes?.map(r => r.id) || [];
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { read, utils } from 'xlsx';
+import { read, utils, writeFile } from 'xlsx';
 import {
     Building2,
     CalendarClock,
@@ -28,14 +28,25 @@ type DispatchImportRow = {
     invoice_number: string;
     client_rut: string;
     crm_order_number: string;
+    delivery_address: string;
 };
 
 type DispatchImportError = {
     row_number: number;
     invoice_number: string;
-    client_rut: string;
     crm_order_number: string;
+    delivery_address: string;
     reason: string;
+};
+
+type OrderFlowSnapshot = {
+    order_status: string | null;
+    order_delivery_status: string | null;
+    quotation_id: string | null;
+    quotation_folio: number | null;
+    quotation_status: string | null;
+    payment_email_status: string | null;
+    payment_proof_path: string | null;
 };
 
 type ProfileLite = {
@@ -72,6 +83,8 @@ type DispatchQueueItem = {
     client_phone_snapshot: string | null;
     client_lat_snapshot: number | null;
     client_lng_snapshot: number | null;
+    imported_address_input: string | null;
+    address_source: 'client' | 'excel' | string | null;
     seller_name_snapshot: string | null;
     seller_email_snapshot: string | null;
     order_total_snapshot: number | null;
@@ -81,7 +94,7 @@ type DispatchQueueItem = {
     delivered_at: string | null;
     cancelled_at: string | null;
     notes: string | null;
-};
+} & OrderFlowSnapshot;
 
 type DeliveryRouteSummary = {
     id: string;
@@ -107,7 +120,8 @@ type RouteDetailItem = {
     client_office: string | null;
     invoice_number: string | null;
     seller_name: string | null;
-};
+    address_source: 'client' | 'excel' | string | null;
+} & OrderFlowSnapshot;
 
 const normalizeText = (value: unknown) => String(value ?? '').trim();
 const normalizeInvoice = (value: unknown) => normalizeText(value);
@@ -137,7 +151,7 @@ const getValueByAliases = (row: Record<string, any>, aliases: string[]) => {
 };
 
 const isImportRowEmpty = (row: DispatchImportRow) =>
-    !row.invoice_number && !row.client_rut && !row.crm_order_number;
+    !row.invoice_number && !row.client_rut && !row.crm_order_number && !row.delivery_address;
 
 const formatDateTime = (value: string | null | undefined) => {
     if (!value) return '—';
@@ -167,13 +181,101 @@ const queueStatusClass: Record<DispatchQueueItem['status'], string> = {
     cancelled: 'bg-red-50 text-red-700 border-red-100'
 };
 
+const prettifyWorkflowStatus = (value: string | null | undefined, fallback = 'Sin dato') => {
+    const normalized = normalizeText(value).toLowerCase();
+    if (!normalized) return fallback;
+
+    const labels: Record<string, string> = {
+        draft: 'Borrador',
+        sent: 'Enviada',
+        approved: 'Aprobada',
+        rejected: 'Rechazada',
+        completed: 'Completado',
+        cancelled: 'Cancelado',
+        pending: 'Pendiente',
+        out_for_delivery: 'En ruta',
+        delivered: 'Entregado',
+        not_required: 'No requerido',
+        failed: 'Fallido',
+        routed: 'En ruta',
+        queued: 'En cola'
+    };
+
+    return labels[normalized] || normalized.replace(/_/g, ' ');
+};
+
+const getPillClass = (tone: 'slate' | 'indigo' | 'amber' | 'emerald' | 'rose') => {
+    const palette: Record<string, string> = {
+        slate: 'bg-slate-50 text-slate-700 border-slate-100',
+        indigo: 'bg-indigo-50 text-indigo-700 border-indigo-100',
+        amber: 'bg-amber-50 text-amber-700 border-amber-100',
+        emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+        rose: 'bg-rose-50 text-rose-700 border-rose-100'
+    };
+    return palette[tone];
+};
+
+const getQuotationStatusTone = (status: string | null | undefined) => {
+    const normalized = normalizeText(status).toLowerCase();
+    if (normalized === 'approved' || normalized === 'completed') return 'emerald';
+    if (normalized === 'sent') return 'indigo';
+    if (normalized === 'rejected' || normalized === 'cancelled') return 'rose';
+    return 'slate';
+};
+
+const getPaymentStage = (row: OrderFlowSnapshot) => {
+    if (row.payment_proof_path) {
+        return { label: 'Comprobante cargado', tone: 'emerald' as const };
+    }
+
+    const normalized = normalizeText(row.payment_email_status).toLowerCase();
+    if (normalized === 'pending') return { label: 'Pago pendiente', tone: 'amber' as const };
+    if (normalized === 'sent') return { label: 'Cobro enviado', tone: 'indigo' as const };
+    if (normalized === 'failed') return { label: 'Cobro con error', tone: 'rose' as const };
+    return { label: 'Sin comprobante', tone: 'slate' as const };
+};
+
+const getDeliveryStage = (row: OrderFlowSnapshot & { status?: string | null }) => {
+    const queueStatus = normalizeText(row.status).toLowerCase();
+    const deliveryStatus = normalizeText(row.order_delivery_status).toLowerCase();
+
+    if (queueStatus === 'cancelled') return { label: 'Despacho cancelado', tone: 'rose' as const };
+    if (queueStatus === 'delivered' || deliveryStatus === 'delivered') return { label: 'Entregado', tone: 'emerald' as const };
+    if (deliveryStatus === 'out_for_delivery') return { label: 'En reparto', tone: 'indigo' as const };
+    if (deliveryStatus === 'assigned' || queueStatus === 'routed') return { label: 'Asignado', tone: 'amber' as const };
+    return { label: 'Pendiente de despacho', tone: 'amber' as const };
+};
+
+const OrderFlowPills: React.FC<{ row: OrderFlowSnapshot & { status?: string | null } }> = ({ row }) => {
+    const paymentStage = getPaymentStage(row);
+    const deliveryStage = getDeliveryStage(row);
+    const quotationTone = getQuotationStatusTone(row.quotation_status);
+
+    return (
+        <div className="flex flex-wrap items-center gap-2">
+            <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${getPillClass(quotationTone)}`}>
+                Cotización {row.quotation_folio ? `#${row.quotation_folio}` : 'sin folio'} · {prettifyWorkflowStatus(row.quotation_status, 'Sin cotización')}
+            </span>
+            <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${getPillClass('slate')}`}>
+                Pedido · {prettifyWorkflowStatus(row.order_status, 'Sin pedido')}
+            </span>
+            <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${getPillClass(paymentStage.tone)}`}>
+                Pago · {paymentStage.label}
+            </span>
+            <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${getPillClass(deliveryStage.tone)}`}>
+                Entrega · {deliveryStage.label}
+            </span>
+        </div>
+    );
+};
+
 const isBillingBackofficeRole = (role: string | null | undefined) =>
     role === 'facturador' || role === 'tesorero';
 
 const routeStatusLabel = (status: string) => {
     const normalized = normalizeText(status).toLowerCase();
     if (normalized === 'completed') return 'Completada';
-    if (normalized === 'draft' || normalized === 'planning') return 'Planificación';
+    if (normalized === 'draft' || normalized === 'planning') return 'Asignada';
     return 'Activa';
 };
 
@@ -202,8 +304,8 @@ const parseRpcValidationErrors = (error: any): DispatchImportError[] | null => {
                 return parsed.errors.map((item: any) => ({
                     row_number: Number(item?.row_number || 0),
                     invoice_number: normalizeText(item?.invoice_number),
-                    client_rut: normalizeText(item?.client_rut),
                     crm_order_number: normalizeText(item?.crm_order_number),
+                    delivery_address: normalizeText(item?.delivery_address),
                     reason: normalizeText(item?.reason) || 'Error de validación'
                 }));
             }
@@ -236,6 +338,52 @@ const Dispatch: React.FC = () => {
     const [selectedRoute, setSelectedRoute] = useState<DeliveryRouteSummary | null>(null);
     const [routeDetails, setRouteDetails] = useState<RouteDetailItem[] | null>(null);
     const [proofViewerUrl, setProofViewerUrl] = useState<string | null>(null);
+
+    const fetchOrderFlowMap = async (orderIds: string[]) => {
+        const normalizedIds = Array.from(new Set(orderIds.filter(Boolean)));
+        if (normalizedIds.length === 0) return new Map<string, OrderFlowSnapshot>();
+
+        const { data: orderRows, error: orderError } = await supabase
+            .from('orders')
+            .select('id, status, delivery_status, payment_email_status, payment_proof_path, quotation_id')
+            .in('id', normalizedIds);
+
+        if (orderError) throw orderError;
+
+        const orders = orderRows || [];
+        const quotationIds = Array.from(new Set(orders.map((order: any) => order.quotation_id).filter(Boolean)));
+        const quotationsMap = new Map<string, { folio: number | null; status: string | null }>();
+
+        if (quotationIds.length > 0) {
+            const { data: quotationRows, error: quotationError } = await supabase
+                .from('quotations')
+                .select('id, folio, status')
+                .in('id', quotationIds);
+
+            if (quotationError) throw quotationError;
+            (quotationRows || []).forEach((quotation: any) => {
+                quotationsMap.set(quotation.id, {
+                    folio: quotation.folio ?? null,
+                    status: quotation.status ?? null
+                });
+            });
+        }
+
+        return new Map<string, OrderFlowSnapshot>(
+            orders.map((order: any) => {
+                const quotation = order.quotation_id ? quotationsMap.get(order.quotation_id) : undefined;
+                return [order.id, {
+                    order_status: order.status ?? null,
+                    order_delivery_status: order.delivery_status ?? null,
+                    quotation_id: order.quotation_id ?? null,
+                    quotation_folio: quotation?.folio ?? null,
+                    quotation_status: quotation?.status ?? null,
+                    payment_email_status: order.payment_email_status ?? null,
+                    payment_proof_path: order.payment_proof_path ?? null
+                }];
+            })
+        );
+    };
 
     const fetchDrivers = async () => {
         const { data, error } = await supabase
@@ -273,14 +421,27 @@ const Dispatch: React.FC = () => {
             .limit(1000);
 
         if (error) throw error;
-        setQueueItems((data || []) as DispatchQueueItem[]);
+        const rows = (data || []) as DispatchQueueItem[];
+        const orderFlowMap = await fetchOrderFlowMap(rows.map((row) => row.order_id));
+        setQueueItems(rows.map((row) => ({
+            ...row,
+            ...(orderFlowMap.get(row.order_id) || {
+                order_status: null,
+                order_delivery_status: null,
+                quotation_id: null,
+                quotation_folio: null,
+                quotation_status: null,
+                payment_email_status: null,
+                payment_proof_path: null
+            })
+        })));
     };
 
     const fetchRoutes = async () => {
         const { data: routesData, error: routesError } = await supabase
             .from('delivery_routes')
             .select('*')
-            .eq('status', 'in_progress')
+            .in('status', ['draft', 'in_progress'])
             .order('created_at', { ascending: false });
 
         if (routesError) throw routesError;
@@ -357,9 +518,14 @@ const Dispatch: React.FC = () => {
                 item.client_rut_input,
                 item.client_name_snapshot,
                 item.client_address_snapshot,
+                item.imported_address_input,
                 item.client_comuna_snapshot,
                 item.seller_name_snapshot,
                 item.seller_email_snapshot,
+                item.quotation_folio,
+                item.quotation_status,
+                item.order_status,
+                item.payment_email_status,
                 driver?.full_name,
                 driver?.email
             ].some((value) => cleanComparableText(value).includes(term));
@@ -376,7 +542,11 @@ const Dispatch: React.FC = () => {
                 item.order_folio_input,
                 item.client_rut_input,
                 item.client_name_snapshot,
+                item.client_address_snapshot,
                 item.seller_name_snapshot,
+                item.quotation_folio,
+                item.quotation_status,
+                item.payment_email_status,
                 driver?.full_name,
                 driver?.email,
                 item.notes
@@ -387,36 +557,25 @@ const Dispatch: React.FC = () => {
     const latestBatch = batches[0] || null;
 
     const handleDownloadImportTemplate = () => {
-        const headers = ['numero_factura', 'rut_cliente', 'numero_pedido_crm'];
-        const example = ['FAC-100234', '76.123.456-7', '100234'];
-        const csv = [headers.join(','), example.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(',')].join('\n');
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'formato_despacho_facturas.csv';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        const worksheet = utils.aoa_to_sheet([
+            ['numero_factura', 'numero_pedido_crm', 'direccion'],
+            ['FAC-100234', '100234', 'Av. Apoquindo 3000, Las Condes, Santiago, Chile'],
+            ['FAC-100235', '100235', '']
+        ]);
+        const workbook = utils.book_new();
+        utils.book_append_sheet(workbook, worksheet, 'despacho');
+        writeFile(workbook, 'plantilla_rutas_despacho.xlsx');
     };
 
     const handleDownloadImportErrors = () => {
         if (importErrors.length === 0) return;
-        const rows = [
-            ['fila', 'numero_factura', 'rut_cliente', 'numero_pedido_crm', 'error'],
-            ...importErrors.map((item) => [item.row_number, item.invoice_number, item.client_rut, item.crm_order_number, item.reason])
-        ];
-        const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'errores_importacion_despacho.csv';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        const worksheet = utils.aoa_to_sheet([
+            ['fila', 'numero_factura', 'numero_pedido_crm', 'direccion', 'error'],
+            ...importErrors.map((item) => [item.row_number, item.invoice_number, item.crm_order_number, item.delivery_address, item.reason])
+        ]);
+        const workbook = utils.book_new();
+        utils.book_append_sheet(workbook, worksheet, 'errores');
+        writeFile(workbook, 'errores_importacion_despacho.xlsx');
     };
 
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -437,12 +596,13 @@ const Dispatch: React.FC = () => {
                     row_number: index + 2,
                     invoice_number: normalizeInvoice(getValueByAliases(row, ['numero_factura', 'factura', 'nro_factura', 'folio_factura'])),
                     client_rut: normalizeText(getValueByAliases(row, ['rut_cliente', 'rut'])),
-                    crm_order_number: normalizeOrderNumber(getValueByAliases(row, ['numero_pedido_crm', 'pedido', 'pedido_crm', 'folio_pedido']))
+                    crm_order_number: normalizeOrderNumber(getValueByAliases(row, ['numero_pedido_crm', 'pedido', 'pedido_crm', 'folio_pedido'])),
+                    delivery_address: normalizeText(getValueByAliases(row, ['direccion', 'direccion_entrega', 'direccion_google', 'direccion_normalizada']))
                 }))
                 .filter((row) => !isImportRowEmpty(row));
 
             if (parsedRows.length === 0) {
-                throw new Error('El archivo no contiene filas con numero_factura, rut_cliente y numero_pedido_crm.');
+                throw new Error('El archivo no contiene filas con numero_factura y numero_pedido_crm.');
             }
 
             const { error } = await supabase.rpc('import_dispatch_invoice_batch', {
@@ -613,18 +773,35 @@ const Dispatch: React.FC = () => {
                 ? { data: [], error: null }
                 : await supabase
                     .from('dispatch_queue_items')
-                    .select('order_id, invoice_number, seller_name_snapshot, seller_email_snapshot')
+                    .select('order_id, invoice_number, seller_name_snapshot, seller_email_snapshot, client_address_snapshot, client_office_snapshot, address_source')
                     .in('order_id', orderIds);
 
             if (queueError) throw queueError;
 
-            const queueByOrderId = new Map<string, { invoice_number: string; seller_name_snapshot: string | null; seller_email_snapshot: string | null }>();
+            const orderFlowMap = await fetchOrderFlowMap(orderIds);
+            const queueByOrderId = new Map<string, {
+                invoice_number: string;
+                seller_name_snapshot: string | null;
+                seller_email_snapshot: string | null;
+                client_address_snapshot: string | null;
+                client_office_snapshot: string | null;
+                address_source: 'client' | 'excel' | string | null;
+            }>();
             (queueRows || []).forEach((row: any) => {
                 queueByOrderId.set(row.order_id, row);
             });
 
             const mappedDetails: RouteDetailItem[] = (routeItemRows || []).map((item: any) => {
                 const queue = queueByOrderId.get(item.order_id);
+                const flow = orderFlowMap.get(item.order_id) || {
+                    order_status: null,
+                    order_delivery_status: null,
+                    quotation_id: null,
+                    quotation_folio: null,
+                    quotation_status: null,
+                    payment_email_status: null,
+                    payment_proof_path: null
+                };
                 return {
                     id: item.id,
                     order_id: item.order_id,
@@ -634,10 +811,12 @@ const Dispatch: React.FC = () => {
                     proof_photo_url: item.proof_photo_url,
                     order_folio: item.order?.folio || null,
                     client_name: item.order?.client?.name || 'Cliente sin nombre',
-                    client_address: item.order?.client?.address || 'Sin dirección registrada',
-                    client_office: item.order?.client?.office || null,
+                    client_address: queue?.client_address_snapshot || item.order?.client?.address || 'Sin dirección registrada',
+                    client_office: queue?.client_office_snapshot || item.order?.client?.office || null,
                     invoice_number: queue?.invoice_number || null,
-                    seller_name: queue?.seller_name_snapshot || queue?.seller_email_snapshot || null
+                    seller_name: queue?.seller_name_snapshot || queue?.seller_email_snapshot || null,
+                    address_source: queue?.address_source || 'client',
+                    ...flow
                 };
             });
 
@@ -731,8 +910,9 @@ const Dispatch: React.FC = () => {
                         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
                             <div>
                                 <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Importación oficial</p>
-                                <h3 className="text-2xl font-black text-gray-900 mt-1">Cargar facturas para liberar despacho</h3>
-                                <p className="text-sm font-medium text-gray-500 mt-2">Columnas esperadas: <span className="font-black text-gray-700">numero_factura</span>, <span className="font-black text-gray-700">rut_cliente</span>, <span className="font-black text-gray-700">numero_pedido_crm</span>.</p>
+                                <h3 className="text-2xl font-black text-gray-900 mt-1">Cargar rutas desde Excel</h3>
+                                <p className="text-sm font-medium text-gray-500 mt-2">Columnas esperadas: <span className="font-black text-gray-700">numero_factura</span>, <span className="font-black text-gray-700">numero_pedido_crm</span> y <span className="font-black text-gray-700">direccion</span> opcional.</p>
+                                <p className="text-xs font-bold text-indigo-600 mt-2">Si la dirección viene vacía, se usa la dirección registrada del cliente en el CRM.</p>
                                 <p className="text-xs font-bold text-red-500 mt-2">Si una fila falla, se cancela la carga completa.</p>
                             </div>
 
@@ -792,7 +972,7 @@ const Dispatch: React.FC = () => {
                                     <p className="text-sm font-medium text-red-500">No se guardó ninguna fila. Corrige el archivo y vuelve a subirlo.</p>
                                 </div>
                                 <button onClick={handleDownloadImportErrors} className="self-start bg-white text-red-600 px-4 py-2 rounded-xl text-sm font-bold border border-red-200 hover:bg-red-50 transition-all">
-                                    Descargar errores CSV
+                                    Descargar errores Excel
                                 </button>
                             </div>
                             <div className="overflow-x-auto rounded-2xl border border-red-100 bg-white">
@@ -801,8 +981,8 @@ const Dispatch: React.FC = () => {
                                         <tr>
                                             <th className="px-4 py-3 text-left">Fila</th>
                                             <th className="px-4 py-3 text-left">Factura</th>
-                                            <th className="px-4 py-3 text-left">RUT</th>
                                             <th className="px-4 py-3 text-left">Pedido CRM</th>
+                                            <th className="px-4 py-3 text-left">Dirección</th>
                                             <th className="px-4 py-3 text-left">Motivo</th>
                                         </tr>
                                     </thead>
@@ -811,8 +991,8 @@ const Dispatch: React.FC = () => {
                                             <tr key={`${errorItem.row_number}-${index}`} className="border-t border-red-50 text-slate-700">
                                                 <td className="px-4 py-3 font-black">{errorItem.row_number}</td>
                                                 <td className="px-4 py-3">{errorItem.invoice_number || '—'}</td>
-                                                <td className="px-4 py-3">{errorItem.client_rut || '—'}</td>
                                                 <td className="px-4 py-3">{errorItem.crm_order_number || '—'}</td>
+                                                <td className="px-4 py-3">{errorItem.delivery_address || '—'}</td>
                                                 <td className="px-4 py-3 text-red-600 font-bold">{errorItem.reason}</td>
                                             </tr>
                                         ))}
@@ -836,7 +1016,7 @@ const Dispatch: React.FC = () => {
                                 <input
                                     value={queueSearch}
                                     onChange={(event) => setQueueSearch(event.target.value)}
-                                    placeholder="Buscar por factura, pedido, RUT, cliente, vendedor o repartidor"
+                                    placeholder="Buscar por factura, pedido, cliente, direccion, vendedor o repartidor"
                                     className="min-w-[320px] rounded-xl border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:border-indigo-300"
                                 />
                                 <select
@@ -920,10 +1100,13 @@ const Dispatch: React.FC = () => {
                                                         </div>
                                                     </div>
 
+                                                    <OrderFlowPills row={item} />
+
                                                     <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
                                                         <span>Total pedido: <span className="text-slate-900">{formatCurrency(item.order_total_snapshot)}</span></span>
                                                         <span>Comuna: <span className="text-slate-900">{item.client_comuna_snapshot || '—'}</span></span>
                                                         <span>Teléfono: <span className="text-slate-900">{item.client_phone_snapshot || '—'}</span></span>
+                                                        <span>Dirección origen: <span className="text-slate-900">{item.address_source === 'excel' ? 'Excel' : 'Ficha cliente'}</span></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1030,7 +1213,7 @@ const Dispatch: React.FC = () => {
                             <input
                                 value={historySearch}
                                 onChange={(event) => setHistorySearch(event.target.value)}
-                                placeholder="Buscar por factura, pedido, RUT, cliente, vendedor o repartidor"
+                                placeholder="Buscar por factura, pedido, cliente, direccion, vendedor o repartidor"
                                 className="min-w-[320px] rounded-xl border border-gray-200 px-4 py-3 text-sm font-medium outline-none focus:border-indigo-300"
                             />
                         </div>
@@ -1137,10 +1320,14 @@ const Dispatch: React.FC = () => {
                                                         <span className="px-2 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest">Factura {item.invoice_number || '—'}</span>
                                                         <span className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest">Pedido #{item.order_folio || item.order_id.slice(0, 8)}</span>
                                                         <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${normalizeText(item.status).toLowerCase() === 'delivered' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>{normalizeText(item.status).toLowerCase() === 'delivered' ? 'Entregado' : 'Pendiente'}</span>
+                                                        {item.address_source === 'excel' && (
+                                                            <span className="px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest bg-fuchsia-50 text-fuchsia-700 border-fuchsia-100">Dirección Excel</span>
+                                                        )}
                                                     </div>
                                                     <h4 className="font-black text-slate-900 text-lg">{item.client_name}</h4>
                                                     <p className="text-sm text-slate-500 font-medium flex items-start gap-2"><MapPin size={15} className="mt-0.5 shrink-0" /> {item.client_address}{item.client_office ? ` (${item.client_office})` : ''}</p>
                                                     <p className="text-xs font-bold text-slate-500 flex items-center gap-2"><User size={13} /> {item.seller_name || 'Sin vendedor'}</p>
+                                                    <OrderFlowPills row={item} />
                                                 </div>
                                             </div>
 
