@@ -21,6 +21,19 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
     return R * c;
 };
 
+const DEFAULT_SANTIAGO_CENTER = { lat: -33.4489, lng: -70.6693 };
+
+const isDefaultFallbackCoordinate = (lat: unknown, lng: unknown) => {
+    const parsedLat = Number(lat);
+    const parsedLng = Number(lng);
+    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) return false;
+
+    return (
+        Math.abs(parsedLat - DEFAULT_SANTIAGO_CENTER.lat) < 0.0001 &&
+        Math.abs(parsedLng - DEFAULT_SANTIAGO_CENTER.lng) < 0.0001
+    );
+};
+
 // Internal Component for Directions
 const Directions = ({ orders, userLocation }: { orders: any[], userLocation: { lat: number, lng: number } | null }) => {
     const map = useMap();
@@ -182,6 +195,10 @@ const DeliveryRoute: React.FC = () => {
                     return null;
                 }
                 const queue = queueByOrderId.get(item.order.id);
+                const clientAddress = queue?.client_address_snapshot || item.order.client?.address || '';
+                const inheritedLat = queue?.client_lat_snapshot ?? item.order.client?.lat ?? null;
+                const inheritedLng = queue?.client_lng_snapshot ?? item.order.client?.lng ?? null;
+                const shouldDiscardFallbackCoords = clientAddress && isDefaultFallbackCoordinate(inheritedLat, inheritedLng);
                 return {
                     id: item.order.id, // Keep order ID as primary key for actions
                     route_item_id: item.id,
@@ -192,11 +209,11 @@ const DeliveryRoute: React.FC = () => {
                     client: {
                         ...(item.order.client || {}),
                         name: queue?.client_name_snapshot || item.order.client?.name || 'Cliente',
-                        address: queue?.client_address_snapshot || item.order.client?.address || '',
+                        address: clientAddress,
                         office: queue?.client_office_snapshot || item.order.client?.office || null,
                         phone: queue?.client_phone_snapshot || item.order.client?.phone || null,
-                        lat: queue?.client_lat_snapshot ?? item.order.client?.lat ?? null,
-                        lng: queue?.client_lng_snapshot ?? item.order.client?.lng ?? null
+                        lat: shouldDiscardFallbackCoords ? null : inheritedLat,
+                        lng: shouldDiscardFallbackCoords ? null : inheritedLng
                     },
                     folio: item.order.folio,
                     invoice_number: queue?.invoice_number || null
@@ -239,6 +256,13 @@ const DeliveryRoute: React.FC = () => {
         };
     }, [profile?.id]); // Re-fetch if profile changes (Impersonation)
 
+    useEffect(() => {
+        if (mapsApiLoaded) return;
+        if (typeof window !== 'undefined' && window.google?.maps?.Geocoder) {
+            setMapsApiLoaded(true);
+        }
+    }, [mapsApiLoaded, isMapMode, orders.length]);
+
     // Debug: Teleport function
     const handleTeleport = (lat: number, lng: number) => {
         setUserLocation({ lat, lng });
@@ -249,7 +273,7 @@ const DeliveryRoute: React.FC = () => {
         const normalizedAddress = String(address || '').trim();
         if (!normalizedAddress || typeof window === 'undefined' || !window.google?.maps?.Geocoder) return null;
 
-        const cacheKey = `delivery_geocode:${normalizedAddress.toLowerCase()}`;
+        const cacheKey = `delivery_geocode:v2:${normalizedAddress.toLowerCase()}`;
         const cached = typeof window !== 'undefined' ? window.sessionStorage.getItem(cacheKey) : null;
         if (cached) {
             try {
