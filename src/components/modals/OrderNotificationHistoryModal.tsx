@@ -7,6 +7,8 @@ type OrderNotificationHistoryModalProps = {
     orderFolio: number | null;
     clientName: string;
     logs: OrderNotificationLog[];
+    loading?: boolean;
+    error?: string | null;
     onClose: () => void;
 };
 
@@ -34,7 +36,15 @@ const getStatusLabel = (status: OrderNotificationLog['status']) => {
 
 const formatDate = (value: string | null) => value ? new Date(value).toLocaleString('es-CL') : '-';
 
-const OrderNotificationHistoryModal = ({ isOpen, orderFolio, clientName, logs, onClose }: OrderNotificationHistoryModalProps) => {
+const OrderNotificationHistoryModal = ({
+    isOpen,
+    orderFolio,
+    clientName,
+    logs,
+    loading = false,
+    error = null,
+    onClose
+}: OrderNotificationHistoryModalProps) => {
     if (!isOpen) return null;
 
     const modalContent = (
@@ -52,7 +62,16 @@ const OrderNotificationHistoryModal = ({ isOpen, orderFolio, clientName, logs, o
                 </div>
 
                 <div className="flex-1 min-h-0 overflow-auto bg-gray-50 p-4 md:p-6">
-                    {logs.length === 0 ? (
+                    {loading ? (
+                        <div className="rounded-[1.5rem] border border-gray-200 bg-white p-8 text-center">
+                            <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                            <p className="text-sm font-bold text-gray-500">Cargando historial de correos...</p>
+                        </div>
+                    ) : error ? (
+                        <div className="rounded-[1.5rem] border border-red-200 bg-red-50 p-6 text-center text-sm font-bold text-red-700">
+                            {error}
+                        </div>
+                    ) : logs.length === 0 ? (
                         <div className="rounded-[1.5rem] border border-gray-200 bg-white p-6 text-center text-sm font-bold text-gray-500">
                             Este pedido aún no tiene historial de envíos a facturación.
                         </div>

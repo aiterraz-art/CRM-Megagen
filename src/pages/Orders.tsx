@@ -130,6 +130,8 @@ const Orders = () => {
     const [deliveryProofError, setDeliveryProofError] = useState<string | null>(null);
     const [notificationLogsByOrderId, setNotificationLogsByOrderId] = useState<Record<string, OrderNotificationLog[]>>({});
     const [selectedNotificationOrder, setSelectedNotificationOrder] = useState<EnrichedOrder | null>(null);
+    const [notificationHistoryLoading, setNotificationHistoryLoading] = useState(false);
+    const [notificationHistoryError, setNotificationHistoryError] = useState<string | null>(null);
     const [selectedItemsOrder, setSelectedItemsOrder] = useState<EnrichedOrder | null>(null);
     const [orderItemsPreviewState, setOrderItemsPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
     const [orderItemsPreview, setOrderItemsPreview] = useState<OrderItemsPreviewItem[]>([]);
@@ -179,9 +181,7 @@ const Orders = () => {
             const clientIds = Array.from(new Set(loaded.map((o) => o.client_id).filter(Boolean)));
             const userIds = Array.from(new Set(loaded.map((o) => o.user_id).filter(Boolean)));
             const quotationIds = Array.from(new Set(loaded.map((o) => o.quotation_id).filter(Boolean)));
-            const orderIds = loaded.map((o) => o.id).filter(Boolean);
-
-            const [clientsRes, profilesRes, quotationsRes, notificationLogsRes] = await Promise.all([
+            const [clientsRes, profilesRes, quotationsRes] = await Promise.all([
                 clientIds.length > 0
                     ? supabase.from('clients').select('id, name').in('id', clientIds)
                     : Promise.resolve({ data: [], error: null } as any),
@@ -190,28 +190,16 @@ const Orders = () => {
                     : Promise.resolve({ data: [], error: null } as any),
                 quotationIds.length > 0
                     ? supabase.from('quotations').select('id, folio').in('id', quotationIds)
-                    : Promise.resolve({ data: [], error: null } as any),
-                orderIds.length > 0
-                    ? supabase
-                        .from('order_notification_logs')
-                        .select('id, order_id, sender_email, to_recipients, cc_recipients, status, gmail_message_id, gmail_thread_id, error_message, request_source, sent_at, created_at')
-                        .in('order_id', orderIds)
-                        .order('created_at', { ascending: false })
                     : Promise.resolve({ data: [], error: null } as any)
             ]);
 
             if (clientsRes.error) throw clientsRes.error;
             if (profilesRes.error) throw profilesRes.error;
             if (quotationsRes.error) throw quotationsRes.error;
-            if (notificationLogsRes.error) throw notificationLogsRes.error;
 
             const clientsMap = new Map<string, any>((clientsRes.data || []).map((c: any) => [c.id, c]));
             const profilesMap = new Map<string, any>((profilesRes.data || []).map((p: any) => [p.id, p]));
             const quotationsMap = new Map<string, any>((quotationsRes.data || []).map((q: any) => [q.id, q]));
-            const logsByOrderId = (notificationLogsRes.data || []).reduce((acc: Record<string, OrderNotificationLog[]>, log: OrderNotificationLog) => {
-                acc[log.order_id] = [...(acc[log.order_id] || []), log];
-                return acc;
-            }, {});
 
             const enriched: EnrichedOrder[] = loaded.map((order: any) => {
                 const seller = profilesMap.get(order.user_id || '');
@@ -240,7 +228,6 @@ const Orders = () => {
             });
 
             setOrders(enriched);
-            setNotificationLogsByOrderId(logsByOrderId);
             setLastRefreshAt(new Date().toISOString());
         } catch (error: any) {
             console.error('Error fetching orders:', error);
@@ -251,6 +238,37 @@ const Orders = () => {
             setLoading(false);
         }
     }, [canViewAll, isSellerRole, profile?.id]);
+
+    const openNotificationHistory = useCallback(async (order: EnrichedOrder) => {
+        setSelectedNotificationOrder(order);
+        setNotificationHistoryLoading(true);
+        setNotificationHistoryError(null);
+
+        if (notificationLogsByOrderId[order.id]) {
+            setNotificationHistoryLoading(false);
+            return;
+        }
+
+        try {
+            const { data, error } = await supabase
+                .from('order_notification_logs')
+                .select('id, order_id, sender_email, to_recipients, cc_recipients, status, gmail_message_id, gmail_thread_id, error_message, request_source, sent_at, created_at')
+                .eq('order_id', order.id)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            setNotificationLogsByOrderId((prev) => ({
+                ...prev,
+                [order.id]: (data || []) as OrderNotificationLog[]
+            }));
+        } catch (error: any) {
+            console.error('Error loading order notification history:', error);
+            setNotificationHistoryError(error?.message || 'No se pudo cargar el historial de correos.');
+        } finally {
+            setNotificationHistoryLoading(false);
+        }
+    }, [notificationLogsByOrderId]);
 
     useEffect(() => {
         if (profile?.id) {
@@ -816,8 +834,6 @@ const Orders = () => {
                                 {filteredOrders.map((order) => (
                                     <tr key={order.id} className="border-b border-gray-100 last:border-0">
                                         {(() => {
-                                            const orderLogs = notificationLogsByOrderId[order.id] || [];
-                                            const latestLog = orderLogs[0] || null;
                                             const canResend = canResendOrderEmail(effectiveRole, profile?.id, order);
                                             const canRetryEmail = canResend && ['failed', 'pending'].includes(String(order.payment_email_status || '').toLowerCase());
                                             return (
@@ -847,19 +863,6 @@ const Orders = () => {
                                                     <p className="text-[11px] font-medium text-red-600 max-w-[200px] truncate" title={order.payment_email_error}>
                                                         {order.payment_email_error}
                                                     </p>
-                                                )}
-                                                {latestLog && (
-                                                    <div className="pt-1 space-y-1">
-                                                        <p className="text-[11px] font-semibold text-gray-600">
-                                                            Emisor: <span className="text-gray-800">{latestLog.sender_email}</span>
-                                                        </p>
-                                                        <p className="text-[11px] font-semibold text-gray-600 max-w-[260px] truncate" title={latestLog.to_recipients.join(', ')}>
-                                                            Para: <span className="text-gray-800">{latestLog.to_recipients.join(', ')}</span>
-                                                        </p>
-                                                        <p className="text-[11px] font-semibold text-gray-500">
-                                                            Último intento: {formatDate(latestLog.sent_at || latestLog.created_at)}
-                                                        </p>
-                                                    </div>
                                                 )}
                                                 {canRetryEmail ? (
                                                     <button
@@ -921,7 +924,7 @@ const Orders = () => {
                                                 </button>
 
                                                 <button
-                                                    onClick={() => setSelectedNotificationOrder(order)}
+                                                    onClick={() => void openNotificationHistory(order)}
                                                     className="inline-flex items-center px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-[11px] font-black uppercase tracking-wider hover:bg-gray-50 transition-all"
                                                 >
                                                     <History size={14} className="mr-2" />
@@ -1020,7 +1023,13 @@ const Orders = () => {
                 orderFolio={selectedNotificationOrder?.folio ?? null}
                 clientName={selectedNotificationOrder?.client_name || 'Cliente'}
                 logs={selectedNotificationOrder ? (notificationLogsByOrderId[selectedNotificationOrder.id] || []) : []}
-                onClose={() => setSelectedNotificationOrder(null)}
+                loading={notificationHistoryLoading}
+                error={notificationHistoryError}
+                onClose={() => {
+                    setSelectedNotificationOrder(null);
+                    setNotificationHistoryLoading(false);
+                    setNotificationHistoryError(null);
+                }}
             />
 
             <OrderItemsPreviewModal
