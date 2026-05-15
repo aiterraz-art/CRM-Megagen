@@ -221,23 +221,62 @@ const Inventory = () => {
         [items]
     );
 
+    const isMissingBackendFeatureError = (error: any) => {
+        const message = String(error?.message || error || '').toLowerCase();
+        return (
+            message.includes('does not exist') ||
+            message.includes('could not find the function') ||
+            message.includes('schema cache') ||
+            message.includes('inventory_movements') ||
+            message.includes('target_coverage_days') ||
+            message.includes('last_stock_reviewed') ||
+            message.includes('min_stock_alert')
+        );
+    };
+
     const fetchInventory = async () => {
         setLoading(true);
-        const { data, error } = await (supabase.from('inventory') as any)
-            .select('id, sku, name, price, stock_qty, category, created_at, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, is_service_item')
-            .eq('is_service_item', false)
-            .order('name');
+        try {
+            const { data, error } = await (supabase.from('inventory') as any)
+                .select('id, sku, name, price, stock_qty, category, created_at, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, is_service_item')
+                .eq('is_service_item', false)
+                .order('name');
 
-        if (error) {
-            console.error('Error fetching inventory:', error);
-            alert(`Error cargando inventario: ${error.message}`);
+            if (error) throw error;
+
+            if (data) {
+                setItems(data as InventoryItem[]);
+            }
+        } catch (error: any) {
+            if (!isMissingBackendFeatureError(error)) {
+                console.error('Error fetching inventory:', error);
+                alert(`Error cargando inventario: ${error.message}`);
+                setLoading(false);
+                return;
+            }
+
+            try {
+                const { data, error: legacyError } = await (supabase.from('inventory') as any)
+                    .select('id, sku, name, price, stock_qty, category, created_at, is_service_item')
+                    .eq('is_service_item', false)
+                    .order('name');
+
+                if (legacyError) throw legacyError;
+
+                setItems(((data || []) as InventoryItem[]).map((item) => ({
+                    ...item,
+                    min_stock_alert: 5,
+                    target_coverage_days: 30,
+                    last_stock_reviewed_at: null,
+                    last_stock_reviewed_by: null
+                })));
+            } catch (legacyError: any) {
+                console.error('Error fetching legacy inventory:', legacyError);
+                alert(`Error cargando inventario: ${legacyError.message}`);
+            }
+        } finally {
+            setLoading(false);
         }
-
-        if (data) {
-            setItems(data as InventoryItem[]);
-        }
-
-        setLoading(false);
     };
 
     const fetchRotationMetrics = async (options?: { search?: string; onlyAlerts?: boolean }) => {
@@ -254,8 +293,11 @@ const Inventory = () => {
             if (error) throw error;
             setRotationMetrics((data || []) as RotationMetric[]);
         } catch (error: any) {
-            console.error('Error fetching rotation metrics:', error);
-            alert(`Error cargando rotación: ${error.message}`);
+            if (!isMissingBackendFeatureError(error)) {
+                console.error('Error fetching rotation metrics:', error);
+                alert(`Error cargando rotación: ${error.message}`);
+            }
+            setRotationMetrics([]);
         } finally {
             setRotationLoading(false);
         }
@@ -267,43 +309,44 @@ const Inventory = () => {
         setMovementsLoading(true);
         try {
             const { data, error } = await (supabase.from('inventory_movements') as any)
-                .select(`
-                    id,
-                    inventory_id,
-                    movement_type,
-                    direction,
-                    qty,
-                    stock_before,
-                    stock_after,
-                    unit_price_snapshot,
-                    reason_code,
-                    reason_note,
-                    source_table,
-                    source_id,
-                    shipment_id,
-                    order_id,
-                    order_item_id,
-                    performed_by,
-                    created_at,
-                    inventory:inventory_id (
-                        id,
-                        sku,
-                        name,
-                        category
-                    ),
-                    profile:performed_by (
-                        full_name,
-                        email
-                    )
-                `)
+                .select('id, inventory_id, movement_type, direction, qty, stock_before, stock_after, unit_price_snapshot, reason_code, reason_note, source_table, source_id, shipment_id, order_id, order_item_id, performed_by, created_at')
                 .order('created_at', { ascending: false })
                 .limit(500);
 
             if (error) throw error;
-            setMovements((data || []) as InventoryMovement[]);
+
+            const movementRows = (data || []) as InventoryMovement[];
+            const inventoryIds = Array.from(new Set(movementRows.map((movement) => movement.inventory_id).filter(Boolean)));
+            const profileIds = Array.from(new Set(movementRows.map((movement) => movement.performed_by).filter(Boolean)));
+
+            const [inventoryRes, profilesRes] = await Promise.all([
+                inventoryIds.length > 0
+                    ? (supabase.from('inventory') as any).select('id, sku, name, category').in('id', inventoryIds)
+                    : Promise.resolve({ data: [], error: null }),
+                profileIds.length > 0
+                    ? supabase.from('profiles').select('id, full_name, email').in('id', profileIds as string[])
+                    : Promise.resolve({ data: [], error: null })
+            ]);
+
+            if (inventoryRes.error) throw inventoryRes.error;
+            if (profilesRes.error) throw profilesRes.error;
+
+            const inventoryById = new Map<string, Pick<InventoryItem, 'id' | 'sku' | 'name' | 'category'>>(
+                ((inventoryRes.data || []) as Array<Pick<InventoryItem, 'id' | 'sku' | 'name' | 'category'>>).map((item) => [item.id, item])
+            );
+            const profilesById = new Map((profilesRes.data || []).map((item) => [item.id, item]));
+
+            setMovements(movementRows.map((movement) => ({
+                ...movement,
+                inventory: inventoryById.get(movement.inventory_id) || null,
+                profile: movement.performed_by ? profilesById.get(movement.performed_by) || null : null
+            })));
         } catch (error: any) {
-            console.error('Error fetching inventory movements:', error);
-            alert(`Error cargando movimientos: ${error.message}`);
+            if (!isMissingBackendFeatureError(error)) {
+                console.error('Error fetching inventory movements:', error);
+                alert(`Error cargando movimientos: ${error.message}`);
+            }
+            setMovements([]);
         } finally {
             setMovementsLoading(false);
         }
@@ -337,38 +380,32 @@ const Inventory = () => {
                     .eq('product_id', item.id)
                     .order('created_at', { ascending: false }),
                 (supabase.from('inventory_movements') as any)
-                    .select(`
-                        id,
-                        inventory_id,
-                        movement_type,
-                        direction,
-                        qty,
-                        stock_before,
-                        stock_after,
-                        unit_price_snapshot,
-                        reason_code,
-                        reason_note,
-                        source_table,
-                        source_id,
-                        shipment_id,
-                        order_id,
-                        order_item_id,
-                        performed_by,
-                        created_at,
-                        profile:performed_by (
-                            full_name,
-                            email
-                        )
-                    `)
+                    .select('id, inventory_id, movement_type, direction, qty, stock_before, stock_after, unit_price_snapshot, reason_code, reason_note, source_table, source_id, shipment_id, order_id, order_item_id, performed_by, created_at')
                     .eq('inventory_id', item.id)
                     .order('created_at', { ascending: false })
             ]);
 
             if (salesRes.error) throw salesRes.error;
-            if (movementsRes.error) throw movementsRes.error;
+            if (movementsRes.error && !isMissingBackendFeatureError(movementsRes.error)) throw movementsRes.error;
 
             setSalesHistoryData(salesRes.data || []);
-            setMovementHistoryData((movementsRes.data || []) as InventoryMovement[]);
+            if (movementsRes.error && isMissingBackendFeatureError(movementsRes.error)) {
+                setMovementHistoryData([]);
+            } else {
+                const movementRows = (movementsRes.data || []) as InventoryMovement[];
+                const profileIds = Array.from(new Set(movementRows.map((movement) => movement.performed_by).filter(Boolean)));
+                const profilesRes = profileIds.length > 0
+                    ? await supabase.from('profiles').select('id, full_name, email').in('id', profileIds as string[])
+                    : { data: [], error: null };
+
+                if (profilesRes.error) throw profilesRes.error;
+
+                const profilesById = new Map((profilesRes.data || []).map((profileRow) => [profileRow.id, profileRow]));
+                setMovementHistoryData(movementRows.map((movement) => ({
+                    ...movement,
+                    profile: movement.performed_by ? profilesById.get(movement.performed_by) || null : null
+                })));
+            }
         } catch (error: any) {
             console.error('Error fetching product history:', error);
             alert(`Error al cargar historial: ${error.message}`);

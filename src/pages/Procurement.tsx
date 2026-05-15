@@ -219,6 +219,17 @@ const getShipmentProgress = (shipment: ShipmentRow) => {
     return Math.min(1, Math.max(0, (now - start) / (end - start)));
 };
 
+const isMissingInventoryAnalyticsFeatureError = (error: any) => {
+    const message = String(error?.message || error || '').toLowerCase();
+    return (
+        message.includes('could not find the function') ||
+        message.includes('schema cache') ||
+        message.includes('inventory_movements') ||
+        message.includes('target_coverage_days') ||
+        message.includes('min_stock_alert')
+    );
+};
+
 const ShipmentProgressTrack: React.FC<{ shipment: ShipmentRow }> = ({ shipment }) => {
     const progress = getShipmentProgress(shipment);
     const VehicleIcon = shipment.transport_mode === 'air' ? Plane : ShipWheel;
@@ -358,8 +369,11 @@ const Procurement: React.FC = () => {
             if (error) throw error;
             setRotationMetrics((data || []) as RotationMetric[]);
         } catch (error: any) {
-            console.error('Error loading procurement replenishment alerts:', error);
-            alert(`Error cargando alertas de reposición: ${error.message}`);
+            if (!isMissingInventoryAnalyticsFeatureError(error)) {
+                console.error('Error loading procurement replenishment alerts:', error);
+                alert(`Error cargando alertas de reposición: ${error.message}`);
+            }
+            setRotationMetrics([]);
         } finally {
             setRotationLoading(false);
         }
