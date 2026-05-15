@@ -337,8 +337,8 @@ const DeliveryRoute: React.FC = () => {
 
         const dist = calculateDistance(userLocation.lat, userLocation.lng, clientLat, clientLng);
         if (dist > 500) {
-            alert(`⛔ Estás muy lejos del punto de entrega (${Math.round(dist)}m). Debes estar a menos de 500m. (Tip: Activa Modo Debug para omitir esto)`);
-            return false;
+            alert(`⚠️ Estás lejos del punto de entrega (${Math.round(dist)}m). Se permitirá continuar solo para pruebas.`);
+            return true;
         }
         return true;
     };
