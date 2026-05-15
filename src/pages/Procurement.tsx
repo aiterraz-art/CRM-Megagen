@@ -9,6 +9,7 @@ import {
     Package,
     Plane,
     Plus,
+    RefreshCw,
     Search,
     ShipWheel,
     X
@@ -29,6 +30,7 @@ type RequestStatus = ProductRequestRow['status'];
 type ShipmentStatus = ShipmentRow['status'];
 type ShipmentMode = ShipmentRow['transport_mode'];
 type ProcurementTab = 'requests' | 'shipments';
+type RotationMetric = Database['public']['Functions']['get_inventory_rotation_metrics']['Returns'][number];
 
 type ProcurementLocationState = {
     activeTab?: ProcurementTab;
@@ -38,6 +40,16 @@ type ProcurementLocationState = {
         sku: string | null;
         name: string;
         stock_qty: number | null;
+    };
+    prefillRequest?: {
+        productId: string;
+        sku: string | null;
+        name: string;
+        stockQty: number | null;
+        requestedQty?: number;
+        reasonType?: RequestReason;
+        priority?: RequestPriority;
+        requestNote?: string;
     };
 } | null;
 
@@ -57,6 +69,16 @@ type PersistedShipmentDraft = {
     shipmentForm: ShipmentFormState;
     shipmentPasteInput: string;
     showShipmentModal: boolean;
+};
+
+type ShipmentReceiptLine = {
+    shipmentItemId: string;
+    productId: string;
+    skuSnapshot: string;
+    productNameSnapshot: string;
+    shippedQty: number;
+    qtyToReceipt: number;
+    include: boolean;
 };
 
 const REQUEST_REASON_LABELS: Record<RequestReason, string> = {
@@ -234,6 +256,7 @@ const Procurement: React.FC = () => {
     const canRequestProducts = hasPermission('REQUEST_PRODUCTS');
     const canManageProcurement = hasPermission('MANAGE_PROCUREMENT');
     const isAdmin = effectiveRole === 'admin';
+    const canViewStockAnalytics = effectiveRole === 'admin' || effectiveRole === 'jefe';
 
     const [activeTab, setActiveTab] = useState<ProcurementTab>('shipments');
     const [loading, setLoading] = useState(true);
@@ -258,6 +281,13 @@ const Procurement: React.FC = () => {
     const [requestToManage, setRequestToManage] = useState<ProductRequestRow | null>(null);
     const [requestForm, setRequestForm] = useState(createEmptyRequestForm);
     const [shipmentForm, setShipmentForm] = useState(createEmptyShipmentForm);
+    const [rotationMetrics, setRotationMetrics] = useState<RotationMetric[]>([]);
+    const [rotationLoading, setRotationLoading] = useState(false);
+    const [showShipmentReceiptModal, setShowShipmentReceiptModal] = useState(false);
+    const [shipmentReceiptTarget, setShipmentReceiptTarget] = useState<ShipmentRow | null>(null);
+    const [shipmentReceiptLines, setShipmentReceiptLines] = useState<ShipmentReceiptLine[]>([]);
+    const [shipmentReceiptNote, setShipmentReceiptNote] = useState('');
+    const [savingShipmentReceipt, setSavingShipmentReceipt] = useState(false);
     const [requestProductSearch, setRequestProductSearch] = useState('');
     const [showRequestSuggestions, setShowRequestSuggestions] = useState(false);
     const [shipmentPasteInput, setShipmentPasteInput] = useState('');
@@ -315,11 +345,37 @@ const Procurement: React.FC = () => {
         }
     };
 
+    const fetchRotationMetrics = async () => {
+        if (!canViewStockAnalytics) return;
+
+        setRotationLoading(true);
+        try {
+            const { data, error } = await supabase.rpc('get_inventory_rotation_metrics', {
+                p_days: 30,
+                p_only_alerts: true
+            });
+
+            if (error) throw error;
+            setRotationMetrics((data || []) as RotationMetric[]);
+        } catch (error: any) {
+            console.error('Error loading procurement replenishment alerts:', error);
+            alert(`Error cargando alertas de reposición: ${error.message}`);
+        } finally {
+            setRotationLoading(false);
+        }
+    };
+
     useEffect(() => {
         if (canViewProcurement) {
             void fetchProcurementData();
         }
     }, [canViewProcurement]);
+
+    useEffect(() => {
+        if (canViewStockAnalytics) {
+            void fetchRotationMetrics();
+        }
+    }, [canViewStockAnalytics]);
 
     useEffect(() => {
         const state = location.state as ProcurementLocationState;
@@ -329,7 +385,23 @@ const Procurement: React.FC = () => {
             setActiveTab(state.activeTab);
         }
 
-        if (state.openRequestModal && state.prefillProduct) {
+        if (state.openRequestModal && state.prefillRequest) {
+            setActiveTab('requests');
+            setEditingRequest(null);
+            setRequestForm({
+                productId: state.prefillRequest.productId,
+                manualSku: '',
+                manualProductName: '',
+                requestedQty: Math.max(1, Number(state.prefillRequest.requestedQty || 1)),
+                reasonType: state.prefillRequest.reasonType || ((state.prefillRequest.stockQty || 0) <= 0 ? 'no_stock' : 'low_stock'),
+                priority: state.prefillRequest.priority || ((state.prefillRequest.stockQty || 0) <= 0 ? 'high' : 'normal'),
+                neededByDate: '',
+                requestNote: state.prefillRequest.requestNote || ''
+            });
+            setRequestProductSearch(`${state.prefillRequest.sku || ''} ${state.prefillRequest.name}`.trim());
+            setShowRequestSuggestions(false);
+            setShowRequestModal(true);
+        } else if (state.openRequestModal && state.prefillProduct) {
             setActiveTab('requests');
             setEditingRequest(null);
             setRequestForm({
@@ -447,6 +519,24 @@ const Procurement: React.FC = () => {
         setShowRequestModal(true);
     };
 
+    const openPrefilledRequestFromMetric = (metric: RotationMetric) => {
+        setActiveTab('requests');
+        setEditingRequest(null);
+        setRequestForm({
+            productId: metric.inventory_id,
+            manualSku: '',
+            manualProductName: '',
+            requestedQty: Math.max(metric.suggested_reorder_qty || 0, 1),
+            reasonType: metric.stock_qty <= 0 ? 'no_stock' : 'low_stock',
+            priority: metric.alert_level === 'critical' ? 'high' : 'normal',
+            neededByDate: '',
+            requestNote: `Reposición sugerida desde Inventario. Venta 30 días: ${metric.units_sold_window} uds. Cobertura estimada: ${metric.days_of_coverage ?? 'sin ventas'} días.`
+        });
+        setRequestProductSearch(`${metric.sku || ''} ${metric.name}`.trim());
+        setShowRequestSuggestions(false);
+        setShowRequestModal(true);
+    };
+
     const openEditRequestModal = (request: ProductRequestRow) => {
         setEditingRequest(request);
         setRequestForm({
@@ -507,6 +597,41 @@ const Procurement: React.FC = () => {
         }
     };
 
+    const openShipmentReceiptModal = (shipment: ShipmentRow) => {
+        const lines = shipmentItems
+            .filter((item) => item.shipment_id === shipment.id)
+            .map((item) => {
+                const matchedInventory = item.product_id
+                    ? inventoryById.get(item.product_id)
+                    : inventory.find((inventoryItem) => (
+                        (inventoryItem.sku || '').trim().toLowerCase() === (item.sku_snapshot || '').trim().toLowerCase()
+                    )) || null;
+
+                return {
+                    shipmentItemId: item.id,
+                    productId: matchedInventory?.id || '',
+                    skuSnapshot: item.sku_snapshot,
+                    productNameSnapshot: item.product_name_snapshot,
+                    shippedQty: item.qty,
+                    qtyToReceipt: item.qty,
+                    include: Boolean(matchedInventory?.id)
+                };
+            });
+
+        setShipmentReceiptTarget(shipment);
+        setShipmentReceiptLines(lines);
+        setShipmentReceiptNote('');
+        setShowShipmentReceiptModal(true);
+    };
+
+    const closeShipmentReceiptModal = () => {
+        setShowShipmentReceiptModal(false);
+        setShipmentReceiptTarget(null);
+        setShipmentReceiptLines([]);
+        setShipmentReceiptNote('');
+        setSavingShipmentReceipt(false);
+    };
+
     const handleSaveRequest = async (event: React.FormEvent) => {
         event.preventDefault();
 
@@ -563,6 +688,9 @@ const Procurement: React.FC = () => {
             setRequestProductSearch('');
             setShowRequestSuggestions(false);
             await fetchProcurementData();
+            if (canViewStockAnalytics) {
+                await fetchRotationMetrics();
+            }
         } catch (error: any) {
             console.error('Error saving product request:', error);
             alert(`Error guardando solicitud: ${error.message}`);
@@ -583,6 +711,9 @@ const Procurement: React.FC = () => {
 
             if (error) throw error;
             await fetchProcurementData();
+            if (canViewStockAnalytics) {
+                await fetchRotationMetrics();
+            }
         } catch (error: any) {
             console.error('Error closing request:', error);
             alert(`Error cerrando solicitud: ${error.message}`);
@@ -786,6 +917,9 @@ const Procurement: React.FC = () => {
 
             setRequestToManage(null);
             await fetchProcurementData();
+            if (canViewStockAnalytics) {
+                await fetchRotationMetrics();
+            }
         } catch (error: any) {
             console.error('Error managing request:', error);
             alert(`Error actualizando solicitud: ${error.message}`);
@@ -841,6 +975,49 @@ const Procurement: React.FC = () => {
         } catch (error: any) {
             console.error('Error marking shipment received:', error);
             alert(`Error marcando importación recibida: ${error.message}`);
+        }
+    };
+
+    const handleSaveShipmentReceipt = async (event: React.FormEvent) => {
+        event.preventDefault();
+
+        if (!shipmentReceiptTarget || !canViewStockAnalytics) {
+            return;
+        }
+
+        const includedLines = shipmentReceiptLines
+            .filter((line) => line.include && line.productId && line.qtyToReceipt > 0)
+            .map((line) => ({
+                inventory_id: line.productId,
+                qty: Math.max(1, Math.trunc(Number(line.qtyToReceipt || 0))),
+                shipment_item_id: line.shipmentItemId
+            }));
+
+        if (includedLines.length === 0) {
+            alert('Debes incluir al menos una línea válida para ingresar a stock.');
+            return;
+        }
+
+        setSavingShipmentReceipt(true);
+        try {
+            const { error } = await supabase.rpc('apply_inventory_manual_receipt', {
+                p_shipment_id: shipmentReceiptTarget.id,
+                p_lines: includedLines,
+                p_reason_note: shipmentReceiptNote.trim() || null
+            });
+
+            if (error) throw error;
+
+            alert('Ingreso a stock registrado correctamente.');
+            closeShipmentReceiptModal();
+            await Promise.all([
+                fetchProcurementData(),
+                fetchRotationMetrics()
+            ]);
+        } catch (error: any) {
+            console.error('Error applying shipment receipt:', error);
+            alert(`Error registrando ingreso a stock: ${error.message}`);
+            setSavingShipmentReceipt(false);
         }
     };
 
@@ -951,6 +1128,86 @@ const Procurement: React.FC = () => {
 
             {activeTab === 'requests' && (
                 <div className="space-y-6">
+                    {canViewStockAnalytics && (
+                        <div className="rounded-[2rem] border border-amber-200 bg-gradient-to-r from-amber-50 via-white to-rose-50 p-6 shadow-sm">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                <div>
+                                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-amber-600">Alertas de reposición</p>
+                                    <h3 className="mt-2 text-2xl font-black text-slate-900">Productos con stock tensionado por ventas</h3>
+                                    <p className="mt-2 max-w-2xl text-sm font-medium text-slate-500">
+                                        Estas sugerencias nacen de la rotación de 30 días y no reemplazan tus solicitudes manuales. Sirven para abrir compras más fundamentadas.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => void fetchRotationMetrics()}
+                                    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition-all hover:bg-slate-50"
+                                >
+                                    <RefreshCw size={16} />
+                                    Recalcular alertas
+                                </button>
+                            </div>
+
+                            {rotationLoading ? (
+                                <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-3">
+                                    {[1, 2, 3].map((index) => (
+                                        <div key={index} className="h-32 animate-pulse rounded-3xl bg-white/70" />
+                                    ))}
+                                </div>
+                            ) : rotationMetrics.length > 0 ? (
+                                <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
+                                    {rotationMetrics.slice(0, 6).map((metric) => (
+                                        <div key={metric.inventory_id} className="rounded-3xl border border-white/80 bg-white p-5 shadow-sm">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-lg font-black text-slate-900">{metric.name}</p>
+                                                    <p className="mt-1 text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">{metric.sku || 'SIN-SKU'}</p>
+                                                </div>
+                                                <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-wide ${metric.alert_level === 'critical' ? 'border-rose-200 bg-rose-50 text-rose-700' : metric.alert_level === 'low' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700'}`}>
+                                                    {metric.alert_level}
+                                                </span>
+                                            </div>
+
+                                            <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-600">
+                                                <div className="rounded-2xl bg-slate-50 p-3">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Stock</p>
+                                                    <p className="mt-1 font-bold text-slate-900">{metric.stock_qty}</p>
+                                                </div>
+                                                <div className="rounded-2xl bg-slate-50 p-3">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Venta 30d</p>
+                                                    <p className="mt-1 font-bold text-slate-900">{metric.units_sold_window}</p>
+                                                </div>
+                                                <div className="rounded-2xl bg-slate-50 p-3">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Cobertura</p>
+                                                    <p className="mt-1 font-bold text-slate-900">{metric.days_of_coverage != null ? `${metric.days_of_coverage} días` : 'Sin ventas'}</p>
+                                                </div>
+                                                <div className="rounded-2xl bg-slate-50 p-3">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Reposición</p>
+                                                    <p className="mt-1 font-bold text-indigo-700">{metric.suggested_reorder_qty}</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-4 flex flex-wrap gap-2">
+                                                <button
+                                                    onClick={() => openPrefilledRequestFromMetric(metric)}
+                                                    className="rounded-2xl bg-indigo-600 px-4 py-2 text-xs font-black text-white shadow-lg shadow-indigo-100"
+                                                >
+                                                    Solicitar compra
+                                                </button>
+                                                <span className={`rounded-2xl border px-4 py-2 text-xs font-black ${metric.has_open_request ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+                                                    {metric.has_open_request ? 'Ya tiene solicitud abierta' : 'Sin solicitud abierta'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="mt-5 rounded-3xl border border-dashed border-amber-200 bg-white/70 p-6 text-center text-sm font-medium text-slate-500">
+                                    No hay alertas activas de reposición en este momento.
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 gap-3 xl:grid-cols-6">
                         <div className="relative xl:col-span-2">
                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -1713,6 +1970,14 @@ const Procurement: React.FC = () => {
                                 <h3 className="text-2xl font-black text-slate-900">{selectedShipment.supplier_name}</h3>
                             </div>
                             <div className="flex items-center gap-3">
+                                {canViewStockAnalytics && (selectedShipment.status === 'received' || selectedShipment.status === 'in_warehouse') && (
+                                    <button
+                                        onClick={() => openShipmentReceiptModal(selectedShipment)}
+                                        className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black text-emerald-700"
+                                    >
+                                        Registrar ingreso a stock
+                                    </button>
+                                )}
                                 {canManageProcurement && selectedShipment.status === 'received' && (
                                     <button
                                         onClick={() => handleMarkShipmentInWarehouse(selectedShipment)}
@@ -1774,6 +2039,11 @@ const Procurement: React.FC = () => {
                                             <Package className="text-slate-500" size={18} />
                                             <h4 className="text-lg font-black text-slate-900">Productos que vienen</h4>
                                         </div>
+                                        {(selectedShipment.status === 'received' || selectedShipment.status === 'in_warehouse') && (
+                                            <div className="mb-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-medium text-emerald-700">
+                                                Esta importación ya puede registrarse en stock manualmente. El cambio de estado del embarque no suma stock por sí solo.
+                                            </div>
+                                        )}
                                         <div className="space-y-3">
                                             {shipmentDetailItems.map((item) => (
                                                 <div key={item.id} className="rounded-2xl bg-white p-4 shadow-sm">
@@ -1820,6 +2090,113 @@ const Procurement: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {showShipmentReceiptModal && shipmentReceiptTarget && canViewStockAnalytics && (
+                <div className="fixed inset-0 z-[232] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeShipmentReceiptModal}>
+                    <div className="w-full max-w-4xl rounded-[2rem] bg-white shadow-2xl max-h-[92vh] overflow-hidden" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-[0.3em] text-emerald-500">Ingreso a stock</p>
+                                <h3 className="text-2xl font-black text-slate-900">{shipmentReceiptTarget.supplier_name}</h3>
+                            </div>
+                            <button onClick={closeShipmentReceiptModal} className="rounded-2xl bg-slate-100 p-3 text-slate-500 transition-all hover:bg-slate-200">
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSaveShipmentReceipt} className="flex max-h-[calc(92vh-88px)] flex-col">
+                            <div className="space-y-5 overflow-y-auto p-6">
+                                <div className="rounded-[2rem] border border-emerald-100 bg-emerald-50/70 p-5">
+                                    <p className="text-sm font-bold text-slate-800">
+                                        Registrar este ingreso mueve stock de forma explícita y deja trazabilidad por línea de embarque.
+                                    </p>
+                                    <p className="mt-2 text-sm text-slate-500">
+                                        Puedes excluir líneas, corregir la cantidad recibida y dejar una observación general.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-3">
+                                    {shipmentReceiptLines.map((line, index) => (
+                                        <div key={line.shipmentItemId} className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-4 md:grid-cols-[auto_1.3fr_0.8fr_0.8fr_1.3fr]">
+                                            <label className="flex items-center justify-center">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={line.include}
+                                                    disabled={!line.productId}
+                                                    onChange={(event) => {
+                                                        const nextLines = [...shipmentReceiptLines];
+                                                        nextLines[index] = { ...nextLines[index], include: event.target.checked };
+                                                        setShipmentReceiptLines(nextLines);
+                                                    }}
+                                                    className="h-5 w-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                                />
+                                            </label>
+                                            <div>
+                                                <p className="font-black text-slate-900">{line.productNameSnapshot}</p>
+                                                <p className="mt-1 text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">{line.skuSnapshot || 'SIN-SKU'}</p>
+                                                {!line.productId && (
+                                                    <p className="mt-2 text-xs font-bold text-rose-600">No está vinculado a inventario. No se puede ingresar hasta mapearlo.</p>
+                                                )}
+                                            </div>
+                                            <div className="rounded-2xl bg-white p-3 text-center">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Embarcado</p>
+                                                <p className="mt-1 font-black text-slate-900">{line.shippedQty}</p>
+                                            </div>
+                                            <div>
+                                                <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Ingresar</label>
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    max={line.shippedQty}
+                                                    value={line.qtyToReceipt}
+                                                    disabled={!line.productId}
+                                                    onChange={(event) => {
+                                                        const nextLines = [...shipmentReceiptLines];
+                                                        nextLines[index] = {
+                                                            ...nextLines[index],
+                                                            qtyToReceipt: Math.max(0, Number(event.target.value || 0))
+                                                        };
+                                                        setShipmentReceiptLines(nextLines);
+                                                    }}
+                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-emerald-300"
+                                                />
+                                            </div>
+                                            <div className="rounded-2xl bg-white p-3 text-sm text-slate-600">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Destino</p>
+                                                <p className="mt-1 font-bold text-slate-900">
+                                                    {line.productId
+                                                        ? inventoryById.get(line.productId)?.name || 'Producto de inventario'
+                                                        : 'Sin producto vinculado'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div>
+                                    <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Observación general</label>
+                                    <textarea
+                                        rows={4}
+                                        value={shipmentReceiptNote}
+                                        onChange={(event) => setShipmentReceiptNote(event.target.value)}
+                                        placeholder="Ej: ingreso parcial por revisión de calidad, faltantes pendientes, diferencia en conteo..."
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-medium text-slate-700 outline-none focus:border-emerald-300"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:justify-end">
+                                <button type="button" onClick={closeShipmentReceiptModal} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">
+                                    Cancelar
+                                </button>
+                                <button type="submit" disabled={savingShipmentReceipt} className="rounded-2xl bg-emerald-600 px-5 py-3 font-black text-white shadow-lg shadow-emerald-100 disabled:opacity-60">
+                                    {savingShipmentReceipt ? 'Registrando...' : 'Registrar ingreso a stock'}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

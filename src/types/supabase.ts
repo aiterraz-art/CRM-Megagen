@@ -90,30 +90,104 @@ export interface Database {
                     created_at: string | null
                     demo_available: boolean | null
                     id: string
+                    is_service_item: boolean | null
+                    last_stock_reviewed_at: string | null
+                    last_stock_reviewed_by: string | null
+                    min_stock_alert: number
                     name: string
                     price: number | null
                     sku: string | null
                     stock_qty: number | null
+                    target_coverage_days: number
                 }
                 Insert: {
                     category?: string | null
                     created_at?: string | null
                     demo_available?: boolean | null
                     id?: string
+                    is_service_item?: boolean | null
+                    last_stock_reviewed_at?: string | null
+                    last_stock_reviewed_by?: string | null
+                    min_stock_alert?: number
                     name: string
                     price?: number | null
                     sku?: string | null
                     stock_qty?: number | null
+                    target_coverage_days?: number
                 }
                 Update: {
                     category?: string | null
                     created_at?: string | null
                     demo_available?: boolean | null
                     id?: string
+                    is_service_item?: boolean | null
+                    last_stock_reviewed_at?: string | null
+                    last_stock_reviewed_by?: string | null
+                    min_stock_alert?: number
                     name?: string
                     price?: number | null
                     sku?: string | null
                     stock_qty?: number | null
+                    target_coverage_days?: number
+                }
+            }
+            inventory_movements: {
+                Row: {
+                    created_at: string
+                    direction: string
+                    id: string
+                    inventory_id: string
+                    movement_type: string
+                    order_id: string | null
+                    order_item_id: string | null
+                    performed_by: string | null
+                    qty: number
+                    reason_code: string
+                    reason_note: string | null
+                    shipment_id: string | null
+                    source_id: string | null
+                    source_table: string | null
+                    stock_after: number
+                    stock_before: number
+                    unit_price_snapshot: number | null
+                }
+                Insert: {
+                    created_at?: string
+                    direction: string
+                    id?: string
+                    inventory_id: string
+                    movement_type: string
+                    order_id?: string | null
+                    order_item_id?: string | null
+                    performed_by?: string | null
+                    qty: number
+                    reason_code: string
+                    reason_note?: string | null
+                    shipment_id?: string | null
+                    source_id?: string | null
+                    source_table?: string | null
+                    stock_after: number
+                    stock_before: number
+                    unit_price_snapshot?: number | null
+                }
+                Update: {
+                    created_at?: string
+                    direction?: string
+                    id?: string
+                    inventory_id?: string
+                    movement_type?: string
+                    order_id?: string | null
+                    order_item_id?: string | null
+                    performed_by?: string | null
+                    qty?: number
+                    reason_code?: string
+                    reason_note?: string | null
+                    shipment_id?: string | null
+                    source_id?: string | null
+                    source_table?: string | null
+                    stock_after?: number
+                    stock_before?: number
+                    unit_price_snapshot?: number | null
                 }
             }
             loan_kits: {
@@ -1128,6 +1202,50 @@ export interface Database {
                     error_message?: string | null
                     created_at?: string
                 }
+            }
+        }
+        Functions: {
+            apply_inventory_manual_adjustment: {
+                Args: {
+                    p_inventory_id: string
+                    p_new_stock_qty: number
+                    p_reason_code: string
+                    p_reason_note?: string | null
+                }
+                Returns: Json
+            }
+            apply_inventory_manual_receipt: {
+                Args: {
+                    p_shipment_id?: string | null
+                    p_lines?: Json
+                    p_reason_note?: string | null
+                }
+                Returns: Json
+            }
+            get_inventory_rotation_metrics: {
+                Args: {
+                    p_days?: number | null
+                    p_search?: string | null
+                    p_only_alerts?: boolean | null
+                }
+                Returns: {
+                    inventory_id: string
+                    sku: string
+                    name: string
+                    category: string
+                    stock_qty: number
+                    min_stock_alert: number
+                    target_coverage_days: number
+                    units_sold_window: number
+                    avg_daily_sales: number
+                    days_of_coverage: number | null
+                    suggested_reorder_qty: number
+                    alert_level: string
+                    last_sale_at: string | null
+                    sales_count_window: number
+                    has_open_request: boolean
+                    linked_open_request_id: string | null
+                }[]
             }
         }
     }
