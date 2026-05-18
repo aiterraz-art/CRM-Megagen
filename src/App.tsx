@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './services/supabase';
@@ -51,6 +51,8 @@ const ScreenLoader = () => (
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-dental-600"></div>
     </div>
 );
+
+const LAST_APP_ROUTE_KEY = 'crm_last_app_route';
 
 const isBillingBackofficeRole = (role: string | null | undefined) =>
     role === 'facturador' || role === 'tesorero';
@@ -199,6 +201,34 @@ function App() {
 
     const AppRoutesWithRecovery = () => {
         const location = useLocation();
+        const navigate = useNavigate();
+
+        useEffect(() => {
+            if (!session) return;
+
+            const currentRoute = `${location.pathname}${location.search}${location.hash}`;
+            const isAuthRoute = location.pathname === '/login';
+
+            if (!isAuthRoute) {
+                window.localStorage.setItem(LAST_APP_ROUTE_KEY, currentRoute);
+            }
+        }, [location.hash, location.pathname, location.search]);
+
+        useEffect(() => {
+            if (!session) return;
+
+            const isRootRoute =
+                location.pathname === '/' &&
+                location.search === '' &&
+                location.hash === '';
+
+            if (!isRootRoute) return;
+
+            const savedRoute = window.localStorage.getItem(LAST_APP_ROUTE_KEY);
+            if (!savedRoute || savedRoute === '/' || savedRoute === '/login') return;
+
+            navigate(savedRoute, { replace: true });
+        }, [location.hash, location.pathname, location.search, navigate]);
 
         return (
             <ErrorBoundary resetKey={location.pathname} fullScreen>

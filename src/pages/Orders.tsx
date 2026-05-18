@@ -40,8 +40,19 @@ const formatMoney = (value: number | null | undefined) => `$${Number(value || 0)
 const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL') : '-';
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
 const ORDER_ITEMS_PREVIEW_STORAGE_KEY = 'orders.activeItemsPreviewOrderId';
+const CHUNK_SIZE = 50;
+const PAGE_SIZE = 10;
 const isBillingBackofficeRole = (role: string | null | undefined) =>
     role === 'facturador' || role === 'tesorero';
+
+const chunkArray = <T,>(values: T[], size: number) => {
+    if (values.length <= size) return [values];
+    const chunks: T[][] = [];
+    for (let index = 0; index < values.length; index += size) {
+        chunks.push(values.slice(index, index + size));
+    }
+    return chunks;
+};
 
 const canResendOrderEmail = (
     effectiveRole: string | null | undefined,
@@ -117,6 +128,7 @@ const Orders = () => {
     const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<DeliveryStatusFilter>('all');
     const [viewMode, setViewMode] = useState<ViewMode>('all');
+    const [currentPage, setCurrentPage] = useState(1);
     const [resendingOrderId, setResendingOrderId] = useState<string | null>(null);
     const [selectedProofOrder, setSelectedProofOrder] = useState<EnrichedOrder | null>(null);
     const [proofPreviewState, setProofPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -181,25 +193,35 @@ const Orders = () => {
             const clientIds = Array.from(new Set(loaded.map((o) => o.client_id).filter(Boolean)));
             const userIds = Array.from(new Set(loaded.map((o) => o.user_id).filter(Boolean)));
             const quotationIds = Array.from(new Set(loaded.map((o) => o.quotation_id).filter(Boolean)));
-            const [clientsRes, profilesRes, quotationsRes] = await Promise.all([
-                clientIds.length > 0
-                    ? supabase.from('clients').select('id, name').in('id', clientIds)
-                    : Promise.resolve({ data: [], error: null } as any),
-                userIds.length > 0
-                    ? supabase.from('profiles').select('id, full_name, email').in('id', userIds)
-                    : Promise.resolve({ data: [], error: null } as any),
-                quotationIds.length > 0
-                    ? supabase.from('quotations').select('id, folio').in('id', quotationIds)
-                    : Promise.resolve({ data: [], error: null } as any)
+
+            const fetchChunkedRows = async <TRow,>(
+                table: 'clients' | 'profiles' | 'quotations',
+                selectClause: string,
+                ids: string[]
+            ): Promise<TRow[]> => {
+                if (ids.length === 0) return [];
+
+                const chunks = chunkArray(ids, CHUNK_SIZE);
+                const results = await Promise.all(
+                    chunks.map(async (chunk) => {
+                        const { data, error } = await supabase.from(table).select(selectClause).in('id', chunk);
+                        if (error) throw error;
+                        return (data || []) as TRow[];
+                    })
+                );
+
+                return results.flat();
+            };
+
+            const [clientsRows, profilesRows, quotationsRows] = await Promise.all([
+                fetchChunkedRows<any>('clients', 'id, name', clientIds),
+                fetchChunkedRows<any>('profiles', 'id, full_name, email', userIds),
+                fetchChunkedRows<any>('quotations', 'id, folio', quotationIds)
             ]);
 
-            if (clientsRes.error) throw clientsRes.error;
-            if (profilesRes.error) throw profilesRes.error;
-            if (quotationsRes.error) throw quotationsRes.error;
-
-            const clientsMap = new Map<string, any>((clientsRes.data || []).map((c: any) => [c.id, c]));
-            const profilesMap = new Map<string, any>((profilesRes.data || []).map((p: any) => [p.id, p]));
-            const quotationsMap = new Map<string, any>((quotationsRes.data || []).map((q: any) => [q.id, q]));
+            const clientsMap = new Map<string, any>(clientsRows.map((client: any) => [client.id, client]));
+            const profilesMap = new Map<string, any>(profilesRows.map((profileRow: any) => [profileRow.id, profileRow]));
+            const quotationsMap = new Map<string, any>(quotationsRows.map((quotation: any) => [quotation.id, quotation]));
 
             const enriched: EnrichedOrder[] = loaded.map((order: any) => {
                 const seller = profilesMap.get(order.user_id || '');
@@ -683,6 +705,23 @@ const Orders = () => {
         });
     }, [deliveryStatusFilter, orderStatusFilter, orders, profile?.id, search, viewMode]);
 
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [search, orderStatusFilter, deliveryStatusFilter, viewMode]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+    const paginatedOrders = useMemo(() => {
+        const safePage = Math.min(currentPage, totalPages);
+        const start = (safePage - 1) * PAGE_SIZE;
+        return filteredOrders.slice(start, start + PAGE_SIZE);
+    }, [currentPage, filteredOrders, totalPages]);
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
     const orderStats = useMemo(() => {
         const completed = filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'completed').length;
         const delivered = filteredOrders.filter((o) => (o.delivery_status || '').toLowerCase() === 'delivered').length;
@@ -814,6 +853,7 @@ const Orders = () => {
                         No hay pedidos convertidos para los filtros seleccionados.
                     </div>
                 ) : (
+                    <div className="space-y-4">
                     <div className="overflow-x-auto">
                         <table className="w-full min-w-[1240px] text-sm">
                             <thead className="bg-gray-50 border-y border-gray-100">
@@ -831,7 +871,7 @@ const Orders = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredOrders.map((order) => (
+                                {paginatedOrders.map((order) => (
                                     <tr key={order.id} className="border-b border-gray-100 last:border-0">
                                         {(() => {
                                             const canResend = canResendOrderEmail(effectiveRole, profile?.id, order);
@@ -956,6 +996,31 @@ const Orders = () => {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <p className="text-xs font-bold text-gray-500">
+                            Mostrando {paginatedOrders.length} de {filteredOrders.length} pedido(s) filtrados. Página {Math.min(currentPage, totalPages)} de {totalPages}.
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                                disabled={currentPage <= 1}
+                                className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-gray-700 transition-all hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Anterior
+                            </button>
+                            <div className="rounded-xl bg-gray-100 px-4 py-2 text-xs font-black uppercase tracking-wider text-gray-700">
+                                {Math.min(currentPage, totalPages)} / {totalPages}
+                            </div>
+                            <button
+                                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                                disabled={currentPage >= totalPages}
+                                className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-gray-700 transition-all hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Siguiente
+                            </button>
+                        </div>
+                    </div>
                     </div>
                 )}
             </div>
