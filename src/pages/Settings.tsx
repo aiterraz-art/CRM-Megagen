@@ -1,15 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { Shield, User, Search, CheckCircle, Ban, Edit, Save, AlertTriangle, Trash2, Mail } from 'lucide-react';
 import { Profile } from '../contexts/UserContext';
 import { googleService } from '../services/googleService';
+import { Database } from '../types/supabase';
 
 type InvitePayload = {
     email: string;
     full_name?: string | null;
     role: string;
 };
+
+type OrderNotificationSettingsRow = Database['public']['Tables']['order_notification_settings']['Row'];
 
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
@@ -39,6 +42,17 @@ const Settings: React.FC = () => {
         needsReconnect: boolean;
     } | null>(null);
     const [loadingGoogleStatus, setLoadingGoogleStatus] = useState(false);
+    const [orderNotificationSettings, setOrderNotificationSettings] = useState<OrderNotificationSettingsRow>({
+        id: 'default',
+        recipient_emails: [],
+        include_backoffice_recipients: true,
+        include_seller_cc: true,
+        updated_at: new Date().toISOString(),
+        updated_by: null
+    });
+    const [orderNotificationRecipientsInput, setOrderNotificationRecipientsInput] = useState('');
+    const [loadingOrderNotificationSettings, setLoadingOrderNotificationSettings] = useState(false);
+    const [savingOrderNotificationSettings, setSavingOrderNotificationSettings] = useState(false);
 
     // RESTORED STATE
     const [tempRole, setTempRole] = useState<string>('');
@@ -58,6 +72,13 @@ const Settings: React.FC = () => {
         if (normalized === 'administrativo') return 'facturador';
         return normalized;
     };
+    const parseEmailList = (raw: string) =>
+        Array.from(new Set(
+            raw
+                .split(/[\n,;]+/g)
+                .map((email) => email.trim().toLowerCase())
+                .filter(Boolean)
+        ));
     const roles = ['admin', 'jefe', 'bodega', 'facturador', 'tesorero', 'seller', 'driver'];
     const permissionList = [
         { key: 'UPLOAD_EXCEL', label: 'Cargar Excel', desc: 'Permite subir archivos de inventario, precios y despacho.' },
@@ -97,6 +118,11 @@ const Settings: React.FC = () => {
         fetchRolePermissions();
         fetchPendingInvites(); // Fetch whitelisted users
     }, []);
+
+    const activeBackofficeRecipients = useMemo(
+        () => users.filter((user) => user.status === 'active' && ['facturador', 'tesorero'].includes(normalizeRole(user.role))),
+        [users]
+    );
 
     const fetchPendingInvites = async () => {
         // Fetch whitelist entries that DO NOT have a corresponding profile
@@ -397,9 +423,76 @@ const Settings: React.FC = () => {
         }
     };
 
+    const fetchOrderNotificationSettings = async () => {
+        setLoadingOrderNotificationSettings(true);
+        try {
+            const { data, error } = await supabase
+                .from('order_notification_settings')
+                .select('*')
+                .eq('id', 'default')
+                .maybeSingle();
+
+            if (error) throw error;
+
+            const nextSettings: OrderNotificationSettingsRow = data || {
+                id: 'default',
+                recipient_emails: [],
+                include_backoffice_recipients: true,
+                include_seller_cc: true,
+                updated_at: new Date().toISOString(),
+                updated_by: null
+            };
+
+            setOrderNotificationSettings(nextSettings);
+            setOrderNotificationRecipientsInput((nextSettings.recipient_emails || []).join('\n'));
+        } catch (error) {
+            console.error('Error fetching order notification settings:', error);
+        } finally {
+            setLoadingOrderNotificationSettings(false);
+        }
+    };
+
+    const handleSaveOrderNotificationSettings = async () => {
+        if (!profile?.id) return;
+
+        const recipientEmails = parseEmailList(orderNotificationRecipientsInput);
+        const invalidEmails = recipientEmails.filter((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+
+        if (invalidEmails.length > 0) {
+            alert(`Hay correos inválidos en la lista: ${invalidEmails.join(', ')}`);
+            return;
+        }
+
+        setSavingOrderNotificationSettings(true);
+        try {
+            const payload: Database['public']['Tables']['order_notification_settings']['Insert'] = {
+                id: 'default',
+                recipient_emails: recipientEmails,
+                include_backoffice_recipients: orderNotificationSettings.include_backoffice_recipients,
+                include_seller_cc: orderNotificationSettings.include_seller_cc,
+                updated_by: profile.id
+            };
+
+            const { error } = await supabase
+                .from('order_notification_settings')
+                .upsert(payload, { onConflict: 'id' });
+
+            if (error) throw error;
+
+            alert('Destinatarios de pedidos actualizados correctamente.');
+            await fetchOrderNotificationSettings();
+        } catch (error: any) {
+            console.error('Error saving order notification settings:', error);
+            alert(`No se pudo guardar la configuración de destinatarios: ${error.message}`);
+        } finally {
+            setSavingOrderNotificationSettings(false);
+        }
+    };
+
     useEffect(() => {
         if (activeTab === 'integrations') {
             fetchGoogleStatus();
+            fetchOrderNotificationSettings();
         }
     }, [activeTab]);
 
@@ -722,6 +815,106 @@ const Settings: React.FC = () => {
                             <p className="text-[11px] text-gray-400 font-medium">
                                 Para ver calendarios ajenos, Google Workspace debe compartir esos calendarios corporativos con jefes o admins.
                             </p>
+                        </div>
+
+                        <div className="bg-white rounded-3xl border border-gray-100 p-8 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-bold text-2xl">
+                                    @
+                                </div>
+                                <div>
+                                    <h4 className="text-lg font-black text-gray-900">Destinatarios de Pedidos</h4>
+                                    <p className="text-xs text-gray-500 font-medium">Correos que reciben los pedidos al convertir cotizaciones</p>
+                                </div>
+                            </div>
+
+                            <div className="bg-gray-50 rounded-2xl p-6 mb-6 space-y-3">
+                                <p className="text-sm text-gray-600 font-medium leading-relaxed">
+                                    Define correos adicionales o reemplaza el comportamiento automático. Si no agregas correos manuales, el sistema seguirá usando facturación y tesorería activas.
+                                </p>
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400 mb-2">Backoffice activo detectado</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {activeBackofficeRecipients.length === 0 ? (
+                                            <span className="text-xs font-bold text-amber-600">No hay facturadores o tesoreros activos detectados.</span>
+                                        ) : (
+                                            activeBackofficeRecipients.map((user) => (
+                                                <span key={user.id} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">
+                                                    {user.email}
+                                                </span>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-[10px] uppercase tracking-widest font-black text-gray-400 mb-2">
+                                        Correos adicionales o personalizados
+                                    </label>
+                                    <textarea
+                                        value={orderNotificationRecipientsInput}
+                                        onChange={(e) => setOrderNotificationRecipientsInput(e.target.value)}
+                                        rows={6}
+                                        placeholder={'facturacion@empresa.cl\npagos@empresa.cl'}
+                                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-4 font-medium text-gray-700 outline-none transition-all focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                                    />
+                                    <p className="mt-2 text-xs text-gray-400 font-medium">
+                                        Usa una línea por correo, o separa por coma o punto y coma.
+                                    </p>
+                                </div>
+
+                                <label className="flex items-start gap-3 rounded-2xl border border-gray-100 p-4">
+                                    <input
+                                        type="checkbox"
+                                        checked={orderNotificationSettings.include_backoffice_recipients}
+                                        onChange={(e) => setOrderNotificationSettings((prev) => ({
+                                            ...prev,
+                                            include_backoffice_recipients: e.target.checked
+                                        }))}
+                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <div>
+                                        <p className="font-black text-gray-900">Incluir facturación y tesorería activas</p>
+                                        <p className="text-xs text-gray-500 font-medium">Mantiene el comportamiento actual además de cualquier correo manual.</p>
+                                    </div>
+                                </label>
+
+                                <label className="flex items-start gap-3 rounded-2xl border border-gray-100 p-4">
+                                    <input
+                                        type="checkbox"
+                                        checked={orderNotificationSettings.include_seller_cc}
+                                        onChange={(e) => setOrderNotificationSettings((prev) => ({
+                                            ...prev,
+                                            include_seller_cc: e.target.checked
+                                        }))}
+                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <div>
+                                        <p className="font-black text-gray-900">Copiar al vendedor en CC</p>
+                                        <p className="text-xs text-gray-500 font-medium">El vendedor que generó o reenvió el pedido quedará copiado en el correo.</p>
+                                    </div>
+                                </label>
+
+                                <div className="flex items-center justify-between pt-2">
+                                    <div className="text-xs text-gray-400 font-medium">
+                                        {loadingOrderNotificationSettings
+                                            ? 'Cargando configuración...'
+                                            : `Última actualización: ${new Date(orderNotificationSettings.updated_at).toLocaleString('es-CL')}`}
+                                    </div>
+                                    <button
+                                        onClick={handleSaveOrderNotificationSettings}
+                                        disabled={savingOrderNotificationSettings || loadingOrderNotificationSettings}
+                                        className={`px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-all ${savingOrderNotificationSettings || loadingOrderNotificationSettings
+                                            ? 'bg-gray-100 text-gray-400'
+                                            : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 shadow-indigo-100'
+                                            }`}
+                                    >
+                                        {savingOrderNotificationSettings ? 'Guardando...' : 'Guardar destinatarios'}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

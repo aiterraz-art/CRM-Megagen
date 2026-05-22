@@ -952,6 +952,32 @@ export interface Database {
                     triggered_by?: string
                 }
             }
+            order_notification_settings: {
+                Row: {
+                    id: string
+                    include_backoffice_recipients: boolean
+                    include_seller_cc: boolean
+                    recipient_emails: string[]
+                    updated_at: string
+                    updated_by: string | null
+                }
+                Insert: {
+                    id?: string
+                    include_backoffice_recipients?: boolean
+                    include_seller_cc?: boolean
+                    recipient_emails?: string[]
+                    updated_at?: string
+                    updated_by?: string | null
+                }
+                Update: {
+                    id?: string
+                    include_backoffice_recipients?: boolean
+                    include_seller_cc?: boolean
+                    recipient_emails?: string[]
+                    updated_at?: string
+                    updated_by?: string | null
+                }
+            }
             quotation_order_conversion_logs: {
                 Row: {
                     actor_id: string

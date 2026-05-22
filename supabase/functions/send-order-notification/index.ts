@@ -17,6 +17,12 @@ type OrderPdfAttachment = {
   contentBase64: string;
 };
 
+type OrderNotificationSettings = {
+  recipient_emails?: string[] | null;
+  include_backoffice_recipients?: boolean | null;
+  include_seller_cc?: boolean | null;
+};
+
 const normalizeEmail = (value: string | null | undefined) => String(value || "").trim().toLowerCase();
 const isBillingBackofficeRole = (role: string | null | undefined) => {
   const normalizedRole = String(role || "").trim().toLowerCase();
@@ -162,7 +168,7 @@ serve(async (req) => {
       throw new Error("No tienes permisos para enviar este pedido a facturación");
     }
 
-    const [clientRes, sellerRes, quotationRes, recipientsRes, senderRes] = await Promise.all([
+    const [clientRes, sellerRes, quotationRes, recipientsRes, senderRes, settingsRes] = await Promise.all([
       serviceClient.from("clients").select("id, name, rut, credit_days").eq("id", order.client_id).single(),
       serviceClient.from("profiles").select("id, full_name, email").eq("id", order.user_id).single(),
       order.quotation_id
@@ -170,6 +176,7 @@ serve(async (req) => {
         : Promise.resolve({ data: null, error: null } as const),
       serviceClient.from("profiles").select("id, full_name, email, role").eq("status", "active").in("role", ["facturador", "tesorero"]),
       serviceClient.from("profiles").select("id, full_name, email, status").eq("email", ORDER_NOTIFICATION_SENDER_EMAIL).maybeSingle(),
+      serviceClient.from("order_notification_settings").select("recipient_emails, include_backoffice_recipients, include_seller_cc").eq("id", "default").maybeSingle(),
     ]);
 
     if (clientRes.error || !clientRes.data) throw clientRes.error || new Error("Client not found");
@@ -177,22 +184,33 @@ serve(async (req) => {
     if (quotationRes.error) throw quotationRes.error;
     if (recipientsRes.error) throw recipientsRes.error;
     if (senderRes.error) throw senderRes.error;
+    if (settingsRes.error) throw settingsRes.error;
     if (!senderRes.data) throw new Error(`No existe un profile para ${ORDER_NOTIFICATION_SENDER_EMAIL}`);
     if (String(senderRes.data.status || "").toLowerCase() !== "active") {
       throw new Error(`La cuenta emisora ${ORDER_NOTIFICATION_SENDER_EMAIL} no está activa`);
     }
 
-    const recipientEmails = Array.from(new Set((recipientsRes.data || [])
+    const settings = (settingsRes.data || null) as OrderNotificationSettings | null;
+    const configuredRecipients = Array.from(new Set((settings?.recipient_emails || [])
+      .map((email) => normalizeEmail(email))
+      .filter(Boolean)));
+    const backofficeRecipients = Array.from(new Set((recipientsRes.data || [])
       .map((row) => normalizeEmail(row.email))
       .filter(Boolean)));
+    const includeBackofficeRecipients = settings?.include_backoffice_recipients !== false;
+    const includeSellerCc = settings?.include_seller_cc !== false;
+    const recipientEmails = Array.from(new Set([
+      ...configuredRecipients,
+      ...(includeBackofficeRecipients ? backofficeRecipients : []),
+    ]));
 
     toRecipients = recipientEmails;
     if (toRecipients.length === 0) {
-      throw new Error("No hay usuarios activos de facturación/tesorería configurados");
+      throw new Error("No hay destinatarios configurados para el envío de pedidos");
     }
 
     const sellerEmail = normalizeEmail(sellerRes.data.email);
-    ccRecipients = sellerEmail ? [sellerEmail] : [];
+    ccRecipients = includeSellerCc && sellerEmail ? [sellerEmail] : [];
     senderEmail = ORDER_NOTIFICATION_SENDER_EMAIL;
 
     const client = clientRes.data;
