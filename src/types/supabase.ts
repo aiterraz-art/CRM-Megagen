@@ -954,6 +954,7 @@ export interface Database {
             }
             order_notification_settings: {
                 Row: {
+                    excluded_backoffice_emails: string[]
                     id: string
                     include_backoffice_recipients: boolean
                     include_seller_cc: boolean
@@ -962,6 +963,7 @@ export interface Database {
                     updated_by: string | null
                 }
                 Insert: {
+                    excluded_backoffice_emails?: string[]
                     id?: string
                     include_backoffice_recipients?: boolean
                     include_seller_cc?: boolean
@@ -970,6 +972,7 @@ export interface Database {
                     updated_by?: string | null
                 }
                 Update: {
+                    excluded_backoffice_emails?: string[]
                     id?: string
                     include_backoffice_recipients?: boolean
                     include_seller_cc?: boolean

@@ -18,6 +18,7 @@ type OrderPdfAttachment = {
 };
 
 type OrderNotificationSettings = {
+  excluded_backoffice_emails?: string[] | null;
   recipient_emails?: string[] | null;
   include_backoffice_recipients?: boolean | null;
   include_seller_cc?: boolean | null;
@@ -176,7 +177,7 @@ serve(async (req) => {
         : Promise.resolve({ data: null, error: null } as const),
       serviceClient.from("profiles").select("id, full_name, email, role").eq("status", "active").in("role", ["facturador", "tesorero"]),
       serviceClient.from("profiles").select("id, full_name, email, status").eq("email", ORDER_NOTIFICATION_SENDER_EMAIL).maybeSingle(),
-      serviceClient.from("order_notification_settings").select("recipient_emails, include_backoffice_recipients, include_seller_cc").eq("id", "default").maybeSingle(),
+      serviceClient.from("order_notification_settings").select("recipient_emails, excluded_backoffice_emails, include_backoffice_recipients, include_seller_cc").eq("id", "default").maybeSingle(),
     ]);
 
     if (clientRes.error || !clientRes.data) throw clientRes.error || new Error("Client not found");
@@ -194,9 +195,12 @@ serve(async (req) => {
     const configuredRecipients = Array.from(new Set((settings?.recipient_emails || [])
       .map((email) => normalizeEmail(email))
       .filter(Boolean)));
+    const excludedBackofficeRecipients = new Set((settings?.excluded_backoffice_emails || [])
+      .map((email) => normalizeEmail(email))
+      .filter(Boolean));
     const backofficeRecipients = Array.from(new Set((recipientsRes.data || [])
       .map((row) => normalizeEmail(row.email))
-      .filter(Boolean)));
+      .filter((email) => Boolean(email) && !excludedBackofficeRecipients.has(email))));
     const includeBackofficeRecipients = settings?.include_backoffice_recipients !== false;
     const includeSellerCc = settings?.include_seller_cc !== false;
     const recipientEmails = Array.from(new Set([

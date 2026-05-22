@@ -44,6 +44,7 @@ const Settings: React.FC = () => {
     const [loadingGoogleStatus, setLoadingGoogleStatus] = useState(false);
     const [orderNotificationSettings, setOrderNotificationSettings] = useState<OrderNotificationSettingsRow>({
         id: 'default',
+        excluded_backoffice_emails: [],
         recipient_emails: [],
         include_backoffice_recipients: true,
         include_seller_cc: true,
@@ -122,6 +123,10 @@ const Settings: React.FC = () => {
     const activeBackofficeRecipients = useMemo(
         () => users.filter((user) => user.status === 'active' && ['facturador', 'tesorero'].includes(normalizeRole(user.role))),
         [users]
+    );
+    const configuredManualRecipients = useMemo(
+        () => parseEmailList(orderNotificationRecipientsInput),
+        [orderNotificationRecipientsInput]
     );
 
     const fetchPendingInvites = async () => {
@@ -436,6 +441,7 @@ const Settings: React.FC = () => {
 
             const nextSettings: OrderNotificationSettingsRow = data || {
                 id: 'default',
+                excluded_backoffice_emails: [],
                 recipient_emails: [],
                 include_backoffice_recipients: true,
                 include_seller_cc: true,
@@ -467,6 +473,7 @@ const Settings: React.FC = () => {
         try {
             const payload: Database['public']['Tables']['order_notification_settings']['Insert'] = {
                 id: 'default',
+                excluded_backoffice_emails: orderNotificationSettings.excluded_backoffice_emails,
                 recipient_emails: recipientEmails,
                 include_backoffice_recipients: orderNotificationSettings.include_backoffice_recipients,
                 include_seller_cc: orderNotificationSettings.include_seller_cc,
@@ -495,6 +502,26 @@ const Settings: React.FC = () => {
             fetchOrderNotificationSettings();
         }
     }, [activeTab]);
+
+    const handleRemoveManualRecipient = (email: string) => {
+        const next = configuredManualRecipients.filter((recipient) => recipient !== email);
+        setOrderNotificationRecipientsInput(next.join('\n'));
+    };
+
+    const handleToggleBackofficeRecipient = (email: string) => {
+        setOrderNotificationSettings((prev) => {
+            const current = new Set((prev.excluded_backoffice_emails || []).map((item) => item.toLowerCase()));
+            if (current.has(email.toLowerCase())) {
+                current.delete(email.toLowerCase());
+            } else {
+                current.add(email.toLowerCase());
+            }
+            return {
+                ...prev,
+                excluded_backoffice_emails: Array.from(current),
+            };
+        });
+    };
 
     if (!profile || effectiveRole !== 'admin') return <div className="p-20 text-center font-bold">Acceso Denegado</div>;
 
@@ -839,12 +866,33 @@ const Settings: React.FC = () => {
                                             <span className="text-xs font-bold text-amber-600">No hay facturadores o tesoreros activos detectados.</span>
                                         ) : (
                                             activeBackofficeRecipients.map((user) => (
-                                                <span key={user.id} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">
-                                                    {user.email}
-                                                </span>
+                                                <div
+                                                    key={user.id}
+                                                    className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black ${
+                                                        orderNotificationSettings.excluded_backoffice_emails.includes((user.email || '').toLowerCase())
+                                                            ? 'bg-gray-100 text-gray-400'
+                                                            : 'bg-indigo-50 text-indigo-700'
+                                                    }`}
+                                                >
+                                                    <span>{user.email}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleToggleBackofficeRecipient((user.email || '').toLowerCase())}
+                                                        className={`rounded-full px-2 py-0.5 text-[10px] ${
+                                                            orderNotificationSettings.excluded_backoffice_emails.includes((user.email || '').toLowerCase())
+                                                                ? 'bg-white text-emerald-600'
+                                                                : 'bg-white text-rose-600'
+                                                        }`}
+                                                    >
+                                                        {orderNotificationSettings.excluded_backoffice_emails.includes((user.email || '').toLowerCase()) ? 'Incluir' : 'Quitar'}
+                                                    </button>
+                                                </div>
                                             ))
                                         )}
                                     </div>
+                                    <p className="mt-2 text-xs text-gray-400 font-medium">
+                                        Puedes quitar uno o más correos automáticos sin cambiar sus roles en el CRM.
+                                    </p>
                                 </div>
                             </div>
 
@@ -863,6 +911,22 @@ const Settings: React.FC = () => {
                                     <p className="mt-2 text-xs text-gray-400 font-medium">
                                         Usa una línea por correo, o separa por coma o punto y coma.
                                     </p>
+                                    {configuredManualRecipients.length > 0 && (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {configuredManualRecipients.map((email) => (
+                                                <div key={email} className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">
+                                                    <span>{email}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveManualRecipient(email)}
+                                                        className="rounded-full bg-white px-2 py-0.5 text-[10px] text-rose-600"
+                                                    >
+                                                        Eliminar
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <label className="flex items-start gap-3 rounded-2xl border border-gray-100 p-4">
