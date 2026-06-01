@@ -831,10 +831,10 @@ const PurchaseOrders: React.FC = () => {
         <div className="space-y-8 pb-12">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.35em] text-slate-400">Logística</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.35em] text-slate-400">Abastecimiento</p>
                     <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-900">Órdenes de Compra</h1>
                     <p className="mt-2 text-lg font-medium text-slate-500">
-                        Gestiona proveedores y emite OC formales desde el inventario con envío directo por Gmail.
+                        Gestiona proveedores y emite OC formales desde abastecimiento con envío directo por Gmail.
                     </p>
                 </div>
 

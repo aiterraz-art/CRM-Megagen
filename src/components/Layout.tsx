@@ -210,7 +210,7 @@ const allMenuEntries: MenuEntry[] = [
         label: 'Órdenes de Compra',
         path: '/purchase-orders',
         icon: <ShoppingBag size={20} />,
-        group: 'logistics',
+        group: 'procurement',
         visibleWhen: ({ canViewPurchaseOrders }) => canViewPurchaseOrders,
     },
     {
