@@ -210,7 +210,7 @@ const PurchaseOrders: React.FC = () => {
                 supabase.from('suppliers').select('*').order('name', { ascending: true }),
                 supabase
                     .from('inventory')
-                    .select('id, sku, name, price, stock_qty, category, is_service_item, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, created_at, demo_available')
+                    .select('id, sku, name, price, stock_qty, category, is_service_item, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, created_at')
                     .or('is_service_item.is.null,is_service_item.eq.false')
                     .order('name', { ascending: true }),
                 supabase.from('purchase_orders').select('*').order('created_at', { ascending: false }).limit(200),
