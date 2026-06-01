@@ -249,7 +249,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/settings',
         icon: <Settings size={20} />,
         group: 'management',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'facturador' || effectiveRole === 'tesorero',
     },
 ];
 

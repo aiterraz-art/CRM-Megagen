@@ -26,12 +26,18 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
 
 const Settings: React.FC = () => {
     const { profile, effectiveRole } = useUser();
+    const isBillingBackoffice = effectiveRole === 'facturador' || effectiveRole === 'tesorero';
+    const canManageGlobalSettings = effectiveRole === 'admin';
+    const canAccessSettings = canManageGlobalSettings || isBillingBackoffice;
+    const canAccessUserAdmin = canManageGlobalSettings;
+    const canAccessPermissionMatrix = canManageGlobalSettings;
+    const canAccessIntegrations = canManageGlobalSettings || isBillingBackoffice;
     const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'owner@company.com';
     const [users, setUsers] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'integrations'>('users');
+    const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'integrations'>(canManageGlobalSettings ? 'users' : 'integrations');
     const [testingSync, setTestingSync] = useState(false);
     const [googleStatus, setGoogleStatus] = useState<{
         googleEmail: string | null;
@@ -503,6 +509,13 @@ const Settings: React.FC = () => {
         }
     }, [activeTab]);
 
+    useEffect(() => {
+        if (!canAccessSettings) return;
+        if (!canManageGlobalSettings && activeTab !== 'integrations') {
+            setActiveTab('integrations');
+        }
+    }, [activeTab, canAccessSettings, canManageGlobalSettings]);
+
     const handleRemoveManualRecipient = (email: string) => {
         const next = configuredManualRecipients.filter((recipient) => recipient !== email);
         setOrderNotificationRecipientsInput(next.join('\n'));
@@ -523,7 +536,7 @@ const Settings: React.FC = () => {
         });
     };
 
-    if (!profile || effectiveRole !== 'admin') return <div className="p-20 text-center font-bold">Acceso Denegado</div>;
+    if (!profile || !canAccessSettings) return <div className="p-20 text-center font-bold">Acceso Denegado</div>;
 
     const filteredUsers = users.filter(u => (u.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || (u.full_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()));
 
@@ -532,17 +545,29 @@ const Settings: React.FC = () => {
             <div className="flex justify-between items-end">
                 <div>
                     <h2 className="text-4xl font-black text-gray-900 tracking-tight">Configuración Global</h2>
-                    <p className="text-gray-400 font-medium mt-1 text-lg">Control maestro de accesos y permisos</p>
+                    <p className="text-gray-400 font-medium mt-1 text-lg">
+                        {canManageGlobalSettings
+                            ? 'Control maestro de accesos y permisos'
+                            : 'Integraciones operativas para correo y Google'}
+                    </p>
                 </div>
                 <div className="flex bg-gray-100 p-1.5 rounded-2xl">
-                    <button onClick={() => setActiveTab('users')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'users' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Usuarios</button>
-                    <button onClick={() => setActiveTab('permissions')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'permissions' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Roles</button>
-                    <button onClick={() => setActiveTab('integrations')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'integrations' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Integraciones</button>
-                    <button onClick={() => setIsInviteModalOpen(true)} className="ml-4 px-6 py-2.5 bg-gray-900 text-white rounded-xl font-bold hover:bg-black transition-all shadow-lg flex items-center gap-2"><User size={16} /> Invitar</button>
+                    {canAccessUserAdmin && (
+                        <button onClick={() => setActiveTab('users')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'users' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Usuarios</button>
+                    )}
+                    {canAccessPermissionMatrix && (
+                        <button onClick={() => setActiveTab('permissions')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'permissions' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Roles</button>
+                    )}
+                    {canAccessIntegrations && (
+                        <button onClick={() => setActiveTab('integrations')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'integrations' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Integraciones</button>
+                    )}
+                    {canAccessUserAdmin && (
+                        <button onClick={() => setIsInviteModalOpen(true)} className="ml-4 px-6 py-2.5 bg-gray-900 text-white rounded-xl font-bold hover:bg-black transition-all shadow-lg flex items-center gap-2"><User size={16} /> Invitar</button>
+                    )}
                 </div>
             </div>
 
-            {activeTab === 'users' ? (
+            {activeTab === 'users' && canAccessUserAdmin ? (
                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-gray-100 overflow-hidden">
                     <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-white/50 backdrop-blur-md sticky top-0 z-20">
                         <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><User className="text-indigo-600" /> Miembros del Equipo</h3>
@@ -707,7 +732,7 @@ const Settings: React.FC = () => {
                         </div>
                     )}
                 </div>
-            ) : activeTab === 'permissions' ? (
+            ) : activeTab === 'permissions' && canAccessPermissionMatrix ? (
                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-gray-100 overflow-hidden">
                     <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
                         <div>
