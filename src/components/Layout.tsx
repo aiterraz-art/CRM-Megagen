@@ -59,6 +59,15 @@ const allMenuEntries: MenuEntry[] = [
         visibleWhen: () => true,
     },
     {
+        id: 'settings-backoffice',
+        label: 'Configuración',
+        path: '/settings',
+        icon: <Settings size={20} />,
+        group: null,
+        isPinned: true,
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'facturador' || effectiveRole === 'tesorero',
+    },
+    {
         id: 'schedule',
         label: 'Agenda',
         path: '/schedule',
@@ -249,7 +258,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/settings',
         icon: <Settings size={20} />,
         group: 'management',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'facturador' || effectiveRole === 'tesorero',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin',
     },
 ];
 
