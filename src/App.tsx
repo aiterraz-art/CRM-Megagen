@@ -45,6 +45,7 @@ const MyDeliveries = loadable(() => import('./pages/MyDeliveries'));
 const ConversionsRanking = loadable(() => import('./pages/ConversionsRanking'));
 const Procurement = loadable(() => import('./pages/Procurement'));
 const KitLoans = loadable(() => import('./pages/KitLoans'));
+const PurchaseOrders = loadable(() => import('./pages/PurchaseOrders'));
 
 const ScreenLoader = () => (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -256,6 +257,7 @@ function App() {
                             <Route path="routes" element={<NonFacturadorGuard><SellerRoutes /></NonFacturadorGuard>} />
                             <Route path="inventory" element={<Inventory />} />
                             <Route path="procurement" element={<PermissionGuard permission="VIEW_PROCUREMENT"><Procurement /></PermissionGuard>} />
+                            <Route path="purchase-orders" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
                             <Route path="kit-loans" element={<PermissionGuard permission="VIEW_KIT_LOANS"><KitLoans /></PermissionGuard>} />
                             <Route path="team" element={<NonFacturadorGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonFacturadorGuard>} />
                             <Route path="pipeline" element={<NonFacturadorGuard><Pipeline /></NonFacturadorGuard>} />

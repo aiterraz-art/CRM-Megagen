@@ -15,9 +15,9 @@ type InvitePayload = {
 type OrderNotificationSettingsRow = Database['public']['Tables']['order_notification_settings']['Row'];
 
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-    admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
+    admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
     jefe: ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS'],
-    bodega: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT'],
+    bodega: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
     facturador: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
     tesorero: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
     seller: ['VIEW_METAS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES'],
@@ -112,6 +112,8 @@ const Settings: React.FC = () => {
         { key: 'VIEW_PROCUREMENT', label: 'Ver Compras', desc: 'Acceso al módulo de solicitudes de productos e importaciones en tránsito.' },
         { key: 'REQUEST_PRODUCTS', label: 'Solicitar Productos', desc: 'Permite crear solicitudes de compra o reposición.' },
         { key: 'MANAGE_PROCUREMENT', label: 'Gestionar Compras', desc: 'Permite administrar solicitudes, importaciones y vínculos con embarques.' },
+        { key: 'VIEW_PURCHASE_ORDERS', label: 'Ver Órdenes de Compra', desc: 'Acceso al módulo logístico de órdenes de compra y proveedores.' },
+        { key: 'MANAGE_PURCHASE_ORDERS', label: 'Gestionar Órdenes de Compra', desc: 'Permite crear, enviar, reenviar y cancelar órdenes de compra.' },
         { key: 'VIEW_KIT_LOANS', label: 'Ver Kits', desc: 'Acceso al módulo de préstamo y seguimiento de kits clínicos.' },
         { key: 'REQUEST_KIT_LOANS', label: 'Solicitar Kits', desc: 'Permite crear solicitudes de préstamo de kits para clientes.' },
         { key: 'MANAGE_KIT_LOANS', label: 'Gestionar Kits', desc: 'Permite registrar kits, despachar préstamos y cerrar devoluciones.' },
@@ -548,7 +550,7 @@ const Settings: React.FC = () => {
                     <p className="text-gray-400 font-medium mt-1 text-lg">
                         {canManageGlobalSettings
                             ? 'Control maestro de accesos y permisos'
-                            : 'Integraciones operativas para correo y Google'}
+                            : 'Integraciones operativas para correo, Google y órdenes de compra'}
                     </p>
                 </div>
                 <div className="flex bg-gray-100 p-1.5 rounded-2xl">
@@ -801,21 +803,21 @@ const Settings: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* Google Calendar Card */}
+                        {/* Google Workspace Card */}
                         <div className="bg-white rounded-3xl border border-gray-100 p-8 shadow-sm hover:shadow-md transition-shadow">
                             <div className="flex items-center gap-4 mb-6">
                                 <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-bold text-2xl">
                                     G
                                 </div>
                                 <div>
-                                    <h4 className="text-lg font-black text-gray-900">Google Calendar</h4>
-                                    <p className="text-xs text-gray-500 font-medium">Sincronización de eventos y visitas</p>
+                                    <h4 className="text-lg font-black text-gray-900">Google Workspace</h4>
+                                    <p className="text-xs text-gray-500 font-medium">Sincronización de eventos, correo y órdenes de compra</p>
                                 </div>
                             </div>
 
                             <div className="bg-gray-50 rounded-2xl p-6 mb-6">
                                 <p className="text-sm text-gray-600 font-medium leading-relaxed">
-                                    Verifica si el sistema tiene permiso para leer y escribir en tu calendario. Si falta un refresh token, usa reconexión explícita sin cerrar sesión.
+                                    Verifica si el sistema tiene permiso para leer y escribir en Google Calendar y Gmail. Si falta un refresh token, usa reconexión explícita sin cerrar sesión.
                                 </p>
                             </div>
 

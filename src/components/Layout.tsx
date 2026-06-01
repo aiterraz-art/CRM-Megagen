@@ -18,6 +18,7 @@ type MenuContext = {
     effectiveRole: string | null | undefined;
     isSupervisor: boolean;
     canViewProcurement: boolean;
+    canViewPurchaseOrders: boolean;
     canViewKitLoans: boolean;
     canViewSizeChanges: boolean;
 };
@@ -205,6 +206,14 @@ const allMenuEntries: MenuEntry[] = [
         visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole),
     },
     {
+        id: 'purchase-orders',
+        label: 'Órdenes de Compra',
+        path: '/purchase-orders',
+        icon: <ShoppingBag size={20} />,
+        group: 'logistics',
+        visibleWhen: ({ canViewPurchaseOrders }) => canViewPurchaseOrders,
+    },
+    {
         id: 'kit-loans',
         label: 'Kits',
         path: '/kit-loans',
@@ -269,6 +278,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [openGroupId, setOpenGroupId] = useState<MenuGroupId | null>(null);
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
+    const canViewPurchaseOrders = hasPermission('VIEW_PURCHASE_ORDERS') || hasPermission('MANAGE_PURCHASE_ORDERS');
     const canViewKitLoans = hasPermission('VIEW_KIT_LOANS');
     const canViewSizeChanges = hasPermission('VIEW_SIZE_CHANGES');
 
@@ -277,10 +287,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             effectiveRole,
             isSupervisor,
             canViewProcurement,
+            canViewPurchaseOrders,
             canViewKitLoans,
             canViewSizeChanges,
         }),
-        [effectiveRole, isSupervisor, canViewProcurement, canViewKitLoans, canViewSizeChanges]
+        [effectiveRole, isSupervisor, canViewProcurement, canViewPurchaseOrders, canViewKitLoans, canViewSizeChanges]
     );
 
     const visibleMenuEntries = useMemo(

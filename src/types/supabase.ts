@@ -572,6 +572,209 @@ export interface Database {
                     full_name?: string | null
                 }
             }
+            suppliers: {
+                Row: {
+                    address: string | null
+                    city: string | null
+                    contact_name: string | null
+                    country: string | null
+                    created_at: string
+                    created_by: string
+                    email: string
+                    id: string
+                    name: string
+                    notes: string | null
+                    phone: string | null
+                    preferred_currency: string | null
+                    status: string
+                    tax_id: string | null
+                    updated_at: string
+                }
+                Insert: {
+                    address?: string | null
+                    city?: string | null
+                    contact_name?: string | null
+                    country?: string | null
+                    created_at?: string
+                    created_by: string
+                    email: string
+                    id?: string
+                    name: string
+                    notes?: string | null
+                    phone?: string | null
+                    preferred_currency?: string | null
+                    status?: string
+                    tax_id?: string | null
+                    updated_at?: string
+                }
+                Update: {
+                    address?: string | null
+                    city?: string | null
+                    contact_name?: string | null
+                    country?: string | null
+                    created_at?: string
+                    created_by?: string
+                    email?: string
+                    id?: string
+                    name?: string
+                    notes?: string | null
+                    phone?: string | null
+                    preferred_currency?: string | null
+                    status?: string
+                    tax_id?: string | null
+                    updated_at?: string
+                }
+            }
+            purchase_orders: {
+                Row: {
+                    created_at: string
+                    created_by: string
+                    currency: string
+                    email_error: string | null
+                    email_status: string
+                    folio: number
+                    general_notes: string | null
+                    id: string
+                    issued_at: string
+                    needed_by_date: string | null
+                    pdf_storage_path: string | null
+                    sent_at: string | null
+                    sent_by: string | null
+                    status: string
+                    subtotal: number
+                    supplier_email_snapshot: string
+                    supplier_id: string
+                    supplier_name_snapshot: string
+                    total_amount: number
+                    total_discount: number
+                    updated_at: string
+                }
+                Insert: {
+                    created_at?: string
+                    created_by: string
+                    currency: string
+                    email_error?: string | null
+                    email_status?: string
+                    folio?: number
+                    general_notes?: string | null
+                    id?: string
+                    issued_at?: string
+                    needed_by_date?: string | null
+                    pdf_storage_path?: string | null
+                    sent_at?: string | null
+                    sent_by?: string | null
+                    status?: string
+                    subtotal?: number
+                    supplier_email_snapshot: string
+                    supplier_id: string
+                    supplier_name_snapshot: string
+                    total_amount?: number
+                    total_discount?: number
+                    updated_at?: string
+                }
+                Update: {
+                    created_at?: string
+                    created_by?: string
+                    currency?: string
+                    email_error?: string | null
+                    email_status?: string
+                    folio?: number
+                    general_notes?: string | null
+                    id?: string
+                    issued_at?: string
+                    needed_by_date?: string | null
+                    pdf_storage_path?: string | null
+                    sent_at?: string | null
+                    sent_by?: string | null
+                    status?: string
+                    subtotal?: number
+                    supplier_email_snapshot?: string
+                    supplier_id?: string
+                    supplier_name_snapshot?: string
+                    total_amount?: number
+                    total_discount?: number
+                    updated_at?: string
+                }
+            }
+            purchase_order_items: {
+                Row: {
+                    discount_amount: number
+                    id: string
+                    inventory_id: string | null
+                    line_notes: string | null
+                    line_total: number
+                    product_name_snapshot: string
+                    purchase_order_id: string
+                    qty: number
+                    sku_snapshot: string
+                    unit_price: number
+                }
+                Insert: {
+                    discount_amount?: number
+                    id?: string
+                    inventory_id?: string | null
+                    line_notes?: string | null
+                    line_total: number
+                    product_name_snapshot: string
+                    purchase_order_id: string
+                    qty: number
+                    sku_snapshot: string
+                    unit_price: number
+                }
+                Update: {
+                    discount_amount?: number
+                    id?: string
+                    inventory_id?: string | null
+                    line_notes?: string | null
+                    line_total?: number
+                    product_name_snapshot?: string
+                    purchase_order_id?: string
+                    qty?: number
+                    sku_snapshot?: string
+                    unit_price?: number
+                }
+            }
+            purchase_order_email_logs: {
+                Row: {
+                    created_at: string
+                    error_message: string | null
+                    gmail_message_id: string | null
+                    gmail_thread_id: string | null
+                    id: string
+                    purchase_order_id: string
+                    sender_email: string
+                    sent_at: string | null
+                    status: string
+                    to_recipients: string[]
+                    triggered_by: string
+                }
+                Insert: {
+                    created_at?: string
+                    error_message?: string | null
+                    gmail_message_id?: string | null
+                    gmail_thread_id?: string | null
+                    id?: string
+                    purchase_order_id: string
+                    sender_email: string
+                    sent_at?: string | null
+                    status: string
+                    to_recipients: string[]
+                    triggered_by: string
+                }
+                Update: {
+                    created_at?: string
+                    error_message?: string | null
+                    gmail_message_id?: string | null
+                    gmail_thread_id?: string | null
+                    id?: string
+                    purchase_order_id?: string
+                    sender_email?: string
+                    sent_at?: string | null
+                    status?: string
+                    to_recipients?: string[]
+                    triggered_by?: string
+                }
+            }
             visits: {
                 Row: {
                     check_in_time: string | null
@@ -1275,6 +1478,12 @@ export interface Database {
                     has_open_request: boolean
                     linked_open_request_id: string | null
                 }[]
+            }
+            create_purchase_order: {
+                Args: {
+                    p_payload: Json
+                }
+                Returns: Json
             }
         }
     }
