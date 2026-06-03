@@ -736,16 +736,6 @@ const PurchaseOrders: React.FC = () => {
 
     const handleOpenPurchaseOrderPdf = async (order: PurchaseOrderView) => {
         try {
-            if (order.pdf_storage_path) {
-                const { data, error } = await supabase.storage
-                    .from(PURCHASE_ORDER_PDF_BUCKET)
-                    .createSignedUrl(order.pdf_storage_path, 60 * 30);
-                if (!error && data?.signedUrl) {
-                    window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
-                    return;
-                }
-            }
-
             const pdfData = buildPurchaseOrderPdfData(order, order.items, order.supplier, order.createdByProfile);
             const pdfFile = await generatePurchaseOrderPdfFile(pdfData);
             const blobUrl = URL.createObjectURL(pdfFile);

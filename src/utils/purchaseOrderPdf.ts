@@ -95,16 +95,19 @@ export const generatePurchaseOrderPdfBlob = async (data: PurchaseOrderPdfData): 
         });
 
         const imgData = canvas.toDataURL('image/png');
-        const imgWidth = 210;
+        const pageWidth = 210;
+        const horizontalMargin = 10;
+        const topMargin = 10;
+        const imgWidth = pageWidth - horizontalMargin * 2;
         const imgHeight = (canvas.height * imgWidth) / canvas.width;
         const pdf = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
-            format: [imgWidth, imgHeight],
+            format: [pageWidth, imgHeight + topMargin * 2],
             compress: true,
         });
 
-        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+        pdf.addImage(imgData, 'PNG', horizontalMargin, topMargin, imgWidth, imgHeight);
         return pdf.output('blob');
     } finally {
         root.unmount();
