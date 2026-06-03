@@ -38,19 +38,19 @@ const PurchaseOrderDocumentContent: React.FC<{ data: PurchaseOrderPdfData }> = (
 
     return (
         <>
-            <div className="flex items-start justify-between mb-10">
-                <div className="space-y-1">
+            <div className="mb-10 grid grid-cols-[minmax(0,1fr)_280px] gap-10 items-start">
+                <div className="min-w-0 space-y-1">
                     <div className="flex items-center space-x-2 mb-4">
                         <img src={companyLogo} alt={companyName} className="h-16 w-auto" />
                     </div>
                     <p className="font-bold text-xs uppercase">{companyName}</p>
-                    <p>{companyGiro}</p>
-                    <p>{companyAddress}</p>
-                    <p>Telefono: {companyPhone}</p>
-                    <p>Email: <span className="text-blue-600 underline">{companyEmail}</span></p>
+                    <p className="break-words">{companyGiro}</p>
+                    <p className="break-words">{companyAddress}</p>
+                    <p className="break-words">Telefono: {companyPhone}</p>
+                    <p className="break-words">Email: <span className="text-blue-600 underline">{companyEmail}</span></p>
                 </div>
 
-                <div className="w-72 border-2 border-slate-900 p-4 text-center rounded-lg space-y-2">
+                <div className="w-full max-w-[280px] justify-self-end rounded-lg border-2 border-slate-900 p-4 text-center space-y-2">
                     <p className="text-slate-700 font-extrabold text-sm tracking-widest">R.U.T: {companyRut}</p>
                     <p className="text-slate-900 font-black text-lg uppercase tracking-wider">Orden de Compra</p>
                     <p className="text-slate-700 font-extrabold text-sm uppercase">OC N° {data.formattedFolio}</p>

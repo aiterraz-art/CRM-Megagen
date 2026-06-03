@@ -70,9 +70,11 @@ export const generatePurchaseOrderPdfBlob = async (data: PurchaseOrderPdfData): 
     sandbox.style.pointerEvents = 'none';
 
     const mountNode = document.createElement('div');
-    mountNode.className = 'bg-white p-6 md:p-12 shadow-sm w-[1000px]';
+    mountNode.className = 'bg-white p-6 md:p-12 shadow-sm';
     mountNode.style.width = '1000px';
     mountNode.style.background = '#ffffff';
+    mountNode.style.boxSizing = 'border-box';
+    mountNode.style.overflow = 'hidden';
 
     sandbox.appendChild(mountNode);
     document.body.appendChild(sandbox);
