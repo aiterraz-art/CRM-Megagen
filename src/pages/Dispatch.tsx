@@ -47,6 +47,7 @@ type OrderFlowSnapshot = {
     quotation_status: string | null;
     payment_email_status: string | null;
     payment_proof_path: string | null;
+    delivery_photo_url: string | null;
 };
 
 type ProfileLite = {
@@ -345,7 +346,7 @@ const Dispatch: React.FC = () => {
 
         const { data: orderRows, error: orderError } = await supabase
             .from('orders')
-            .select('id, status, delivery_status, payment_email_status, payment_proof_path, quotation_id')
+            .select('id, status, delivery_status, payment_email_status, payment_proof_path, delivery_photo_url, quotation_id')
             .in('id', normalizedIds);
 
         if (orderError) throw orderError;
@@ -379,7 +380,8 @@ const Dispatch: React.FC = () => {
                     quotation_folio: quotation?.folio ?? null,
                     quotation_status: quotation?.status ?? null,
                     payment_email_status: order.payment_email_status ?? null,
-                    payment_proof_path: order.payment_proof_path ?? null
+                    payment_proof_path: order.payment_proof_path ?? null,
+                    delivery_photo_url: order.delivery_photo_url ?? null
                 }];
             })
         );
@@ -432,7 +434,8 @@ const Dispatch: React.FC = () => {
                 quotation_folio: null,
                 quotation_status: null,
                 payment_email_status: null,
-                payment_proof_path: null
+                payment_proof_path: null,
+                delivery_photo_url: null
             })
         })));
     };
@@ -800,7 +803,8 @@ const Dispatch: React.FC = () => {
                     quotation_folio: null,
                     quotation_status: null,
                     payment_email_status: null,
-                    payment_proof_path: null
+                    payment_proof_path: null,
+                    delivery_photo_url: null
                 };
                 return {
                     id: item.id,
@@ -1259,6 +1263,7 @@ const Dispatch: React.FC = () => {
                                                 <th className="text-left py-3 pr-4">Vendedor</th>
                                                 <th className="text-left py-3 pr-4">Repartidor</th>
                                                 <th className="text-left py-3 pr-4">Estado</th>
+                                                <th className="text-left py-3 pr-4">Prueba</th>
                                                 <th className="text-left py-3 pr-4">Fecha</th>
                                             </tr>
                                         </thead>
@@ -1274,6 +1279,22 @@ const Dispatch: React.FC = () => {
                                                         <td className="py-3 pr-4 text-slate-600">{item.seller_name_snapshot || item.seller_email_snapshot || '—'}</td>
                                                         <td className="py-3 pr-4 text-slate-600">{driver?.full_name || driver?.email || '—'}</td>
                                                         <td className="py-3 pr-4"><span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${queueStatusClass[item.status]}`}>{queueStatusLabel[item.status]}</span></td>
+                                                        <td className="py-3 pr-4">
+                                                            {item.status === 'delivered' && item.delivery_photo_url ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setProofViewerUrl(item.delivery_photo_url)}
+                                                                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] font-black uppercase tracking-widest text-indigo-700 transition hover:bg-indigo-100"
+                                                                >
+                                                                    <Camera size={14} />
+                                                                    Ver foto
+                                                                </button>
+                                                            ) : item.status === 'delivered' ? (
+                                                                <span className="text-xs font-bold text-gray-400">Sin foto</span>
+                                                            ) : (
+                                                                <span className="text-xs font-bold text-gray-300">—</span>
+                                                            )}
+                                                        </td>
                                                         <td className="py-3 pr-4 text-slate-600">{formatDateTime(effectiveDate)}</td>
                                                     </tr>
                                                 );
