@@ -51,6 +51,7 @@ type SupplierFormState = {
 type PurchaseOrderLineForm = {
     localId: string;
     inventoryId: string;
+    productSearch: string;
     qty: number;
     unitPrice: number;
     discountAmount: number;
@@ -92,6 +93,7 @@ const createEmptySupplierForm = (): SupplierFormState => ({
 const createEmptyOrderLine = (): PurchaseOrderLineForm => ({
     localId: crypto.randomUUID(),
     inventoryId: '',
+    productSearch: '',
     qty: 1,
     unitPrice: 0,
     discountAmount: 0,
@@ -528,6 +530,7 @@ const PurchaseOrders: React.FC = () => {
                 if (field === 'inventoryId') {
                     const product = inventoryMap.get(String(value));
                     if (product) {
+                        nextLine.productSearch = `${product.sku?.trim() || 'SIN-SKU'} · ${product.name}`;
                         nextLine.unitPrice = Number(product.price || 0);
                     }
                 }
@@ -1346,61 +1349,115 @@ const PurchaseOrders: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-4">
-                                    {orderLineDetails.map((line, index) => (
+                                    {orderLineDetails.map((line, index) => {
+                                        const normalizedProductSearch = line.productSearch.trim().toLowerCase();
+                                        const filteredInventoryItems = normalizedProductSearch
+                                            ? inventoryItems.filter((item) =>
+                                                item.id === line.inventoryId || `${item.sku || 'SIN-SKU'} ${item.name} ${item.category || ''}`
+                                                    .toLowerCase()
+                                                    .includes(normalizedProductSearch)
+                                            )
+                                            : inventoryItems;
+
+                                        return (
                                         <div key={line.localId} className="rounded-[1.6rem] border border-slate-100 bg-slate-50/60 p-4">
-                                            <div className="grid gap-3 xl:grid-cols-[minmax(0,2.2fr)_110px_140px_140px_minmax(0,1.2fr)_auto]">
-                                                <select
-                                                    value={line.inventoryId}
-                                                    onChange={(event) => updateOrderLine(line.localId, 'inventoryId', event.target.value)}
-                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
-                                                >
-                                                    <option value="">Producto de inventario *</option>
-                                                    {inventoryItems.map((item) => (
-                                                        <option key={item.id} value={item.id}>
-                                                            {(item.sku || 'SIN-SKU')} · {item.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <input
-                                                    type="number"
-                                                    min={1}
-                                                    step={1}
-                                                    value={line.qty}
-                                                    onChange={(event) => updateOrderLine(line.localId, 'qty', Number(event.target.value || 0))}
-                                                    placeholder="Cant."
-                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
-                                                />
-                                                <input
-                                                    type="number"
-                                                    min={0}
-                                                    step={orderForm.currency === 'CLP' ? 1 : 0.01}
-                                                    value={line.unitPrice}
-                                                    onChange={(event) => updateOrderLine(line.localId, 'unitPrice', Number(event.target.value || 0))}
-                                                    placeholder="Precio"
-                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
-                                                />
-                                                <input
-                                                    type="number"
-                                                    min={0}
-                                                    step={orderForm.currency === 'CLP' ? 1 : 0.01}
-                                                    value={line.discountAmount}
-                                                    onChange={(event) => updateOrderLine(line.localId, 'discountAmount', Number(event.target.value || 0))}
-                                                    placeholder="Descuento"
-                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
-                                                />
-                                                <input
-                                                    value={line.lineNotes}
-                                                    onChange={(event) => updateOrderLine(line.localId, 'lineNotes', event.target.value)}
-                                                    placeholder="Observación línea"
-                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none"
-                                                />
-                                                <div className="flex items-center justify-end gap-2">
-                                                    <div className="rounded-2xl bg-white px-4 py-3 text-right text-sm font-black text-slate-900 shadow-inner">
-                                                        {formatCurrency(line.lineTotal, orderForm.currency)}
+                                            <div className="grid gap-3 xl:grid-cols-[minmax(0,2.2fr)_110px_160px_160px_minmax(0,1.2fr)_auto]">
+                                                <div className="space-y-2">
+                                                    <label className="block text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+                                                        Producto
+                                                    </label>
+                                                    <div className="relative">
+                                                        <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                                                        <input
+                                                            value={line.productSearch}
+                                                            onChange={(event) => updateOrderLine(line.localId, 'productSearch', event.target.value)}
+                                                            placeholder="Buscar por SKU o nombre"
+                                                            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm font-medium text-slate-700 outline-none"
+                                                        />
                                                     </div>
-                                                    <button type="button" onClick={() => removeOrderLine(line.localId)} disabled={orderForm.lines.length === 1} className="rounded-xl border border-rose-200 p-3 text-rose-500 transition hover:bg-rose-50 disabled:opacity-40">
-                                                        <Trash2 size={14} />
-                                                    </button>
+                                                    <select
+                                                        value={line.inventoryId}
+                                                        onChange={(event) => updateOrderLine(line.localId, 'inventoryId', event.target.value)}
+                                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
+                                                    >
+                                                        <option value="">Producto de inventario *</option>
+                                                        {filteredInventoryItems.map((item) => (
+                                                            <option key={item.id} value={item.id}>
+                                                                {(item.sku || 'SIN-SKU')} · {item.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    {normalizedProductSearch && filteredInventoryItems.length === 0 && (
+                                                        <p className="text-xs font-bold text-amber-600">
+                                                            No hay productos que coincidan con la búsqueda.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="block text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+                                                        Cantidad
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        step={1}
+                                                        value={line.qty}
+                                                        onChange={(event) => updateOrderLine(line.localId, 'qty', Number(event.target.value || 0))}
+                                                        placeholder="Cant."
+                                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="block text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+                                                        Precio Unitario
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        step={orderForm.currency === 'CLP' ? 1 : 0.01}
+                                                        value={line.unitPrice}
+                                                        onChange={(event) => updateOrderLine(line.localId, 'unitPrice', Number(event.target.value || 0))}
+                                                        placeholder="Precio"
+                                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="block text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+                                                        Descuento
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        step={orderForm.currency === 'CLP' ? 1 : 0.01}
+                                                        value={line.discountAmount}
+                                                        onChange={(event) => updateOrderLine(line.localId, 'discountAmount', Number(event.target.value || 0))}
+                                                        placeholder="Descuento"
+                                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="block text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+                                                        Observación
+                                                    </label>
+                                                    <input
+                                                        value={line.lineNotes}
+                                                        onChange={(event) => updateOrderLine(line.localId, 'lineNotes', event.target.value)}
+                                                        placeholder="Observación línea"
+                                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="block text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">
+                                                        Total
+                                                    </label>
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        <div className="rounded-2xl bg-white px-4 py-3 text-right text-sm font-black text-slate-900 shadow-inner">
+                                                            {formatCurrency(line.lineTotal, orderForm.currency)}
+                                                        </div>
+                                                        <button type="button" onClick={() => removeOrderLine(line.localId)} disabled={orderForm.lines.length === 1} className="rounded-xl border border-rose-200 p-3 text-rose-500 transition hover:bg-rose-50 disabled:opacity-40">
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -1415,7 +1472,8 @@ const PurchaseOrders: React.FC = () => {
                                                 )}
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
 
