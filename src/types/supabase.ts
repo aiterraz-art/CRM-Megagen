@@ -98,6 +98,7 @@ export interface Database {
                     price: number | null
                     sku: string | null
                     stock_qty: number | null
+                    supplier_id: string | null
                     target_coverage_days: number
                 }
                 Insert: {
@@ -113,6 +114,7 @@ export interface Database {
                     price?: number | null
                     sku?: string | null
                     stock_qty?: number | null
+                    supplier_id?: string | null
                     target_coverage_days?: number
                 }
                 Update: {
@@ -128,6 +130,7 @@ export interface Database {
                     price?: number | null
                     sku?: string | null
                     stock_qty?: number | null
+                    supplier_id?: string | null
                     target_coverage_days?: number
                 }
             }

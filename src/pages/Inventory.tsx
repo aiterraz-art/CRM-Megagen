@@ -21,6 +21,7 @@ import { useUser } from '../contexts/UserContext';
 import { Database } from '../types/supabase';
 
 type InventoryItem = Database['public']['Tables']['inventory']['Row'] & { sku?: string | null };
+type SupplierRow = Database['public']['Tables']['suppliers']['Row'];
 type InventoryMovement = Database['public']['Tables']['inventory_movements']['Row'] & {
     inventory?: Pick<InventoryItem, 'id' | 'sku' | 'name' | 'category'> | null;
     profile?: { full_name?: string | null; email?: string | null } | null;
@@ -53,6 +54,7 @@ const Inventory = () => {
     const canShowActions = canManageInventory || canRequestProducts;
 
     const [items, setItems] = useState<InventoryItem[]>([]);
+    const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
     const [movements, setMovements] = useState<InventoryMovement[]>([]);
     const [rotationMetrics, setRotationMetrics] = useState<RotationMetric[]>([]);
     const [activeTab, setActiveTab] = useState<InventoryTab>('stock');
@@ -90,6 +92,9 @@ const Inventory = () => {
     const [minStockItem, setMinStockItem] = useState<InventoryItem | null>(null);
     const [minStockValue, setMinStockValue] = useState('');
     const [savingMinStock, setSavingMinStock] = useState(false);
+    const [supplierItem, setSupplierItem] = useState<InventoryItem | null>(null);
+    const [supplierValue, setSupplierValue] = useState('');
+    const [savingSupplier, setSavingSupplier] = useState(false);
     const [receiptItem, setReceiptItem] = useState<InventoryItem | null>(null);
     const [receiptQty, setReceiptQty] = useState('1');
     const [receiptShipmentId, setReceiptShipmentId] = useState('');
@@ -108,7 +113,8 @@ const Inventory = () => {
         name: '',
         price: 0,
         stock_qty: 0,
-        category: 'General'
+        category: 'General',
+        supplier_id: ''
     });
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -225,6 +231,14 @@ const Inventory = () => {
         () => Array.from(new Set(items.map((item) => item.category || 'General'))).sort(),
         [items]
     );
+    const activeSuppliers = useMemo(
+        () => suppliers.filter((supplier) => supplier.status === 'active'),
+        [suppliers]
+    );
+    const supplierMap = useMemo(
+        () => new Map(suppliers.map((supplier) => [supplier.id, supplier])),
+        [suppliers]
+    );
 
     const isMissingBackendFeatureError = (error: any) => {
         const message = String(error?.message || error || '').toLowerCase();
@@ -233,17 +247,36 @@ const Inventory = () => {
             message.includes('could not find the function') ||
             message.includes('schema cache') ||
             message.includes('inventory_movements') ||
+            message.includes('supplier_id') ||
+            message.includes('suppliers') ||
             message.includes('target_coverage_days') ||
             message.includes('last_stock_reviewed') ||
             message.includes('min_stock_alert')
         );
     };
 
+    const fetchSuppliers = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('suppliers')
+                .select('id, name, email, status, created_at, created_by, updated_at, address, city, contact_name, country, notes, phone, preferred_currency, tax_id')
+                .order('name', { ascending: true });
+
+            if (error) throw error;
+            setSuppliers((data || []) as SupplierRow[]);
+        } catch (error: any) {
+            if (!isMissingBackendFeatureError(error)) {
+                console.error('Error fetching suppliers for inventory:', error);
+            }
+            setSuppliers([]);
+        }
+    };
+
     const fetchInventory = async () => {
         setLoading(true);
         try {
             const { data, error } = await (supabase.from('inventory') as any)
-                .select('id, sku, name, price, stock_qty, category, created_at, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, is_service_item')
+                .select('id, sku, name, price, stock_qty, category, created_at, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, is_service_item, supplier_id')
                 .eq('is_service_item', false)
                 .order('name');
 
@@ -273,7 +306,8 @@ const Inventory = () => {
                     min_stock_alert: 5,
                     target_coverage_days: 30,
                     last_stock_reviewed_at: null,
-                    last_stock_reviewed_by: null
+                    last_stock_reviewed_by: null,
+                    supplier_id: null
                 })));
             } catch (legacyError: any) {
                 console.error('Error fetching legacy inventory:', legacyError);
@@ -363,6 +397,7 @@ const Inventory = () => {
     };
 
     useEffect(() => {
+        void fetchSuppliers();
         void fetchInventory();
         if (canViewAnalytics) {
             void fetchRotationMetrics({ search: '', onlyAlerts: false });
@@ -484,6 +519,7 @@ const Inventory = () => {
     };
 
     const refreshAll = async () => {
+        await fetchSuppliers();
         await fetchInventory();
         if (canViewAnalytics) {
             await fetchRotationMetrics();
@@ -614,6 +650,7 @@ const Inventory = () => {
                 price: Math.max(0, Number(newProduct.price || 0)),
                 stock_qty: Math.max(0, Math.trunc(Number(newProduct.stock_qty || 0))),
                 category: String(newProduct.category || 'General').trim() || 'General',
+                supplier_id: newProduct.supplier_id || null,
                 min_stock_alert: 5,
                 target_coverage_days: 30
             };
@@ -628,7 +665,8 @@ const Inventory = () => {
                 name: '',
                 price: 0,
                 stock_qty: 0,
-                category: 'General'
+                category: 'General',
+                supplier_id: ''
             });
             await refreshAll();
         } catch (error: any) {
@@ -740,6 +778,39 @@ const Inventory = () => {
         setMinStockItem(null);
         setMinStockValue('');
         setSavingMinStock(false);
+    };
+
+    const openSupplierModal = (item: InventoryItem) => {
+        setSupplierItem(item);
+        setSupplierValue(item.supplier_id || '');
+    };
+
+    const closeSupplierModal = () => {
+        setSupplierItem(null);
+        setSupplierValue('');
+        setSavingSupplier(false);
+    };
+
+    const saveSupplierAssignment = async () => {
+        if (!supplierItem) return;
+
+        setSavingSupplier(true);
+        try {
+            const { error } = await supabase
+                .from('inventory')
+                .update({ supplier_id: supplierValue || null })
+                .eq('id', supplierItem.id);
+
+            if (error) throw error;
+
+            alert('Proveedor del producto actualizado.');
+            closeSupplierModal();
+            await refreshAll();
+        } catch (error: any) {
+            console.error('Error updating inventory supplier:', error);
+            alert(`No se pudo actualizar el proveedor: ${error.message}`);
+            setSavingSupplier(false);
+        }
     };
 
     const saveMinStock = async () => {
@@ -1149,6 +1220,9 @@ const Inventory = () => {
                                                     <div>
                                                         <p className="text-sm font-bold text-gray-900">{item.name}</p>
                                                         <p className="text-[10px] font-medium uppercase text-gray-400">{item.category || 'General'}</p>
+                                                        <p className="mt-1 text-[11px] font-bold text-slate-500">
+                                                            Proveedor: {supplierMap.get(item.supplier_id || '')?.name || 'Sin proveedor'}
+                                                        </p>
                                                     </div>
                                                 </div>
                                             </td>
@@ -1251,6 +1325,15 @@ const Inventory = () => {
                                                                     Editar mínimo
                                                                 </button>
                                                             </>
+                                                        )}
+                                                        {canManageInventory && (
+                                                            <button
+                                                                onClick={() => openSupplierModal(item)}
+                                                                className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-cyan-700 transition-all hover:bg-cyan-100"
+                                                                title="Asignar proveedor"
+                                                            >
+                                                                Proveedor
+                                                            </button>
                                                         )}
                                                         {(canManageInventory || canViewAnalytics) && (
                                                             <button
@@ -1779,6 +1862,21 @@ const Inventory = () => {
                                     onChange={(event) => setNewProduct({ ...newProduct, category: event.target.value })}
                                 />
                             </div>
+                            <div>
+                                <label className="mb-1 block text-xs font-bold uppercase text-gray-400">Proveedor</label>
+                                <select
+                                    className="w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500"
+                                    value={newProduct.supplier_id}
+                                    onChange={(event) => setNewProduct({ ...newProduct, supplier_id: event.target.value })}
+                                >
+                                    <option value="">Sin proveedor asignado</option>
+                                    {activeSuppliers.map((supplier) => (
+                                        <option key={supplier.id} value={supplier.id}>
+                                            {supplier.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
                             <div className="flex justify-end gap-3 pt-2">
                                 <button type="button" onClick={() => setShowNewProductModal(false)} className="rounded-2xl border border-gray-200 px-5 py-3 font-bold text-slate-700">
                                     Cancelar
@@ -1788,6 +1886,51 @@ const Inventory = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {supplierItem && canManageInventory && (
+                <div className="fixed inset-0 z-[2005] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
+                        <div className="flex items-center justify-between bg-cyan-600 p-6 text-white">
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-[0.3em] text-cyan-100">Proveedor del Producto</p>
+                                <h3 className="text-xl font-black">{supplierItem.name}</h3>
+                            </div>
+                            <button onClick={closeSupplierModal} className="rounded-full p-2 transition-all hover:bg-white/20">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="space-y-5 p-6">
+                            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                <p className="text-sm font-bold text-slate-800">SKU: {supplierItem.sku || 'SIN-SKU'}</p>
+                                <p className="mt-1 text-xs text-slate-500">Asigna el proveedor principal para filtrar productos al crear órdenes de compra.</p>
+                            </div>
+                            <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Proveedor asignado</label>
+                                <select
+                                    value={supplierValue}
+                                    onChange={(event) => setSupplierValue(event.target.value)}
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-cyan-300"
+                                >
+                                    <option value="">Sin proveedor asignado</option>
+                                    {activeSuppliers.map((supplier) => (
+                                        <option key={supplier.id} value={supplier.id}>
+                                            {supplier.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex justify-end gap-3">
+                                <button onClick={closeSupplierModal} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">
+                                    Cancelar
+                                </button>
+                                <button onClick={() => void saveSupplierAssignment()} disabled={savingSupplier} className="rounded-2xl bg-cyan-600 px-5 py-3 font-black text-white shadow-lg shadow-cyan-100 disabled:opacity-60">
+                                    {savingSupplier ? 'Guardando...' : 'Guardar proveedor'}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

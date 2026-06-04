@@ -212,7 +212,7 @@ const PurchaseOrders: React.FC = () => {
                 supabase.from('suppliers').select('*').order('name', { ascending: true }),
                 supabase
                     .from('inventory')
-                    .select('id, sku, name, price, stock_qty, category, is_service_item, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, created_at')
+                    .select('id, sku, name, price, stock_qty, category, is_service_item, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, supplier_id, created_at')
                     .or('is_service_item.is.null,is_service_item.eq.false')
                     .order('name', { ascending: true }),
                 supabase.from('purchase_orders').select('*').order('created_at', { ascending: false }).limit(200),
@@ -319,6 +319,10 @@ const PurchaseOrders: React.FC = () => {
         () => suppliers.find((supplier) => supplier.id === orderForm.supplierId) || null,
         [suppliers, orderForm.supplierId]
     );
+    const availableInventoryItems = useMemo(() => {
+        if (!selectedSupplier) return inventoryItems;
+        return inventoryItems.filter((item) => item.supplier_id === selectedSupplier.id);
+    }, [inventoryItems, selectedSupplier]);
 
     useEffect(() => {
         if (selectedSupplier?.preferred_currency && !showOrderModal) {
@@ -1260,18 +1264,25 @@ const PurchaseOrders: React.FC = () => {
                             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
                                 <div className="rounded-[2rem] border border-slate-100 bg-slate-50/70 p-6">
                                     <div className="grid gap-4 md:grid-cols-2">
-                                        <select
-                                            value={orderForm.supplierId}
-                                            onChange={(event) => setOrderForm((current) => ({ ...current, supplierId: event.target.value }))}
-                                            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
-                                        >
-                                            <option value="">Selecciona proveedor *</option>
-                                            {activeSuppliers.map((supplier) => (
-                                                <option key={supplier.id} value={supplier.id}>
-                                                    {supplier.name} · {supplier.email}
-                                                </option>
-                                            ))}
-                                        </select>
+                                        <div className="space-y-2">
+                                            <select
+                                                value={orderForm.supplierId}
+                                                onChange={(event) => setOrderForm((current) => ({ ...current, supplierId: event.target.value }))}
+                                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none"
+                                            >
+                                                <option value="">Selecciona proveedor *</option>
+                                                {activeSuppliers.map((supplier) => (
+                                                    <option key={supplier.id} value={supplier.id}>
+                                                        {supplier.name} · {supplier.email}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            {selectedSupplier && (
+                                                <p className="text-xs font-bold text-slate-500">
+                                                    Se mostrarán solo productos asignados a este proveedor.
+                                                </p>
+                                            )}
+                                        </div>
                                         <select
                                             value={orderForm.currency}
                                             onChange={(event) => setOrderForm((current) => ({ ...current, currency: event.target.value as 'CLP' | 'USD' }))}
@@ -1331,6 +1342,11 @@ const PurchaseOrders: React.FC = () => {
                                     <div>
                                         <p className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Líneas</p>
                                         <h4 className="mt-2 text-2xl font-black tracking-tight text-slate-900">Productos de la OC</h4>
+                                        {selectedSupplier && availableInventoryItems.length === 0 && (
+                                            <p className="mt-2 text-sm font-bold text-amber-600">
+                                                Este proveedor aún no tiene productos asignados en inventario.
+                                            </p>
+                                        )}
                                     </div>
                                     <button type="button" onClick={addOrderLine} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-xs font-black uppercase tracking-[0.2em] text-slate-700 transition hover:bg-slate-50">
                                         <Plus size={14} />
@@ -1342,12 +1358,12 @@ const PurchaseOrders: React.FC = () => {
                                     {orderLineDetails.map((line, index) => {
                                         const normalizedProductSearch = line.productSearch.trim().toLowerCase();
                                         const filteredInventoryItems = normalizedProductSearch
-                                            ? inventoryItems.filter((item) =>
+                                            ? availableInventoryItems.filter((item) =>
                                                 item.id === line.inventoryId || `${item.sku || 'SIN-SKU'} ${item.name} ${item.category || ''}`
                                                     .toLowerCase()
                                                     .includes(normalizedProductSearch)
                                             )
-                                            : inventoryItems;
+                                            : availableInventoryItems;
 
                                         return (
                                         <div key={line.localId} className="rounded-[1.6rem] border border-slate-100 bg-slate-50/60 p-4">
