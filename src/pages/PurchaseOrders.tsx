@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
     AlertTriangle,
     Eye,
@@ -179,8 +180,11 @@ const emailStatusStyleMap: Record<string, string> = {
 const PurchaseOrders: React.FC = () => {
     const { profile, hasPermission } = useUser();
     const canManage = hasPermission('MANAGE_PURCHASE_ORDERS');
+    const location = useLocation();
+    const navigate = useNavigate();
+    const defaultTabFromRoute: PageTab = location.pathname === '/suppliers' ? 'suppliers' : 'orders';
 
-    const [activeTab, setActiveTab] = useState<PageTab>('orders');
+    const [activeTab, setActiveTab] = useState<PageTab>(defaultTabFromRoute);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -305,6 +309,10 @@ const PurchaseOrders: React.FC = () => {
         void fetchModuleData();
     }, [fetchModuleData]);
 
+    useEffect(() => {
+        setActiveTab(defaultTabFromRoute);
+    }, [defaultTabFromRoute]);
+
     const activeSuppliers = useMemo(
         () => suppliers.filter((supplier) => supplier.status === 'active'),
         [suppliers]
@@ -387,6 +395,11 @@ const PurchaseOrders: React.FC = () => {
         total: suppliers.length,
         active: suppliers.filter((supplier) => supplier.status === 'active').length,
     }), [suppliers]);
+
+    const pageTitle = activeTab === 'suppliers' ? 'Proveedores' : 'Órdenes de Compra';
+    const pageDescription = activeTab === 'suppliers'
+        ? 'Administra la base de proveedores para abastecimiento y futuras órdenes de compra.'
+        : 'Gestiona proveedores y emite OC formales desde abastecimiento con envío directo por Gmail.';
 
     const orderLineDetails = useMemo(() => orderForm.lines.map((line) => {
         const product = inventoryMap.get(line.inventoryId) || null;
@@ -829,9 +842,9 @@ const PurchaseOrders: React.FC = () => {
             <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
                 <div>
                     <p className="text-[11px] font-black uppercase tracking-[0.35em] text-slate-400">Abastecimiento</p>
-                    <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-900">Órdenes de Compra</h1>
+                    <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-900">{pageTitle}</h1>
                     <p className="mt-2 text-lg font-medium text-slate-500">
-                        Gestiona proveedores y emite OC formales desde abastecimiento con envío directo por Gmail.
+                        {pageDescription}
                     </p>
                 </div>
 
@@ -890,14 +903,20 @@ const PurchaseOrders: React.FC = () => {
                 <div className="flex flex-wrap items-center gap-3 rounded-[1.6rem] bg-slate-50 p-2">
                     <button
                         type="button"
-                        onClick={() => setActiveTab('orders')}
+                        onClick={() => {
+                            setActiveTab('orders');
+                            navigate('/purchase-orders');
+                        }}
                         className={`rounded-[1.2rem] px-5 py-3 text-sm font-black transition ${activeTab === 'orders' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}
                     >
                         Órdenes
                     </button>
                     <button
                         type="button"
-                        onClick={() => setActiveTab('suppliers')}
+                        onClick={() => {
+                            setActiveTab('suppliers');
+                            navigate('/suppliers');
+                        }}
                         className={`rounded-[1.2rem] px-5 py-3 text-sm font-black transition ${activeTab === 'suppliers' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}
                     >
                         Proveedores

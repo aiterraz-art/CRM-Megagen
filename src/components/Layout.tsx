@@ -214,6 +214,14 @@ const allMenuEntries: MenuEntry[] = [
         visibleWhen: ({ canViewPurchaseOrders }) => canViewPurchaseOrders,
     },
     {
+        id: 'suppliers',
+        label: 'Proveedores',
+        path: '/suppliers',
+        icon: <Users size={20} />,
+        group: 'procurement',
+        visibleWhen: ({ canViewPurchaseOrders }) => canViewPurchaseOrders,
+    },
+    {
         id: 'kit-loans',
         label: 'Kits',
         path: '/kit-loans',

@@ -258,6 +258,7 @@ function App() {
                             <Route path="inventory" element={<Inventory />} />
                             <Route path="procurement" element={<PermissionGuard permission="VIEW_PROCUREMENT"><Procurement /></PermissionGuard>} />
                             <Route path="purchase-orders" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
+                            <Route path="suppliers" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
                             <Route path="kit-loans" element={<PermissionGuard permission="VIEW_KIT_LOANS"><KitLoans /></PermissionGuard>} />
                             <Route path="team" element={<NonFacturadorGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonFacturadorGuard>} />
                             <Route path="pipeline" element={<NonFacturadorGuard><Pipeline /></NonFacturadorGuard>} />
