@@ -147,7 +147,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/visits',
         icon: <ClipboardList size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'seller' && !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
     },
     {
         id: 'pipeline',

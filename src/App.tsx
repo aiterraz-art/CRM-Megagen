@@ -246,7 +246,7 @@ function App() {
                             <Route path="cold-visit" element={<NonFacturadorGuard><ColdVisit /></NonFacturadorGuard>} />
                             <Route path="map" element={<NonFacturadorGuard><MapView /></NonFacturadorGuard>} />
                             <Route path="visit/:clientId" element={<VisitLog />} />
-                            <Route path="visits" element={<NonFacturadorGuard><NonSellerGuard><VisitHistory /></NonSellerGuard></NonFacturadorGuard>} />
+                            <Route path="visits" element={<NonFacturadorGuard><VisitHistory /></NonFacturadorGuard>} />
                             <Route path="schedule" element={<Schedule />} />
                             <Route path="clients" element={<Clients />} />
                             <Route path="quotations" element={<Quotations />} />

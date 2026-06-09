@@ -221,11 +221,13 @@ const VisitHistory = () => {
     const [loading, setLoading] = useState(true);
     const [filters, setFilters] = useState<VisitFilters>(() => parseFiltersFromSearchParams(searchParams));
 
+    const isSellerSelfView = effectiveRole === 'seller';
     const canViewAllTeamVisits = effectiveRole === 'admin'
         || effectiveRole === 'jefe'
         || hasPermission('VIEW_ALL_TEAM_STATS');
     const canViewVisitSummary = effectiveRole === 'admin'
         || effectiveRole === 'jefe'
+        || effectiveRole === 'seller'
         || isSupervisor
         || hasPermission('VIEW_TEAM_STATS')
         || canViewAllTeamVisits;
@@ -250,6 +252,11 @@ const VisitHistory = () => {
     }, [filters, searchParams, setSearchParams]);
 
     useEffect(() => {
+        if (!profile?.id || !isSellerSelfView) return;
+        setFilters((current) => (current.seller === profile.id ? current : { ...current, seller: profile.id }));
+    }, [profile?.id, isSellerSelfView]);
+
+    useEffect(() => {
         const fetchSellerOptions = async () => {
             if (!profile?.id || !canViewVisitSummary) {
                 setSellerOptions([]);
@@ -261,6 +268,22 @@ const VisitHistory = () => {
             setSellerScopeReady(false);
 
             try {
+                if (isSellerSelfView) {
+                    const selfOption = mapProfileToSellerOption({
+                        id: profile.id,
+                        full_name: profile.full_name || null,
+                        email: profile.email || null,
+                        role: effectiveRole || 'seller'
+                    });
+
+                    setSellerOptions(selfOption ? [selfOption] : []);
+                    setSellerScopeIds([profile.id]);
+                    if (filters.seller !== profile.id) {
+                        setFilters((current) => ({ ...current, seller: profile.id }));
+                    }
+                    return;
+                }
+
                 let scopedProfilesQuery = supabase
                     .from('profiles')
                     .select('id, full_name, email, role');
@@ -364,7 +387,7 @@ const VisitHistory = () => {
         };
 
         void fetchSellerOptions();
-    }, [profile?.id, filters.from, filters.to, canViewAllTeamVisits, canViewVisitSummary, permissions]);
+    }, [profile?.id, profile?.full_name, profile?.email, filters.from, filters.to, filters.seller, canViewAllTeamVisits, canViewVisitSummary, isSellerSelfView, effectiveRole, permissions]);
 
     useEffect(() => {
         const fetchVisits = async () => {
@@ -394,7 +417,9 @@ const VisitHistory = () => {
                     .lte('check_in_time', toIso)
                     .order('check_in_time', { ascending: false });
 
-                if (filters.seller !== 'all') {
+                if (isSellerSelfView) {
+                    query = query.eq('sales_rep_id', profile.id);
+                } else if (filters.seller !== 'all') {
                     query = query.eq('sales_rep_id', filters.seller);
                 } else if (!canViewAllTeamVisits && sellerScopeIds.length > 0) {
                     query = query.in('sales_rep_id', sellerScopeIds);
@@ -460,7 +485,8 @@ const VisitHistory = () => {
         sellerScopeIds,
         sellerScopeReady,
         canViewAllTeamVisits,
-        canViewVisitSummary
+        canViewVisitSummary,
+        isSellerSelfView
     ]);
 
     const updateFilter = <K extends keyof VisitFilters>(key: K, value: VisitFilters[K]) => {
