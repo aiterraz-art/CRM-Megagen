@@ -86,6 +86,7 @@ export interface Database {
             }
             inventory: {
                 Row: {
+                    allow_sale_without_stock: boolean
                     category: string | null
                     created_at: string | null
                     demo_available: boolean | null
@@ -102,6 +103,7 @@ export interface Database {
                     target_coverage_days: number
                 }
                 Insert: {
+                    allow_sale_without_stock?: boolean
                     category?: string | null
                     created_at?: string | null
                     demo_available?: boolean | null
@@ -118,6 +120,7 @@ export interface Database {
                     target_coverage_days?: number
                 }
                 Update: {
+                    allow_sale_without_stock?: boolean
                     category?: string | null
                     created_at?: string | null
                     demo_available?: boolean | null

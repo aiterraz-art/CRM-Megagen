@@ -95,6 +95,9 @@ const Inventory = () => {
     const [supplierItem, setSupplierItem] = useState<InventoryItem | null>(null);
     const [supplierValue, setSupplierValue] = useState('');
     const [savingSupplier, setSavingSupplier] = useState(false);
+    const [stockPolicyItem, setStockPolicyItem] = useState<InventoryItem | null>(null);
+    const [stockPolicyValue, setStockPolicyValue] = useState(false);
+    const [savingStockPolicy, setSavingStockPolicy] = useState(false);
     const [receiptItem, setReceiptItem] = useState<InventoryItem | null>(null);
     const [receiptQty, setReceiptQty] = useState('1');
     const [receiptShipmentId, setReceiptShipmentId] = useState('');
@@ -114,7 +117,8 @@ const Inventory = () => {
         price: 0,
         stock_qty: 0,
         category: 'General',
-        supplier_id: ''
+        supplier_id: '',
+        allow_sale_without_stock: false
     });
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -248,6 +252,7 @@ const Inventory = () => {
             message.includes('schema cache') ||
             message.includes('inventory_movements') ||
             message.includes('supplier_id') ||
+            message.includes('allow_sale_without_stock') ||
             message.includes('suppliers') ||
             message.includes('target_coverage_days') ||
             message.includes('last_stock_reviewed') ||
@@ -276,7 +281,7 @@ const Inventory = () => {
         setLoading(true);
         try {
             const { data, error } = await (supabase.from('inventory') as any)
-                .select('id, sku, name, price, stock_qty, category, created_at, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, is_service_item, supplier_id')
+                .select('id, sku, name, price, stock_qty, category, created_at, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, is_service_item, supplier_id, allow_sale_without_stock')
                 .eq('is_service_item', false)
                 .order('name');
 
@@ -303,6 +308,7 @@ const Inventory = () => {
 
                 setItems(((data || []) as InventoryItem[]).map((item) => ({
                     ...item,
+                    allow_sale_without_stock: false,
                     min_stock_alert: 5,
                     target_coverage_days: 30,
                     last_stock_reviewed_at: null,
@@ -651,6 +657,7 @@ const Inventory = () => {
                 stock_qty: Math.max(0, Math.trunc(Number(newProduct.stock_qty || 0))),
                 category: String(newProduct.category || 'General').trim() || 'General',
                 supplier_id: newProduct.supplier_id || null,
+                allow_sale_without_stock: Boolean(newProduct.allow_sale_without_stock),
                 min_stock_alert: 5,
                 target_coverage_days: 30
             };
@@ -666,7 +673,8 @@ const Inventory = () => {
                 price: 0,
                 stock_qty: 0,
                 category: 'General',
-                supplier_id: ''
+                supplier_id: '',
+                allow_sale_without_stock: false
             });
             await refreshAll();
         } catch (error: any) {
@@ -810,6 +818,41 @@ const Inventory = () => {
             console.error('Error updating inventory supplier:', error);
             alert(`No se pudo actualizar el proveedor: ${error.message}`);
             setSavingSupplier(false);
+        }
+    };
+
+    const openStockPolicyModal = (item: InventoryItem) => {
+        setStockPolicyItem(item);
+        setStockPolicyValue(Boolean(item.allow_sale_without_stock));
+    };
+
+    const closeStockPolicyModal = () => {
+        setStockPolicyItem(null);
+        setStockPolicyValue(false);
+        setSavingStockPolicy(false);
+    };
+
+    const saveStockPolicy = async () => {
+        if (!stockPolicyItem) return;
+
+        setSavingStockPolicy(true);
+        try {
+            const { error } = await supabase
+                .from('inventory')
+                .update({ allow_sale_without_stock: stockPolicyValue })
+                .eq('id', stockPolicyItem.id);
+
+            if (error) throw error;
+
+            alert(stockPolicyValue
+                ? 'El producto ya puede convertirse a pedido aunque no tenga stock.'
+                : 'El producto volverá a exigir stock disponible para convertirse a pedido.');
+            closeStockPolicyModal();
+            await refreshAll();
+        } catch (error: any) {
+            console.error('Error updating stock policy:', error);
+            alert(`No se pudo actualizar la política de stock: ${error.message}`);
+            setSavingStockPolicy(false);
         }
     };
 
@@ -1223,6 +1266,11 @@ const Inventory = () => {
                                                         <p className="mt-1 text-[11px] font-bold text-slate-500">
                                                             Proveedor: {supplierMap.get(item.supplier_id || '')?.name || 'Sin proveedor'}
                                                         </p>
+                                                        <p className="mt-1">
+                                                            <span className={`rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-wide ${item.allow_sale_without_stock ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                                {item.allow_sale_without_stock ? 'Permite pedido sin stock' : 'Requiere stock para pedido'}
+                                                            </span>
+                                                        </p>
                                                     </div>
                                                 </div>
                                             </td>
@@ -1327,13 +1375,22 @@ const Inventory = () => {
                                                             </>
                                                         )}
                                                         {canManageInventory && (
-                                                            <button
-                                                                onClick={() => openSupplierModal(item)}
-                                                                className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-cyan-700 transition-all hover:bg-cyan-100"
-                                                                title="Asignar proveedor"
-                                                            >
-                                                                Proveedor
-                                                            </button>
+                                                            <>
+                                                                <button
+                                                                    onClick={() => openSupplierModal(item)}
+                                                                    className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-cyan-700 transition-all hover:bg-cyan-100"
+                                                                    title="Asignar proveedor"
+                                                                >
+                                                                    Proveedor
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => openStockPolicyModal(item)}
+                                                                    className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-violet-700 transition-all hover:bg-violet-100"
+                                                                    title="Configurar si este producto puede venderse sin stock"
+                                                                >
+                                                                    Sin stock
+                                                                </button>
+                                                            </>
                                                         )}
                                                         {(canManageInventory || canViewAnalytics) && (
                                                             <button
@@ -1877,6 +1934,20 @@ const Inventory = () => {
                                     ))}
                                 </select>
                             </div>
+                            <label className="flex items-start gap-3 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-4">
+                                <input
+                                    type="checkbox"
+                                    checked={newProduct.allow_sale_without_stock}
+                                    onChange={(event) => setNewProduct({ ...newProduct, allow_sale_without_stock: event.target.checked })}
+                                    className="mt-1 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
+                                />
+                                <div>
+                                    <p className="text-sm font-black text-violet-900">Permitir convertir a pedido sin stock</p>
+                                    <p className="mt-1 text-xs font-medium text-violet-700">
+                                        Si lo marcas, este producto podrá generar pedidos aunque el stock disponible sea insuficiente. El stock podrá quedar negativo.
+                                    </p>
+                                </div>
+                            </label>
                             <div className="flex justify-end gap-3 pt-2">
                                 <button type="button" onClick={() => setShowNewProductModal(false)} className="rounded-2xl border border-gray-200 px-5 py-3 font-bold text-slate-700">
                                     Cancelar
@@ -1928,6 +1999,52 @@ const Inventory = () => {
                                 </button>
                                 <button onClick={() => void saveSupplierAssignment()} disabled={savingSupplier} className="rounded-2xl bg-cyan-600 px-5 py-3 font-black text-white shadow-lg shadow-cyan-100 disabled:opacity-60">
                                     {savingSupplier ? 'Guardando...' : 'Guardar proveedor'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {stockPolicyItem && canManageInventory && (
+                <div className="fixed inset-0 z-[2006] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
+                        <div className="flex items-center justify-between bg-violet-600 p-6 text-white">
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-[0.3em] text-violet-100">Política de Stock</p>
+                                <h3 className="text-xl font-black">{stockPolicyItem.name}</h3>
+                            </div>
+                            <button onClick={closeStockPolicyModal} className="rounded-full p-2 transition-all hover:bg-white/20">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="space-y-5 p-6">
+                            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                <p className="text-sm font-bold text-slate-800">SKU: {stockPolicyItem.sku || 'SIN-SKU'}</p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                    Define si este producto puede convertirse a pedido aunque el stock actual no alcance. Si lo permites, el stock podrá quedar negativo.
+                                </p>
+                            </div>
+                            <label className="flex items-start gap-3 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-4">
+                                <input
+                                    type="checkbox"
+                                    checked={stockPolicyValue}
+                                    onChange={(event) => setStockPolicyValue(event.target.checked)}
+                                    className="mt-1 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
+                                />
+                                <div>
+                                    <p className="text-sm font-black text-violet-900">Permitir pedido sin stock</p>
+                                    <p className="mt-1 text-xs font-medium text-violet-700">
+                                        Úsalo solo en productos que deban poder venderse bajo pedido o con reposición posterior.
+                                    </p>
+                                </div>
+                            </label>
+                            <div className="flex justify-end gap-3">
+                                <button onClick={closeStockPolicyModal} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">
+                                    Cancelar
+                                </button>
+                                <button onClick={() => void saveStockPolicy()} disabled={savingStockPolicy} className="rounded-2xl bg-violet-600 px-5 py-3 font-black text-white shadow-lg shadow-violet-100 disabled:opacity-60">
+                                    {savingStockPolicy ? 'Guardando...' : 'Guardar política'}
                                 </button>
                             </div>
                         </div>
