@@ -47,6 +47,7 @@ const Inventory = () => {
     const isSellerReadOnly = effectiveRole === 'seller';
     const canViewAnalytics = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canManageInventory = !isSellerReadOnly && hasPermission('MANAGE_INVENTORY');
+    const canManageStocklessOrders = effectiveRole === 'admin' || effectiveRole === 'bodega';
     const canManageStockControls = canManageInventory && canViewAnalytics;
     const canUploadInventory = !isSellerReadOnly && hasPermission('UPLOAD_EXCEL');
     const canRequestProducts = hasPermission('REQUEST_PRODUCTS');
@@ -1383,6 +1384,10 @@ const Inventory = () => {
                                                                 >
                                                                     Proveedor
                                                                 </button>
+                                                            </>
+                                                        )}
+                                                        {canManageStocklessOrders && (
+                                                            <>
                                                                 <button
                                                                     onClick={() => openStockPolicyModal(item)}
                                                                     className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-violet-700 transition-all hover:bg-violet-100"
@@ -1934,20 +1939,22 @@ const Inventory = () => {
                                     ))}
                                 </select>
                             </div>
-                            <label className="flex items-start gap-3 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-4">
-                                <input
-                                    type="checkbox"
-                                    checked={newProduct.allow_sale_without_stock}
-                                    onChange={(event) => setNewProduct({ ...newProduct, allow_sale_without_stock: event.target.checked })}
-                                    className="mt-1 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
-                                />
-                                <div>
-                                    <p className="text-sm font-black text-violet-900">Permitir convertir a pedido sin stock</p>
-                                    <p className="mt-1 text-xs font-medium text-violet-700">
-                                        Si lo marcas, este producto podrá generar pedidos aunque el stock disponible sea insuficiente. El stock podrá quedar negativo.
-                                    </p>
-                                </div>
-                            </label>
+                            {canManageStocklessOrders && (
+                                <label className="flex items-start gap-3 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-4">
+                                    <input
+                                        type="checkbox"
+                                        checked={newProduct.allow_sale_without_stock}
+                                        onChange={(event) => setNewProduct({ ...newProduct, allow_sale_without_stock: event.target.checked })}
+                                        className="mt-1 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
+                                    />
+                                    <div>
+                                        <p className="text-sm font-black text-violet-900">Permitir convertir a pedido sin stock</p>
+                                        <p className="mt-1 text-xs font-medium text-violet-700">
+                                            Si lo marcas, este producto podrá generar pedidos aunque el stock disponible sea insuficiente. El stock podrá quedar negativo.
+                                        </p>
+                                    </div>
+                                </label>
+                            )}
                             <div className="flex justify-end gap-3 pt-2">
                                 <button type="button" onClick={() => setShowNewProductModal(false)} className="rounded-2xl border border-gray-200 px-5 py-3 font-bold text-slate-700">
                                     Cancelar
@@ -2006,7 +2013,7 @@ const Inventory = () => {
                 </div>
             )}
 
-            {stockPolicyItem && canManageInventory && (
+            {stockPolicyItem && canManageStocklessOrders && (
                 <div className="fixed inset-0 z-[2006] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
                     <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
                         <div className="flex items-center justify-between bg-violet-600 p-6 text-white">
