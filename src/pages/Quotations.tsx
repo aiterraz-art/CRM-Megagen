@@ -16,6 +16,7 @@ import { buildQuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import { generateQuotationPdfFile } from '../utils/quotationPdf';
 import { uploadFileToStorage } from '../utils/storageUpload';
+import { isProspectStatus } from '../utils/prospect';
 import QuotationOrderConversionHistoryModal from '../components/modals/QuotationOrderConversionHistoryModal';
 import { Database } from '../types/supabase';
 
@@ -1002,6 +1003,7 @@ const Quotations: React.FC = () => {
         setCreateError(null);
 
         try {
+            const shouldPromoteProspectToEvaluating = isProspectStatus(selectedClient.status);
             let latitude: number | null = null;
             let longitude: number | null = null;
             const shouldCaptureSellerLocation = !(canAssignQuotationSeller(effectiveRole) && sellerIdForQuotation !== profile.id);
@@ -1065,6 +1067,15 @@ const Quotations: React.FC = () => {
                     .eq('id', editingQuotation.id);
 
                 if (updateError) throw updateError;
+                if (shouldPromoteProspectToEvaluating) {
+                    const { error: clientStatusError } = await supabase
+                        .from('clients')
+                        .update({ status: 'prospect_evaluating' })
+                        .eq('id', selectedClient.id)
+                        .in('status', ['prospect', 'prospect_new', 'prospect_contacted', 'prospect_evaluating']);
+
+                    if (clientStatusError) throw clientStatusError;
+                }
                 if (shouldCreateApprovalRequest) {
                     const { data: approvalRow, error: approvalError } = await supabase
                         .from('approval_requests')
@@ -1115,6 +1126,15 @@ const Quotations: React.FC = () => {
                     .single();
 
                 if (insertError) throw insertError;
+                if (shouldPromoteProspectToEvaluating) {
+                    const { error: clientStatusError } = await supabase
+                        .from('clients')
+                        .update({ status: 'prospect_evaluating' })
+                        .eq('id', selectedClient.id)
+                        .in('status', ['prospect', 'prospect_new', 'prospect_contacted', 'prospect_evaluating']);
+
+                    if (clientStatusError) throw clientStatusError;
+                }
                 if (shouldStartAsSent && insertData?.id) {
                     await markQuotationAsSent(insertData.id);
                 }
