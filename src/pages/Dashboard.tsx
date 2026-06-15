@@ -117,6 +117,14 @@ const Dashboard = () => {
 
     const [dailyVisits, setDailyVisits] = useState<any[]>([]);
     const [adminSummary, setAdminSummary] = useState<any[]>([]);
+    const [teamDashboardTotals, setTeamDashboardTotals] = useState({
+        todayVisits: 0,
+        todaySalesNet: 0,
+        averageDailyMonthSales: 0,
+        pendingVisitsNoQuote: 0,
+        pendingQuotesNoOrder: 0,
+        monthSalesNet: 0
+    });
     const [selectedVisitForEvidence, setSelectedVisitForEvidence] = useState<any | null>(null);
     const [neglectedClients, setNeglectedClients] = useState<any[]>([]);
     const [selectedDate, setSelectedDate] = useState(new Date());
@@ -438,87 +446,202 @@ const Dashboard = () => {
             }
 
             if (hasPermission('VIEW_TEAM_STATS')) {
-                // Admin/Supervisor Logic
-                const { data: sellers } = await supabase
+                const canViewAllTeam = profile?.role === 'admin';
+                let sellersQuery = supabase
                     .from('profiles')
-                    .select('id, email, full_name, role');
+                    .select('id, email, full_name, role, status');
 
-                const summary = await Promise.all((sellers || []).map(async (seller) => {
-                    const now = new Date(); // Re-declare now locally inside map async
+                if (canViewAllTeam) {
+                    sellersQuery = sellersQuery.eq('role', 'seller');
+                } else if (profile?.id) {
+                    sellersQuery = sellersQuery.eq('supervisor_id', profile.id).eq('role', 'seller');
+                }
 
-                    // 1. Visits
-                    const { data: vData } = await supabase.from('visits').select('client_id, check_in_time, check_out_time').eq('sales_rep_id', seller.id).gte('check_in_time', isoStart).lte('check_in_time', isoEnd);
-                    // 2. Orders
-                    const { data: oData } = await supabase.from('orders').select('id, client_id, total_amount, visit_id').eq('user_id', seller.id).not('quotation_id', 'is', null).gte('created_at', isoStart).lte('created_at', isoEnd);
-                    // 3. Calls
-                    const { data: lData } = await supabase.from('call_logs').select('client_id').eq('user_id', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
-                    // 4. Quotations
-                    const { data: qData } = await supabase.from('quotations').select('client_id, interaction_type').eq('seller_id', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
-                    // 5. New Clients
-                    const { count: cCount, data: cData } = await supabase.from('clients').select('name', { count: 'exact' }).eq('created_by', seller.id).gte('created_at', isoStart).lte('created_at', isoEnd);
-                    // 6. Goal & Sales
-                    const currentMonth = now.getMonth() + 1;
-                    const currentYear = now.getFullYear();
-                    const firstDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)).toISOString();
-                    const lastDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
-                    const { data: sellerGoal } = await supabase.from('goals').select('target_amount').eq('user_id', seller.id).eq('month', currentMonth).eq('year', currentYear).maybeSingle();
-                    const { data: mOrders } = await supabase.from('orders').select('total_amount').eq('user_id', seller.id).not('quotation_id', 'is', null).gte('created_at', firstDayOfMonth).lte('created_at', lastDayOfMonth);
+                const { data: sellers } = await sellersQuery;
+                const activeSellers = (sellers || []).filter((seller: any) => seller.status === 'active');
+                const sellerIds = activeSellers.map((seller: any) => seller.id);
 
-                    let sellerMonthSales = 0;
-                    mOrders?.forEach(o => sellerMonthSales += grossToNet(o.total_amount));
-
-                    // 7. Last Zone
-                    const { data: lastV } = await supabase.from('visits').select('clients(zone)').eq('sales_rep_id', seller.id).order('check_in_time', { ascending: false }).limit(1).maybeSingle();
-
-                    // Calculate Time
-                    let totalMinutes = 0;
-                    const handledClientIds = new Set();
-                    vData?.forEach(v => {
-                        handledClientIds.add(v.client_id);
-                        const start = new Date(v.check_in_time).getTime();
-                        const end = v.check_out_time ? new Date(v.check_out_time).getTime() : new Date().getTime();
-                        totalMinutes += Math.max(0, Math.floor((end - start) / 60000));
+                if (sellerIds.length === 0) {
+                    setAdminSummary([]);
+                    setTeamDashboardTotals({
+                        todayVisits: 0,
+                        todaySalesNet: 0,
+                        averageDailyMonthSales: 0,
+                        pendingVisitsNoQuote: 0,
+                        pendingQuotesNoOrder: 0,
+                        monthSalesNet: 0
                     });
-                    oData?.forEach(o => { if (!o.visit_id) { handledClientIds.add(o.client_id); totalMinutes += 15; } });
-                    lData?.forEach(l => { handledClientIds.add(l.client_id); totalMinutes += 7; });
-                    qData?.forEach(q => {
-                        handledClientIds.add(q.client_id);
-                        if (q.interaction_type === 'WhatsApp' || q.interaction_type === 'Teléfono') totalMinutes += 7;
-                        else if (!vData?.some(v => v.client_id === q.client_id)) totalMinutes += 20;
+                    setStats({
+                        todayVisits: 0,
+                        effectiveHours: 'Resumen de equipo',
+                        zones: [],
+                        recentVisits: [],
+                        newClientsToday: 0,
+                        quotationsToday: 0
+                    });
+                } else {
+                    const teamNow = new Date();
+                    const teamCurrentMonth = teamNow.getMonth() + 1;
+                    const teamCurrentYear = teamNow.getFullYear();
+                    const teamFirstDayOfMonth = new Date(Date.UTC(teamNow.getFullYear(), teamNow.getMonth(), 1, 0, 0, 0, 0)).toISOString();
+                    const teamLastDayOfMonth = new Date(Date.UTC(teamNow.getFullYear(), teamNow.getMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
+                    const startOfToday = new Date(selectedDate);
+                    startOfToday.setHours(0, 0, 0, 0);
+                    const endOfToday = new Date(selectedDate);
+                    endOfToday.setHours(23, 59, 59, 999);
+
+                    const yesterdayDate = new Date(startOfToday);
+                    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                    const startOfYesterday = new Date(yesterdayDate);
+                    startOfYesterday.setHours(0, 0, 0, 0);
+                    const endOfYesterday = new Date(yesterdayDate);
+                    endOfYesterday.setHours(23, 59, 59, 999);
+                    const daysElapsedInMonth = Math.max(1, teamNow.getDate());
+
+                    const [
+                        { data: todayVisitsRows },
+                        { data: todayOrdersRows },
+                        { data: monthOrdersRows },
+                        { data: yesterdayVisitsRows },
+                        { data: yesterdayQuotesRows },
+                        { data: teamGoalsRows },
+                    ] = await Promise.all([
+                        supabase
+                            .from('visits')
+                            .select('id, sales_rep_id, client_id, check_in_time, status')
+                            .in('sales_rep_id', sellerIds)
+                            .gte('check_in_time', startOfToday.toISOString())
+                            .lte('check_in_time', endOfToday.toISOString())
+                            .neq('status', 'cancelled'),
+                        supabase
+                            .from('orders')
+                            .select('id, user_id, total_amount, status, quotation_id, created_at')
+                            .in('user_id', sellerIds)
+                            .not('quotation_id', 'is', null)
+                            .gte('created_at', startOfToday.toISOString())
+                            .lte('created_at', endOfToday.toISOString()),
+                        supabase
+                            .from('orders')
+                            .select('id, user_id, total_amount, status, quotation_id, created_at')
+                            .in('user_id', sellerIds)
+                            .not('quotation_id', 'is', null)
+                            .gte('created_at', teamFirstDayOfMonth)
+                            .lte('created_at', teamLastDayOfMonth),
+                        supabase
+                            .from('visits')
+                            .select('id, sales_rep_id, client_id, check_in_time, clients(name, comuna, zone)')
+                            .in('sales_rep_id', sellerIds)
+                            .eq('status', 'completed')
+                            .not('client_id', 'is', null)
+                            .gte('check_in_time', startOfYesterday.toISOString())
+                            .lte('check_in_time', endOfYesterday.toISOString()),
+                        supabase
+                            .from('quotations')
+                            .select('id, folio, seller_id, client_id, status, total_amount, created_at, clients(name)')
+                            .in('seller_id', sellerIds)
+                            .in('status', ['sent', 'approved'])
+                            .gte('created_at', startOfYesterday.toISOString())
+                            .lte('created_at', endOfYesterday.toISOString()),
+                        supabase
+                            .from('goals')
+                            .select('user_id, target_amount')
+                            .in('user_id', sellerIds)
+                            .eq('month', teamCurrentMonth)
+                            .eq('year', teamCurrentYear),
+                    ]);
+
+                    const yesterdayVisitClientIds = Array.from(
+                        new Set(((yesterdayVisitsRows || []) as any[]).map((visit: any) => visit.client_id).filter(Boolean))
+                    );
+
+                    let quotesForVisitedClients: any[] = [];
+                    if (yesterdayVisitClientIds.length > 0) {
+                        const { data } = await supabase
+                            .from('quotations')
+                            .select('seller_id, client_id, created_at')
+                            .in('seller_id', sellerIds)
+                            .in('client_id', yesterdayVisitClientIds)
+                            .gte('created_at', startOfYesterday.toISOString());
+                        quotesForVisitedClients = data || [];
+                    }
+
+                    const yesterdayQuoteIds = ((yesterdayQuotesRows || []) as any[]).map((quote: any) => quote.id);
+                    let convertedQuoteIds = new Set<string>();
+                    if (yesterdayQuoteIds.length > 0) {
+                        const { data } = await supabase
+                            .from('orders')
+                            .select('quotation_id')
+                            .in('quotation_id', yesterdayQuoteIds);
+                        convertedQuoteIds = new Set((data || []).map((order: any) => order.quotation_id).filter(Boolean));
+                    }
+
+                    const goalsBySeller = new Map<string, number>();
+                    (teamGoalsRows || []).forEach((goal: any) => {
+                        goalsBySeller.set(goal.user_id, Number(goal.target_amount) || 0);
                     });
 
-                    const hours = totalMinutes / 60;
-                    return {
-                        id: seller.id,
-                        name: seller.full_name || seller.email?.split('@')[0].toUpperCase(),
-                        role: seller.role,
-                        visits: handledClientIds.size,
-                        clientsCreated: cCount || 0,
-                        newClientNames: (cData || []).map(c => c.name),
-                        quoteAmount: oData?.reduce((sum, o) => sum + grossToNet(o.total_amount), 0) || 0,
-                        quoteCount: oData?.length || 0,
-                        quotationCount: qData?.length || 0,
-                        callCount: lData?.length || 0,
-                        hours: `${Math.floor(hours)}h ${Math.round((hours % 1) * 60)}m`,
-                        totalMinutes,
-                        zone: (lastV?.clients as any)?.zone || 'N/A',
-                        monthlyGoal: sellerGoal?.target_amount || 0,
-                        monthlySales: sellerMonthSales
+                    const summary = activeSellers.map((seller: any) => {
+                        const sellerTodayVisits = ((todayVisitsRows || []) as any[]).filter((visit: any) => visit.sales_rep_id === seller.id);
+                        const sellerTodayOrders = ((todayOrdersRows || []) as any[]).filter((order: any) => order.user_id === seller.id && order.status !== 'cancelled' && order.status !== 'rejected');
+                        const sellerMonthOrders = ((monthOrdersRows || []) as any[]).filter((order: any) => order.user_id === seller.id && order.status !== 'cancelled' && order.status !== 'rejected');
+                        const sellerYesterdayVisits = ((yesterdayVisitsRows || []) as any[]).filter((visit: any) => visit.sales_rep_id === seller.id);
+                        const sellerYesterdayQuotes = ((yesterdayQuotesRows || []) as any[]).filter((quote: any) => quote.seller_id === seller.id);
+
+                        const pendingVisitsNoQuote = sellerYesterdayVisits.filter((visit: any) => {
+                            if (!visit.client_id || !visit.check_in_time) return false;
+                            const visitAt = new Date(visit.check_in_time).getTime();
+                            return !quotesForVisitedClients.some((quote: any) => {
+                                if (quote.seller_id !== seller.id || quote.client_id !== visit.client_id || !quote.created_at) return false;
+                                return new Date(quote.created_at).getTime() >= visitAt;
+                            });
+                        }).length;
+
+                        const pendingQuotesNoOrder = sellerYesterdayQuotes.filter((quote: any) => !convertedQuoteIds.has(quote.id)).length;
+                        const todaySalesNet = sellerTodayOrders.reduce((sum: number, order: any) => sum + grossToNet(order.total_amount), 0);
+                        const monthSalesNet = sellerMonthOrders.reduce((sum: number, order: any) => sum + grossToNet(order.total_amount), 0);
+
+                        return {
+                            id: seller.id,
+                            name: seller.full_name || seller.email?.split('@')[0].toUpperCase(),
+                            role: seller.role,
+                            todayVisits: sellerTodayVisits.length,
+                            todaySalesNet,
+                            averageDailyMonthSales: monthSalesNet / daysElapsedInMonth,
+                            pendingVisitsNoQuote,
+                            pendingQuotesNoOrder,
+                            monthSalesNet,
+                            monthlyGoal: goalsBySeller.get(seller.id) || 0
+                        };
+                    });
+
+                    setAdminSummary(summary);
+
+                    const totals = {
+                        todayVisits: summary.reduce((sum, seller) => sum + (seller.todayVisits || 0), 0),
+                        todaySalesNet: summary.reduce((sum, seller) => sum + (seller.todaySalesNet || 0), 0),
+                        averageDailyMonthSales: summary.reduce((sum, seller) => sum + (seller.averageDailyMonthSales || 0), 0),
+                        pendingVisitsNoQuote: summary.reduce((sum, seller) => sum + (seller.pendingVisitsNoQuote || 0), 0),
+                        pendingQuotesNoOrder: summary.reduce((sum, seller) => sum + (seller.pendingQuotesNoOrder || 0), 0),
+                        monthSalesNet: summary.reduce((sum, seller) => sum + (seller.monthSalesNet || 0), 0)
                     };
-                }));
-                setAdminSummary(summary);
+                    setTeamDashboardTotals(totals);
 
-                const totalMinutes = summary.reduce((sum, seller) => sum + (seller.totalMinutes || 0), 0);
-                const totalHours = totalMinutes / 60;
-                const uniqueZones = Array.from(new Set(summary.map(seller => seller.zone).filter((z: string) => !!z && z !== 'N/A')));
-                setStats({
-                    todayVisits: summary.reduce((sum, seller) => sum + (seller.visits || 0), 0),
-                    effectiveHours: `${Math.floor(totalHours)}h ${Math.round((totalHours % 1) * 60)}m`,
-                    zones: uniqueZones,
-                    recentVisits: [],
-                    newClientsToday: summary.reduce((sum, seller) => sum + (seller.clientsCreated || 0), 0),
-                    quotationsToday: summary.reduce((sum, seller) => sum + (seller.quotationCount || 0), 0)
-                });
+                    const uniqueZones = Array.from(
+                        new Set(
+                            ((dailyVisits || []) as any[])
+                                .map((visit: any) => visit.dashboardComuna || (visit.clients as any)?.comuna || (visit.clients as any)?.zone)
+                                .filter(Boolean)
+                        )
+                    );
+                    setStats({
+                        todayVisits: totals.todayVisits,
+                        effectiveHours: 'Resumen de equipo',
+                        zones: uniqueZones,
+                        recentVisits: [],
+                        newClientsToday: 0,
+                        quotationsToday: 0
+                    });
+                }
             } else if (profile && !hasPermission('VIEW_TEAM_STATS')) {
                 // Seller Stats
                 const { data: visits } = await supabase.from('visits').select('*, clients(name, zone)').eq('sales_rep_id', profile.id).gte('check_in_time', isoStart).lte('check_in_time', isoEnd).order('check_in_time', { ascending: false });
@@ -763,34 +886,85 @@ const Dashboard = () => {
             </div>
 
             {/* KPI Cards Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <KPICard
-                    title="Venta Mensual Neta"
-                    value={`$${monthlyStats.currentSales.toLocaleString()}`}
-                    icon={ShoppingCart}
-                    color="indigo"
-                    trend={monthlyStats.goal > 0 ? `${Math.round((monthlyStats.currentSales / monthlyStats.goal) * 100)}% de Meta Neta` : undefined}
-                    trendUp={monthlyStats.currentSales > 0}
-                />
-                <KPICard
-                    title="Visitas (Hoy)"
-                    value={stats.todayVisits}
-                    icon={MapPin}
-                    color="emerald"
-                />
-                <KPICard
-                    title="Cotizaciones"
-                    value={stats.quotationsToday}
-                    icon={Package}
-                    color="amber"
-                />
-                <KPICard
-                    title="Clientes Nuevos"
-                    value={stats.newClientsToday}
-                    icon={Users}
-                    color="blue"
-                />
-            </div>
+            {hasPermission('VIEW_TEAM_STATS') ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <KPICard
+                        title="Visitas Hoy"
+                        value={teamDashboardTotals.todayVisits}
+                        icon={MapPin}
+                        color="emerald"
+                    />
+                    <KPICard
+                        title="Ventas Hoy"
+                        value={`$${Math.round(teamDashboardTotals.todaySalesNet).toLocaleString()}`}
+                        icon={ShoppingCart}
+                        color="blue"
+                        trend="Monto neto del equipo"
+                        trendUp={teamDashboardTotals.todaySalesNet > 0}
+                    />
+                    <KPICard
+                        title="Promedio Diario Mes"
+                        value={`$${Math.round(teamDashboardTotals.averageDailyMonthSales).toLocaleString()}`}
+                        icon={TrendingUp}
+                        color="amber"
+                        trend="Suma de promedios diarios"
+                        trendUp={teamDashboardTotals.averageDailyMonthSales > 0}
+                    />
+                    <KPICard
+                        title="Visitas Ayer sin Cotizar"
+                        value={teamDashboardTotals.pendingVisitsNoQuote}
+                        icon={AlertCircle}
+                        color="indigo"
+                        trend="Pendiente actual del equipo"
+                        trendUp={teamDashboardTotals.pendingVisitsNoQuote === 0}
+                    />
+                    <KPICard
+                        title="Cotizaciones Ayer sin Pedido"
+                        value={teamDashboardTotals.pendingQuotesNoOrder}
+                        icon={Package}
+                        color="rose"
+                        trend="Estados sent o approved"
+                        trendUp={teamDashboardTotals.pendingQuotesNoOrder === 0}
+                    />
+                    <KPICard
+                        title="Ventas Acumuladas Mes"
+                        value={`$${Math.round(teamDashboardTotals.monthSalesNet).toLocaleString()}`}
+                        icon={CalendarIcon}
+                        color="indigo"
+                        trend="Monto neto mensual del equipo"
+                        trendUp={teamDashboardTotals.monthSalesNet > 0}
+                    />
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <KPICard
+                        title="Venta Mensual Neta"
+                        value={`$${monthlyStats.currentSales.toLocaleString()}`}
+                        icon={ShoppingCart}
+                        color="indigo"
+                        trend={monthlyStats.goal > 0 ? `${Math.round((monthlyStats.currentSales / monthlyStats.goal) * 100)}% de Meta Neta` : undefined}
+                        trendUp={monthlyStats.currentSales > 0}
+                    />
+                    <KPICard
+                        title="Visitas (Hoy)"
+                        value={stats.todayVisits}
+                        icon={MapPin}
+                        color="emerald"
+                    />
+                    <KPICard
+                        title="Cotizaciones"
+                        value={stats.quotationsToday}
+                        icon={Package}
+                        color="amber"
+                    />
+                    <KPICard
+                        title="Clientes Nuevos"
+                        value={stats.newClientsToday}
+                        icon={Users}
+                        color="blue"
+                    />
+                </div>
+            )}
 
             {/* Charts Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -872,7 +1046,7 @@ const Dashboard = () => {
                         <div className="p-6 border-b border-gray-100 bg-gray-50/50">
                             <h3 className="text-xl font-bold text-gray-900 flex items-center">
                                 <Users size={20} className="mr-3 text-indigo-600" />
-                                Resumen del Equipo
+                                Resumen Comercial del Equipo
                             </h3>
                         </div>
                         <div className="overflow-x-auto">
@@ -880,27 +1054,24 @@ const Dashboard = () => {
                                 <thead className="bg-white border-b border-gray-50">
                                     <tr>
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Vendedor</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Pedidos</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Monto Neto</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Meta Neta</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas Hoy</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Ventas Hoy</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Prom. Diario Mes</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas Ayer sin Cotizar</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Cotizaciones Ayer sin Pedido</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Venta Acum. Mes</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {adminSummary.map(seller => (
                                         <tr key={seller.id} className="hover:bg-gray-50 border-b border-gray-50 last:border-0">
                                             <td className="px-6 py-4 font-bold text-gray-900">{seller.name}</td>
-                                            <td className="px-6 py-4 text-center font-bold">{seller.visits}</td>
-                                            <td className="px-6 py-4 text-center font-bold">{seller.quoteCount}</td>
-                                            <td className="px-6 py-4 text-right font-bold text-emerald-600">${seller.quoteAmount.toLocaleString()}</td>
-                                            <td className="px-6 py-4 text-center">
-                                                <div className="w-24 mx-auto h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-indigo-500 rounded-full"
-                                                        style={{ width: `${Math.min((seller.monthlySales / (seller.monthlyGoal || 1)) * 100, 100)}%` }}
-                                                    />
-                                                </div>
-                                            </td>
+                                            <td className="px-6 py-4 text-center font-bold">{seller.todayVisits}</td>
+                                            <td className="px-6 py-4 text-right font-bold text-emerald-600">${Math.round(seller.todaySalesNet || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-right font-bold text-amber-600">${Math.round(seller.averageDailyMonthSales || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-center font-bold">{seller.pendingVisitsNoQuote}</td>
+                                            <td className="px-6 py-4 text-center font-bold">{seller.pendingQuotesNoOrder}</td>
+                                            <td className="px-6 py-4 text-right font-bold text-indigo-600">${Math.round(seller.monthSalesNet || 0).toLocaleString()}</td>
                                         </tr>
                                     ))}
                                 </tbody>
