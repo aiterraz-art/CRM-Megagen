@@ -446,18 +446,30 @@ const Dashboard = () => {
             }
 
             if (hasPermission('VIEW_TEAM_STATS')) {
-                const canViewAllTeam = profile?.role === 'admin';
-                let sellersQuery = supabase
-                    .from('profiles')
-                    .select('id, email, full_name, role, status');
+                const canViewAllTeam = profile?.role === 'admin' || profile?.role === 'jefe';
+                let sellers: any[] = [];
 
                 if (canViewAllTeam) {
-                    sellersQuery = sellersQuery.eq('role', 'seller');
+                    const { data } = await supabase
+                        .from('profiles')
+                        .select('id, email, full_name, role, status')
+                        .eq('role', 'seller');
+                    sellers = data || [];
                 } else if (profile?.id) {
-                    sellersQuery = sellersQuery.eq('supervisor_id', profile.id).eq('role', 'seller');
+                    const scopedResponse = await supabase
+                        .from('profiles')
+                        .select('id, email, full_name, role, status')
+                        .eq('supervisor_id', profile.id)
+                        .eq('role', 'seller');
+
+                    if (scopedResponse.error) {
+                        console.warn('Dashboard: fallback to all active sellers because supervisor scope is unavailable.', scopedResponse.error.message);
+                    }
+
+                    sellers = scopedResponse.data || [];
+
                 }
 
-                const { data: sellers } = await sellersQuery;
                 const activeSellers = (sellers || []).filter((seller: any) => seller.status === 'active');
                 const sellerIds = activeSellers.map((seller: any) => seller.id);
 
