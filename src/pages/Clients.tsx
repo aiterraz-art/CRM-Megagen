@@ -919,9 +919,9 @@ const ClientsContent = () => {
                 (c.address?.toLowerCase().includes(normalizedSearch) ?? false);
 
             const isOwner = c.created_by === profile?.id;
-            const isNeglected = (neglectedData[c.id] || 0) >= 15;
-            const passesNeglect = neglectFilter === 'all' || isNeglected;
             const isProspect = isProspectStatus(c.status);
+            const isNeglected = isProspect && (neglectedData[c.id] || 0) >= 15;
+            const passesNeglect = neglectFilter === 'all' || isNeglected;
             const passesTypeFilter = clientTypeFilter === 'all'
                 || (clientTypeFilter === 'active' && !isProspect)
                 || (clientTypeFilter === 'prospect' && isProspect);
@@ -1167,7 +1167,7 @@ const ClientsContent = () => {
     };
 
     const clientStats = useMemo(() => {
-        const inRisk = filteredClients.filter((client) => (neglectedData[client.id] || 0) >= 15).length;
+        const inRisk = filteredClients.filter((client) => isProspectStatus(client.status) && (neglectedData[client.id] || 0) >= 15).length;
         const withCoordinates = filteredClients.filter((client) => !!client.lat && !!client.lng).length;
         const mine = filteredClients.filter((client) => client.created_by === profile?.id).length;
         return {
@@ -1437,6 +1437,7 @@ const ClientsContent = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredClients.map((client) => {
                         const isOwner = client.created_by === profile?.id;
+                        const showNeglectBadge = isProspectStatus(client.status) && (neglectedData[client.id] || 0) >= 15;
 
                         return (
                             <div key={client.id} className="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col justify-between min-h-[340px]">
@@ -1446,7 +1447,7 @@ const ClientsContent = () => {
                                             <div className="w-16 h-16 bg-gradient-to-br from-indigo-50 to-blue-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-inner">
                                                 <Building2 size={28} />
                                             </div>
-                                            {neglectedData[client.id] >= 15 && (
+                                            {showNeglectBadge && (
                                                 <div className={`absolute -top-2 -right-2 px-2 py-1 rounded-lg text-[8px] font-black text-white shadow-lg animate-pulse ${neglectedData[client.id] >= 30 ? 'bg-red-600' : 'bg-amber-500'}`}>
                                                     {neglectedData[client.id] >= 30 ? 'CRÍTICO' : 'RIESGO'}
                                                 </div>
