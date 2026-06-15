@@ -13,6 +13,18 @@ import { sendGmailMessage } from '../utils/gmail';
 import { isProspectStatus } from '../utils/prospect';
 
 type Client = Database['public']['Tables']['clients']['Row'];
+type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_settings']['Row'];
+
+const DEFAULT_CLIENT_FOLLOWUP_SETTINGS: ClientFollowupSettingsRow = {
+    id: 'default',
+    active_warning_days: 15,
+    active_critical_days: 30,
+    prospect_warning_days: 15,
+    prospect_critical_days: 30,
+    pool_reassignment_days: 30,
+    updated_at: new Date().toISOString(),
+    updated_by: null
+};
 
 // Google Maps Setup
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
@@ -61,9 +73,9 @@ const normalizeSheetHeader = (value: string): string => value
     .trim();
 
 const buildNormalizedSheetRow = (row: Record<string, unknown>) => {
-    const normalizedRow = new globalThis.Map<string, unknown>();
+    const normalizedRow: Record<string, unknown> = {};
     Object.entries(row).forEach(([key, value]) => {
-        normalizedRow.set(normalizeSheetHeader(key), value);
+        normalizedRow[normalizeSheetHeader(key)] = value;
     });
     return normalizedRow;
 };
@@ -146,6 +158,24 @@ const buildClientFormState = (assignedSellerId = '') => ({
     creditDays: 0
 });
 
+const chunkArray = <T,>(items: T[], size: number) => {
+    const chunks: T[][] = [];
+    for (let index = 0; index < items.length; index += size) {
+        chunks.push(items.slice(index, index + size));
+    }
+    return chunks;
+};
+
+const getLatestIsoDate = (...values: Array<string | null | undefined>) => {
+    return values
+        .filter(Boolean)
+        .reduce<string | null>((latest, current) => {
+            if (!current) return latest;
+            if (!latest) return current;
+            return new Date(current).getTime() > new Date(latest).getTime() ? current : latest;
+        }, null);
+};
+
 const ClientsContent = () => {
     const { profile, hasPermission, isSupervisor, effectiveRole } = useUser();
     const navigate = useNavigate();
@@ -163,6 +193,7 @@ const ClientsContent = () => {
     // Client 360 View State
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
     const [neglectedData, setNeglectedData] = useState<Record<string, number>>({});
+    const [clientFollowupSettings, setClientFollowupSettings] = useState<ClientFollowupSettingsRow>(DEFAULT_CLIENT_FOLLOWUP_SETTINGS);
 
     // Client Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -303,18 +334,39 @@ const ClientsContent = () => {
     }, [placesLib, isModalOpen]);
 
     // Initial Fetch
+    const fetchClientFollowupSettings = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('client_followup_settings')
+                .select('*')
+                .eq('id', 'default')
+                .maybeSingle();
+
+            if (error) {
+                console.error('Error fetching client followup settings:', error);
+                setClientFollowupSettings(DEFAULT_CLIENT_FOLLOWUP_SETTINGS);
+                return DEFAULT_CLIENT_FOLLOWUP_SETTINGS;
+            }
+
+            const nextSettings = data || DEFAULT_CLIENT_FOLLOWUP_SETTINGS;
+            setClientFollowupSettings(nextSettings);
+            return nextSettings;
+        } catch (error) {
+            console.error('Error fetching client followup settings:', error);
+            setClientFollowupSettings(DEFAULT_CLIENT_FOLLOWUP_SETTINGS);
+            return DEFAULT_CLIENT_FOLLOWUP_SETTINGS;
+        }
+    };
+
     const fetchClients = async () => {
         setLoading(true);
         setErrorMessage(null);
         try {
+            const followupSettings = await fetchClientFollowupSettings();
             let query = supabase.from('clients').select('*').order('name');
 
             if (portfolioTab === 'pool') {
-                const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-                query = query.or(
-                    `and(status.in.(prospect,prospect_new,prospect_contacted,prospect_evaluating),last_visit_date.not.is.null,last_visit_date.lt.${cutoffDate}),` +
-                    `and(status.in.(prospect,prospect_new,prospect_contacted,prospect_evaluating),last_visit_date.is.null,created_at.lt.${cutoffDate})`
-                );
+                query = query.in('status', ['prospect', 'prospect_new', 'prospect_contacted', 'prospect_evaluating']);
             } else if (isSellerRole && profile?.id) {
                 query = query.eq('created_by', profile.id);
             } else if (!canViewAll && profile?.id) {
@@ -333,18 +385,57 @@ const ClientsContent = () => {
                 setClients(visibleClients);
                 setLastRefreshAt(new Date().toISOString());
 
-                // OPTIMIZATION: Use 'last_visit_date' directly from client record
-                // This avoids fetching ALL visits separately, which was causing massive slowness (O(N) vs O(1))
                 const neglectMap: Record<string, number> = {};
                 const now = new Date();
+                const clientIds = visibleClients.map((client) => client.id).filter(Boolean);
+                const latestQuotationByClient: Record<string, string> = {};
+                const latestOrderByClient: Record<string, string> = {};
+
+                for (const chunk of chunkArray(clientIds, 200)) {
+                    const [{ data: quotationsData, error: quotationsError }, { data: ordersData, error: ordersError }] = await Promise.all([
+                        supabase
+                            .from('quotations')
+                            .select('client_id, created_at')
+                            .in('client_id', chunk),
+                        supabase
+                            .from('orders')
+                            .select('client_id, created_at')
+                            .in('client_id', chunk)
+                    ]);
+
+                    if (quotationsError) throw quotationsError;
+                    if (ordersError) throw ordersError;
+
+                    (quotationsData || []).forEach((quotation) => {
+                        if (!quotation.client_id) return;
+                        const current = latestQuotationByClient[quotation.client_id];
+                        latestQuotationByClient[quotation.client_id] = getLatestIsoDate(current, quotation.created_at) || quotation.created_at;
+                    });
+
+                    (ordersData || []).forEach((order) => {
+                        if (!order.client_id) return;
+                        const current = latestOrderByClient[order.client_id];
+                        latestOrderByClient[order.client_id] = getLatestIsoDate(current, order.created_at) || order.created_at;
+                    });
+                }
 
                 visibleClients.forEach(client => {
-                    if (client.last_visit_date) {
-                        const days = Math.floor((now.getTime() - new Date(client.last_visit_date).getTime()) / (1000 * 60 * 60 * 24));
-                        neglectMap[client.id] = days;
-                    } else {
-                        neglectMap[client.id] = 999; // Never visited
+                    const lastActivityAt = getLatestIsoDate(
+                        client.last_visit_date,
+                        latestQuotationByClient[client.id] || null,
+                        latestOrderByClient[client.id] || null,
+                        client.created_at
+                    );
+                    const days = lastActivityAt
+                        ? Math.max(0, Math.floor((now.getTime() - new Date(lastActivityAt).getTime()) / (1000 * 60 * 60 * 24)))
+                        : 999;
+                    const isProspect = isProspectStatus(client.status);
+
+                    if (portfolioTab === 'pool' && (!isProspect || days < followupSettings.pool_reassignment_days)) {
+                        return;
                     }
+
+                    neglectMap[client.id] = days;
                 });
                 setNeglectedData(neglectMap);
             }
@@ -910,6 +1001,17 @@ const ClientsContent = () => {
         [profiles]
     );
 
+    const getClientFollowupSeverity = (client: Client): 'normal' | 'warning' | 'critical' => {
+        const days = neglectedData[client.id] ?? 0;
+        const isProspect = isProspectStatus(client.status);
+        const warningDays = isProspect ? clientFollowupSettings.prospect_warning_days : clientFollowupSettings.active_warning_days;
+        const criticalDays = isProspect ? clientFollowupSettings.prospect_critical_days : clientFollowupSettings.active_critical_days;
+
+        if (days >= criticalDays) return 'critical';
+        if (days >= warningDays) return 'warning';
+        return 'normal';
+    };
+
     const filteredClients = useMemo(() => {
         const normalizedSearch = search.trim().toLowerCase();
         return clients.filter(c => {
@@ -920,14 +1022,15 @@ const ClientsContent = () => {
 
             const isOwner = c.created_by === profile?.id;
             const isProspect = isProspectStatus(c.status);
-            const isNeglected = isProspect && (neglectedData[c.id] || 0) >= 15;
+            const severity = getClientFollowupSeverity(c);
+            const isNeglected = severity !== 'normal';
             const passesNeglect = neglectFilter === 'all' || isNeglected;
             const passesTypeFilter = clientTypeFilter === 'all'
                 || (clientTypeFilter === 'active' && !isProspect)
                 || (clientTypeFilter === 'prospect' && isProspect);
 
             if (portfolioTab === 'pool') {
-                return matchesSearch && passesNeglect && passesTypeFilter;
+                return matchesSearch && isProspect && (neglectedData[c.id] || 0) >= clientFollowupSettings.pool_reassignment_days;
             }
 
             if (canViewAll) {
@@ -935,7 +1038,7 @@ const ClientsContent = () => {
             }
             return isOwner && matchesSearch && passesNeglect && passesTypeFilter;
         });
-    }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode, clientTypeFilter, portfolioTab]);
+    }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode, clientTypeFilter, portfolioTab, clientFollowupSettings]);
 
     const downloadCreditDaysList = () => {
         if (filteredClients.length === 0) {
@@ -977,7 +1080,7 @@ const ClientsContent = () => {
             Contacto: client.purchase_contact || '',
             'Días de Crédito': client.credit_days ?? 0,
             'Última visita': client.last_visit_date ? new Date(client.last_visit_date).toLocaleDateString('es-CL') : '',
-            'Días sin visita': neglectedData[client.id] ?? '',
+            'Días sin actividad': neglectedData[client.id] ?? '',
             'Vendedor Asignado': ownersById[client.created_by || ''] || client.pending_seller_email || 'Sin asignar',
             Notas: client.notes || ''
         }));
@@ -1056,10 +1159,10 @@ const ClientsContent = () => {
                     const row = rows[idx];
                     const rowNumber = idx + 2;
                     const normalizedRow = buildNormalizedSheetRow(row);
-                    const clientId = `${normalizedRow.get('id') ?? ''}`.trim();
-                    const rutRaw = `${normalizedRow.get('rut') ?? ''}`.trim();
-                    const clientName = `${normalizedRow.get('nombre') ?? ''}`.trim();
-                    const creditDaysRaw = normalizedRow.get('dias de credito');
+                    const clientId = `${normalizedRow['id'] ?? ''}`.trim();
+                    const rutRaw = `${normalizedRow['rut'] ?? ''}`.trim();
+                    const clientName = `${normalizedRow['nombre'] ?? ''}`.trim();
+                    const creditDaysRaw = normalizedRow['dias de credito'];
                     const creditDaysText = `${creditDaysRaw ?? ''}`.trim();
 
                     if (!clientId && !rutRaw) {
@@ -1167,7 +1270,7 @@ const ClientsContent = () => {
     };
 
     const clientStats = useMemo(() => {
-        const inRisk = filteredClients.filter((client) => isProspectStatus(client.status) && (neglectedData[client.id] || 0) >= 15).length;
+        const inRisk = filteredClients.filter((client) => getClientFollowupSeverity(client) !== 'normal').length;
         const withCoordinates = filteredClients.filter((client) => !!client.lat && !!client.lng).length;
         const mine = filteredClients.filter((client) => client.created_by === profile?.id).length;
         return {
@@ -1176,7 +1279,7 @@ const ClientsContent = () => {
             withCoordinates,
             mine
         };
-    }, [filteredClients, neglectedData, profile?.id]);
+    }, [filteredClients, neglectedData, profile?.id, clientFollowupSettings]);
 
     return (
         <div className="space-y-8 w-full mx-auto px-4 sm:px-6 lg:px-8">
@@ -1437,7 +1540,8 @@ const ClientsContent = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredClients.map((client) => {
                         const isOwner = client.created_by === profile?.id;
-                        const showNeglectBadge = isProspectStatus(client.status) && (neglectedData[client.id] || 0) >= 15;
+                        const followupSeverity = getClientFollowupSeverity(client);
+                        const showNeglectBadge = followupSeverity !== 'normal';
 
                         return (
                             <div key={client.id} className="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col justify-between min-h-[340px]">
@@ -1448,8 +1552,8 @@ const ClientsContent = () => {
                                                 <Building2 size={28} />
                                             </div>
                                             {showNeglectBadge && (
-                                                <div className={`absolute -top-2 -right-2 px-2 py-1 rounded-lg text-[8px] font-black text-white shadow-lg animate-pulse ${neglectedData[client.id] >= 30 ? 'bg-red-600' : 'bg-amber-500'}`}>
-                                                    {neglectedData[client.id] >= 30 ? 'CRÍTICO' : 'RIESGO'}
+                                                <div className={`absolute -top-2 -right-2 px-2 py-1 rounded-lg text-[8px] font-black text-white shadow-lg animate-pulse ${followupSeverity === 'critical' ? 'bg-red-600' : 'bg-amber-500'}`}>
+                                                    {followupSeverity === 'critical' ? 'CRÍTICO' : 'RIESGO'}
                                                 </div>
                                             )}
                                         </div>

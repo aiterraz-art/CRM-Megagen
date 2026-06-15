@@ -84,6 +84,38 @@ export interface Database {
                     lead_score?: number | null
                 }
             }
+            client_followup_settings: {
+                Row: {
+                    id: string
+                    active_warning_days: number
+                    active_critical_days: number
+                    prospect_warning_days: number
+                    prospect_critical_days: number
+                    pool_reassignment_days: number
+                    updated_at: string
+                    updated_by: string | null
+                }
+                Insert: {
+                    id?: string
+                    active_warning_days?: number
+                    active_critical_days?: number
+                    prospect_warning_days?: number
+                    prospect_critical_days?: number
+                    pool_reassignment_days?: number
+                    updated_at?: string
+                    updated_by?: string | null
+                }
+                Update: {
+                    id?: string
+                    active_warning_days?: number
+                    active_critical_days?: number
+                    prospect_warning_days?: number
+                    prospect_critical_days?: number
+                    pool_reassignment_days?: number
+                    updated_at?: string
+                    updated_by?: string | null
+                }
+            }
             inventory: {
                 Row: {
                     allow_sale_without_stock: boolean

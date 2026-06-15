@@ -13,6 +13,7 @@ type InvitePayload = {
 };
 
 type OrderNotificationSettingsRow = Database['public']['Tables']['order_notification_settings']['Row'];
+type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_settings']['Row'];
 
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
@@ -32,12 +33,13 @@ const Settings: React.FC = () => {
     const canAccessUserAdmin = canManageGlobalSettings;
     const canAccessPermissionMatrix = canManageGlobalSettings;
     const canAccessIntegrations = canManageGlobalSettings || isBillingBackoffice;
+    const canAccessClientFollowupSettings = canManageGlobalSettings;
     const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'owner@company.com';
     const [users, setUsers] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'integrations'>(canManageGlobalSettings ? 'users' : 'integrations');
+    const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'integrations' | 'clients'>(canManageGlobalSettings ? 'users' : 'integrations');
     const [testingSync, setTestingSync] = useState(false);
     const [googleStatus, setGoogleStatus] = useState<{
         googleEmail: string | null;
@@ -60,6 +62,18 @@ const Settings: React.FC = () => {
     const [orderNotificationRecipientsInput, setOrderNotificationRecipientsInput] = useState('');
     const [loadingOrderNotificationSettings, setLoadingOrderNotificationSettings] = useState(false);
     const [savingOrderNotificationSettings, setSavingOrderNotificationSettings] = useState(false);
+    const [clientFollowupSettings, setClientFollowupSettings] = useState<ClientFollowupSettingsRow>({
+        id: 'default',
+        active_warning_days: 15,
+        active_critical_days: 30,
+        prospect_warning_days: 15,
+        prospect_critical_days: 30,
+        pool_reassignment_days: 30,
+        updated_at: new Date().toISOString(),
+        updated_by: null
+    });
+    const [loadingClientFollowupSettings, setLoadingClientFollowupSettings] = useState(false);
+    const [savingClientFollowupSettings, setSavingClientFollowupSettings] = useState(false);
 
     // RESTORED STATE
     const [tempRole, setTempRole] = useState<string>('');
@@ -466,6 +480,83 @@ const Settings: React.FC = () => {
         }
     };
 
+    const fetchClientFollowupSettings = async () => {
+        if (!canAccessClientFollowupSettings) return;
+
+        setLoadingClientFollowupSettings(true);
+        try {
+            const { data, error } = await supabase
+                .from('client_followup_settings')
+                .select('*')
+                .eq('id', 'default')
+                .maybeSingle();
+
+            if (error) throw error;
+
+            setClientFollowupSettings(data || {
+                id: 'default',
+                active_warning_days: 15,
+                active_critical_days: 30,
+                prospect_warning_days: 15,
+                prospect_critical_days: 30,
+                pool_reassignment_days: 30,
+                updated_at: new Date().toISOString(),
+                updated_by: null
+            });
+        } catch (error) {
+            console.error('Error fetching client followup settings:', error);
+        } finally {
+            setLoadingClientFollowupSettings(false);
+        }
+    };
+
+    const handleSaveClientFollowupSettings = async () => {
+        if (!profile?.id) return;
+
+        const activeWarningDays = Math.max(0, Number(clientFollowupSettings.active_warning_days || 0));
+        const activeCriticalDays = Math.max(0, Number(clientFollowupSettings.active_critical_days || 0));
+        const prospectWarningDays = Math.max(0, Number(clientFollowupSettings.prospect_warning_days || 0));
+        const prospectCriticalDays = Math.max(0, Number(clientFollowupSettings.prospect_critical_days || 0));
+        const poolReassignmentDays = Math.max(0, Number(clientFollowupSettings.pool_reassignment_days || 0));
+
+        const payload: Database['public']['Tables']['client_followup_settings']['Insert'] = {
+            id: 'default',
+            active_warning_days: activeWarningDays,
+            active_critical_days: activeCriticalDays,
+            prospect_warning_days: prospectWarningDays,
+            prospect_critical_days: prospectCriticalDays,
+            pool_reassignment_days: poolReassignmentDays,
+            updated_by: profile.id
+        };
+
+        if (activeCriticalDays < activeWarningDays) {
+            alert('El umbral crítico de clientes activos no puede ser menor que el de riesgo.');
+            return;
+        }
+
+        if (prospectCriticalDays < prospectWarningDays) {
+            alert('El umbral crítico de prospectos no puede ser menor que el de riesgo.');
+            return;
+        }
+
+        setSavingClientFollowupSettings(true);
+        try {
+            const { error } = await supabase
+                .from('client_followup_settings')
+                .upsert(payload, { onConflict: 'id' });
+
+            if (error) throw error;
+
+            alert('Configuración de seguimiento de clientes actualizada.');
+            await fetchClientFollowupSettings();
+        } catch (error: any) {
+            console.error('Error saving client followup settings:', error);
+            alert(`No se pudo guardar la configuración de clientes: ${error.message}`);
+        } finally {
+            setSavingClientFollowupSettings(false);
+        }
+    };
+
     const handleSaveOrderNotificationSettings = async () => {
         if (!profile?.id) return;
 
@@ -508,6 +599,9 @@ const Settings: React.FC = () => {
         if (activeTab === 'integrations') {
             fetchGoogleStatus();
             fetchOrderNotificationSettings();
+        }
+        if (activeTab === 'clients') {
+            fetchClientFollowupSettings();
         }
     }, [activeTab]);
 
@@ -562,6 +656,9 @@ const Settings: React.FC = () => {
                     )}
                     {canAccessIntegrations && (
                         <button onClick={() => setActiveTab('integrations')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'integrations' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Integraciones</button>
+                    )}
+                    {canAccessClientFollowupSettings && (
+                        <button onClick={() => setActiveTab('clients')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'clients' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Clientes</button>
                     )}
                     {canAccessUserAdmin && (
                         <button onClick={() => setIsInviteModalOpen(true)} className="ml-4 px-6 py-2.5 bg-gray-900 text-white rounded-xl font-bold hover:bg-black transition-all shadow-lg flex items-center gap-2"><User size={16} /> Invitar</button>
@@ -792,6 +889,96 @@ const Settings: React.FC = () => {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            ) : activeTab === 'clients' && canAccessClientFollowupSettings ? (
+                <div className="bg-white rounded-[2.5rem] shadow-xl border border-gray-100 overflow-hidden">
+                    <div className="p-8 border-b border-gray-100">
+                        <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><AlertTriangle className="text-indigo-600" /> Seguimiento Comercial</h3>
+                        <p className="mt-2 text-sm font-medium text-gray-500">
+                            Define cuándo un prospecto o cliente activo pasa a riesgo o crítico por falta de gestión comercial.
+                            La actividad considera visitas, cotizaciones y pedidos.
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-8 p-8 lg:grid-cols-2">
+                        <div className="space-y-4 rounded-3xl border border-amber-100 bg-amber-50/60 p-6">
+                            <h4 className="text-lg font-black text-amber-900">Prospectos</h4>
+                            <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-amber-700">Riesgo desde (días)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={clientFollowupSettings.prospect_warning_days}
+                                    onChange={(event) => setClientFollowupSettings((prev) => ({ ...prev, prospect_warning_days: Number(event.target.value) || 0 }))}
+                                    disabled={loadingClientFollowupSettings}
+                                    className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-amber-400"
+                                />
+                            </div>
+                            <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-amber-700">Crítico desde (días)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={clientFollowupSettings.prospect_critical_days}
+                                    onChange={(event) => setClientFollowupSettings((prev) => ({ ...prev, prospect_critical_days: Number(event.target.value) || 0 }))}
+                                    disabled={loadingClientFollowupSettings}
+                                    className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-amber-400"
+                                />
+                            </div>
+                            <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-amber-700">Mover al pool desde (días)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={clientFollowupSettings.pool_reassignment_days}
+                                    onChange={(event) => setClientFollowupSettings((prev) => ({ ...prev, pool_reassignment_days: Number(event.target.value) || 0 }))}
+                                    disabled={loadingClientFollowupSettings}
+                                    className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-amber-400"
+                                />
+                                <p className="mt-2 text-xs font-medium text-amber-800">Prospectos sin actividad comercial por este plazo entran al pool de recuperación.</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6">
+                            <h4 className="text-lg font-black text-indigo-900">Clientes Activos</h4>
+                            <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-indigo-700">Riesgo desde (días)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={clientFollowupSettings.active_warning_days}
+                                    onChange={(event) => setClientFollowupSettings((prev) => ({ ...prev, active_warning_days: Number(event.target.value) || 0 }))}
+                                    disabled={loadingClientFollowupSettings}
+                                    className="w-full rounded-2xl border border-indigo-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-indigo-400"
+                                />
+                            </div>
+                            <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-indigo-700">Crítico desde (días)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={clientFollowupSettings.active_critical_days}
+                                    onChange={(event) => setClientFollowupSettings((prev) => ({ ...prev, active_critical_days: Number(event.target.value) || 0 }))}
+                                    disabled={loadingClientFollowupSettings}
+                                    className="w-full rounded-2xl border border-indigo-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-indigo-400"
+                                />
+                                <p className="mt-2 text-xs font-medium text-indigo-800">Si un cliente activo no recibe visita, cotización ni pedido dentro de este plazo, se marcará como crítico.</p>
+                            </div>
+                            <div className="rounded-2xl border border-indigo-100 bg-white/80 p-4 text-xs font-medium text-slate-600">
+                                Actividad comercial considerada: última visita, última cotización o último pedido, lo que sea más reciente.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end border-t border-gray-100 p-8">
+                        <button
+                            onClick={() => void handleSaveClientFollowupSettings()}
+                            disabled={savingClientFollowupSettings || loadingClientFollowupSettings}
+                            className="rounded-2xl bg-indigo-600 px-6 py-3 font-black text-white shadow-lg shadow-indigo-100 disabled:opacity-60"
+                        >
+                            {savingClientFollowupSettings ? 'Guardando...' : 'Guardar configuración'}
+                        </button>
                     </div>
                 </div>
             ) : (
