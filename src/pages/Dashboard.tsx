@@ -448,12 +448,23 @@ const Dashboard = () => {
             if (hasPermission('VIEW_TEAM_STATS')) {
                 const canViewAllTeam = profile?.role === 'admin' || profile?.role === 'jefe';
                 let sellers: any[] = [];
+                let sellerLookupError: any = null;
+                let preloadedTodayVisitsRows: any[] = [];
+                let preloadedTodayOrdersRows: any[] = [];
+                let preloadedMonthOrdersRows: any[] = [];
+                let preloadedYesterdayVisitsRows: any[] = [];
+                let preloadedYesterdayQuotesRows: any[] = [];
+                let preloadedTeamGoalsRows: any[] = [];
 
                 if (canViewAllTeam) {
-                    const { data } = await supabase
+                    const { data, error } = await supabase
                         .from('profiles')
                         .select('id, email, full_name, role, status')
                         .eq('role', 'seller');
+                    sellerLookupError = error;
+                    if (error) {
+                        console.warn('Dashboard: no se pudo leer el roster de vendedores desde profiles.', error.message);
+                    }
                     sellers = data || [];
                 } else if (profile?.id) {
                     const scopedResponse = await supabase
@@ -470,8 +481,125 @@ const Dashboard = () => {
 
                 }
 
-                const activeSellers = (sellers || []).filter((seller: any) => seller.status === 'active');
-                const sellerIds = activeSellers.map((seller: any) => seller.id);
+                let activeSellers = (sellers || []).filter((seller: any) => seller.status === 'active');
+                let sellerIds = activeSellers.map((seller: any) => seller.id);
+
+                if (canViewAllTeam && (sellerLookupError || sellerIds.length === 0)) {
+                    const teamNow = new Date();
+                    const teamFirstDayOfMonth = new Date(Date.UTC(teamNow.getFullYear(), teamNow.getMonth(), 1, 0, 0, 0, 0)).toISOString();
+                    const teamLastDayOfMonth = new Date(Date.UTC(teamNow.getFullYear(), teamNow.getMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
+                    const startOfToday = new Date(selectedDate);
+                    startOfToday.setHours(0, 0, 0, 0);
+                    const endOfToday = new Date(selectedDate);
+                    endOfToday.setHours(23, 59, 59, 999);
+
+                    const yesterdayDate = new Date(startOfToday);
+                    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                    const startOfYesterday = new Date(yesterdayDate);
+                    startOfYesterday.setHours(0, 0, 0, 0);
+                    const endOfYesterday = new Date(yesterdayDate);
+                    endOfYesterday.setHours(23, 59, 59, 999);
+
+                    const [
+                        todayVisitsFallback,
+                        todayOrdersFallback,
+                        monthOrdersFallback,
+                        yesterdayVisitsFallback,
+                        yesterdayQuotesFallback,
+                        teamGoalsFallback,
+                    ] = await Promise.all([
+                        supabase
+                            .from('visits')
+                            .select('id, sales_rep_id, client_id, check_in_time, status, profiles(full_name, email)')
+                            .gte('check_in_time', startOfToday.toISOString())
+                            .lte('check_in_time', endOfToday.toISOString())
+                            .neq('status', 'cancelled'),
+                        supabase
+                            .from('orders')
+                            .select('id, user_id, total_amount, status, quotation_id, created_at')
+                            .not('quotation_id', 'is', null)
+                            .gte('created_at', startOfToday.toISOString())
+                            .lte('created_at', endOfToday.toISOString()),
+                        supabase
+                            .from('orders')
+                            .select('id, user_id, total_amount, status, quotation_id, created_at')
+                            .not('quotation_id', 'is', null)
+                            .gte('created_at', teamFirstDayOfMonth)
+                            .lte('created_at', teamLastDayOfMonth),
+                        supabase
+                            .from('visits')
+                            .select('id, sales_rep_id, client_id, check_in_time, clients(name, comuna, zone)')
+                            .eq('status', 'completed')
+                            .not('client_id', 'is', null)
+                            .gte('check_in_time', startOfYesterday.toISOString())
+                            .lte('check_in_time', endOfYesterday.toISOString()),
+                        supabase
+                            .from('quotations')
+                            .select('id, folio, seller_id, client_id, status, total_amount, created_at, clients(name)')
+                            .in('status', ['sent', 'approved'])
+                            .gte('created_at', startOfYesterday.toISOString())
+                            .lte('created_at', endOfYesterday.toISOString()),
+                        supabase
+                            .from('goals')
+                            .select('user_id, target_amount')
+                            .eq('month', teamNow.getMonth() + 1)
+                            .eq('year', teamNow.getFullYear()),
+                    ]);
+
+                    preloadedTodayVisitsRows = todayVisitsFallback.data || [];
+                    preloadedTodayOrdersRows = todayOrdersFallback.data || [];
+                    preloadedMonthOrdersRows = monthOrdersFallback.data || [];
+                    preloadedYesterdayVisitsRows = yesterdayVisitsFallback.data || [];
+                    preloadedYesterdayQuotesRows = yesterdayQuotesFallback.data || [];
+                    preloadedTeamGoalsRows = teamGoalsFallback.data || [];
+
+                    const discoveredSellerIds = Array.from(new Set([
+                        ...preloadedTodayVisitsRows.map((row: any) => row.sales_rep_id).filter(Boolean),
+                        ...preloadedTodayOrdersRows.map((row: any) => row.user_id).filter(Boolean),
+                        ...preloadedMonthOrdersRows.map((row: any) => row.user_id).filter(Boolean),
+                        ...preloadedYesterdayVisitsRows.map((row: any) => row.sales_rep_id).filter(Boolean),
+                        ...preloadedYesterdayQuotesRows.map((row: any) => row.seller_id).filter(Boolean),
+                        ...preloadedTeamGoalsRows.map((row: any) => row.user_id).filter(Boolean),
+                    ]));
+
+                    if (discoveredSellerIds.length > 0) {
+                        const { data: fallbackProfiles, error: fallbackProfilesError } = await supabase
+                            .from('profiles')
+                            .select('id, email, full_name, role, status')
+                            .in('id', discoveredSellerIds);
+
+                        if (fallbackProfilesError) {
+                            console.warn('Dashboard: no se pudieron enriquecer los vendedores desde profiles.', fallbackProfilesError.message);
+                        }
+
+                        const visitProfileMap = new Map<string, { email: string | null; full_name: string | null }>();
+                        preloadedTodayVisitsRows.forEach((row: any) => {
+                            const embeddedProfile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+                            if (!row.sales_rep_id || !embeddedProfile) return;
+                            visitProfileMap.set(row.sales_rep_id, {
+                                email: embeddedProfile.email || null,
+                                full_name: embeddedProfile.full_name || null,
+                            });
+                        });
+
+                        const fallbackProfileMap = new Map<string, any>(
+                            ((fallbackProfiles || []) as any[]).map((seller) => [seller.id, seller])
+                        );
+
+                        activeSellers = discoveredSellerIds.map((sellerId) => {
+                            const profileRow = fallbackProfileMap.get(sellerId);
+                            const visitProfile = visitProfileMap.get(sellerId);
+                            return {
+                                id: sellerId,
+                                email: profileRow?.email || visitProfile?.email || null,
+                                full_name: profileRow?.full_name || visitProfile?.full_name || null,
+                                role: profileRow?.role || 'seller',
+                                status: profileRow?.status || 'active',
+                            };
+                        });
+                        sellerIds = activeSellers.map((seller: any) => seller.id);
+                    }
+                }
 
                 if (sellerIds.length === 0) {
                     setAdminSummary([]);
@@ -510,57 +638,65 @@ const Dashboard = () => {
                     endOfYesterday.setHours(23, 59, 59, 999);
                     const daysElapsedInMonth = Math.max(1, teamNow.getDate());
 
-                    const [
-                        { data: todayVisitsRows },
-                        { data: todayOrdersRows },
-                        { data: monthOrdersRows },
-                        { data: yesterdayVisitsRows },
-                        { data: yesterdayQuotesRows },
-                        { data: teamGoalsRows },
-                    ] = await Promise.all([
-                        supabase
+                    const todayVisitsRows = preloadedTodayVisitsRows.length > 0
+                        ? preloadedTodayVisitsRows
+                        : (await supabase
                             .from('visits')
                             .select('id, sales_rep_id, client_id, check_in_time, status')
                             .in('sales_rep_id', sellerIds)
                             .gte('check_in_time', startOfToday.toISOString())
                             .lte('check_in_time', endOfToday.toISOString())
-                            .neq('status', 'cancelled'),
-                        supabase
+                            .neq('status', 'cancelled')).data || [];
+
+                    const todayOrdersRows = preloadedTodayOrdersRows.length > 0
+                        ? preloadedTodayOrdersRows
+                        : (await supabase
                             .from('orders')
                             .select('id, user_id, total_amount, status, quotation_id, created_at')
                             .in('user_id', sellerIds)
                             .not('quotation_id', 'is', null)
                             .gte('created_at', startOfToday.toISOString())
-                            .lte('created_at', endOfToday.toISOString()),
-                        supabase
+                            .lte('created_at', endOfToday.toISOString())).data || [];
+
+                    const monthOrdersRows = preloadedMonthOrdersRows.length > 0
+                        ? preloadedMonthOrdersRows
+                        : (await supabase
                             .from('orders')
                             .select('id, user_id, total_amount, status, quotation_id, created_at')
                             .in('user_id', sellerIds)
                             .not('quotation_id', 'is', null)
                             .gte('created_at', teamFirstDayOfMonth)
-                            .lte('created_at', teamLastDayOfMonth),
-                        supabase
+                            .lte('created_at', teamLastDayOfMonth)).data || [];
+
+                    const yesterdayVisitsRows = preloadedYesterdayVisitsRows.length > 0
+                        ? preloadedYesterdayVisitsRows
+                        : (await supabase
                             .from('visits')
                             .select('id, sales_rep_id, client_id, check_in_time, clients(name, comuna, zone)')
                             .in('sales_rep_id', sellerIds)
                             .eq('status', 'completed')
                             .not('client_id', 'is', null)
                             .gte('check_in_time', startOfYesterday.toISOString())
-                            .lte('check_in_time', endOfYesterday.toISOString()),
-                        supabase
+                            .lte('check_in_time', endOfYesterday.toISOString())).data || [];
+
+                    const yesterdayQuotesRows = preloadedYesterdayQuotesRows.length > 0
+                        ? preloadedYesterdayQuotesRows
+                        : (await supabase
                             .from('quotations')
                             .select('id, folio, seller_id, client_id, status, total_amount, created_at, clients(name)')
                             .in('seller_id', sellerIds)
                             .in('status', ['sent', 'approved'])
                             .gte('created_at', startOfYesterday.toISOString())
-                            .lte('created_at', endOfYesterday.toISOString()),
-                        supabase
+                            .lte('created_at', endOfYesterday.toISOString())).data || [];
+
+                    const teamGoalsRows = preloadedTeamGoalsRows.length > 0
+                        ? preloadedTeamGoalsRows
+                        : (await supabase
                             .from('goals')
                             .select('user_id, target_amount')
                             .in('user_id', sellerIds)
                             .eq('month', teamCurrentMonth)
-                            .eq('year', teamCurrentYear),
-                    ]);
+                            .eq('year', teamCurrentYear)).data || [];
 
                     const yesterdayVisitClientIds = Array.from(
                         new Set(((yesterdayVisitsRows || []) as any[]).map((visit: any) => visit.client_id).filter(Boolean))
