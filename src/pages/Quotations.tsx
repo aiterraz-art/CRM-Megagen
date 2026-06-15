@@ -10,7 +10,11 @@ import { queueQuotationLocation } from '../services/locationQueue';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { logQuotationOrderConversionSafe } from '../utils/quotationOrderConversionLog';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays, getPaymentTermsFromCreditDays } from '../utils/credit';
-import { buildDiscountApprovalRequestedItems, getApprovalReason } from '../utils/discountApproval';
+import {
+    ensureDiscountApprovalBeforeOrderConversion,
+    SELLER_MAX_DISCOUNT_PCT,
+    getQuotationMaxDiscountPct,
+} from '../utils/quotationDiscountApprovalFlow';
 import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
@@ -46,7 +50,6 @@ const toWholeMoney = (value: unknown) => {
 };
 
 const formatMoney = (value: number) => `$${toWholeMoney(value).toLocaleString('es-CL')}`;
-const SELLER_MAX_DISCOUNT_PCT = 5;
 const DISPATCH_SERVICE_NAME = 'SERVICIO DE DESPACHO';
 const DISPATCH_SERVICE_SKU = 'SERV-DESPACHO';
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
@@ -131,10 +134,6 @@ const Quotations: React.FC = () => {
     const [editingQuotation, setEditingQuotation] = useState<any | null>(null);
     const [isInteractionModalOpen, setIsInteractionModalOpen] = useState(false);
     const [selectedInteractionType, setSelectedInteractionType] = useState<'Presencial' | 'WhatsApp' | 'Teléfono'>('Presencial');
-    const [discountApprovalRequested, setDiscountApprovalRequested] = useState(false);
-    const [isApprovalReasonModalOpen, setIsApprovalReasonModalOpen] = useState(false);
-    const [approvalReason, setApprovalReason] = useState('');
-    const [approvalReasonError, setApprovalReasonError] = useState<string | null>(null);
     const [quotationPendingOrder, setQuotationPendingOrder] = useState<any | null>(null);
     const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
     const [paymentProofError, setPaymentProofError] = useState<string | null>(null);
@@ -173,6 +172,23 @@ const Quotations: React.FC = () => {
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
     );
+
+    const requestDiscountApprovalReason = useCallback(async ({
+        status,
+        maxDiscountPct,
+        limitPct,
+    }: {
+        status: 'new_request' | 'rejected';
+        maxDiscountPct: number;
+        limitPct: number;
+    }) => {
+        const message = status === 'rejected'
+            ? `La última autorización fue rechazada. Escribe el motivo para reenviar la solicitud de descuento (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%).`
+            : `Esta cotización supera el descuento permitido para vendedor (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%). Escribe el motivo para solicitar autorización antes de generar el pedido.`;
+        const reason = window.prompt(message, '');
+        const trimmed = String(reason || '').trim();
+        return trimmed || null;
+    }, []);
 
     const markQuotationAsSent = useCallback(async (quotationId: string) => {
         if (!quotationId) return;
@@ -227,11 +243,6 @@ const Quotations: React.FC = () => {
     }, []);
 
     const openQuoteViaWhatsApp = useCallback(async (quote: any) => {
-        if (quote?.discount_approval?.status === 'pending' || quote?.discount_approval?.status === 'rejected') {
-            alert('Esta cotización no se puede enviar hasta resolver la aprobación de descuento.');
-            return;
-        }
-
         const normalizedPhone = normalizePhoneForWhatsapp(quote?.client_phone || quote?.client?.phone);
         if (!normalizedPhone) {
             alert('El cliente no tiene un celular válido para WhatsApp.');
@@ -245,11 +256,6 @@ const Quotations: React.FC = () => {
     }, [markQuotationAsSent, normalizePhoneForWhatsapp]);
 
     const openQuoteViaEmail = useCallback(async (quote: any, pdfAttachment?: File | null) => {
-        if (quote?.discount_approval?.status === 'pending' || quote?.discount_approval?.status === 'rejected') {
-            alert('Esta cotización no se puede enviar hasta resolver la aprobación de descuento.');
-            return;
-        }
-
         const recipient = String(quote?.client_email || quote?.client?.email || '').trim();
         if (!recipient) {
             alert('El cliente no tiene correo registrado.');
@@ -483,8 +489,6 @@ const Quotations: React.FC = () => {
                     setFormItems(draft.items);
                     setFormComments(draft.comments);
                     setPaymentTerms(draft.paymentTerms);
-                    setDiscountApprovalRequested(Boolean(draft.discountApprovalRequested));
-                    setApprovalReason(String(draft.approvalReason || ''));
                     setSelectedSellerId(draft.selectedSellerId || null);
                 }
             } catch (e) {
@@ -502,8 +506,6 @@ const Quotations: React.FC = () => {
                 items: formItems,
                 comments: formComments,
                 paymentTerms: paymentTerms,
-                discountApprovalRequested,
-                approvalReason,
                 selectedSellerId
             };
             localStorage.setItem('quotation_draft', JSON.stringify(draft));
@@ -511,7 +513,7 @@ const Quotations: React.FC = () => {
             // Clear draft if closed and not editing
             localStorage.removeItem('quotation_draft');
         }
-    }, [isItemModalOpen, selectedClient, formItems, formComments, paymentTerms, editingQuotation, discountApprovalRequested, approvalReason, selectedSellerId]);
+    }, [isItemModalOpen, selectedClient, formItems, formComments, paymentTerms, editingQuotation, selectedSellerId]);
 
     useEffect(() => {
         if (!selectedClient?.id || availableClients.length === 0) return;
@@ -547,9 +549,6 @@ const Quotations: React.FC = () => {
         setPaymentTerms(getPaymentTermsFromCreditDays(getClientCreditDays(client)));
         setManualLocation(null);
         setEditingQuotation(null); // Ensure we are NOT in edit mode
-        setDiscountApprovalRequested(false);
-        setApprovalReason('');
-        setApprovalReasonError(null);
         setSelectedSellerId((prev) => canAssignQuotationSeller(effectiveRole) ? prev : (profile?.id || null));
     };
 
@@ -574,9 +573,6 @@ const Quotations: React.FC = () => {
         setFormComments(q.comments || '');
         setPaymentTerms(getPaymentTermsFromCreditDays(getClientCreditDays(q.client)));
         setCreateError(null);
-        setDiscountApprovalRequested(q.discount_approval?.status === 'pending');
-        setApprovalReason(getApprovalReason(q.discount_approval));
-        setApprovalReasonError(null);
         setSelectedSellerId(q.seller_id || null);
         setIsItemModalOpen(true);
     };
@@ -986,19 +982,6 @@ const Quotations: React.FC = () => {
             setCreateError('Para pago a crédito debes indicar días mayores a 0.');
             return;
         }
-        const maxDiscountPct = normalizedItems.reduce((max, item) => Math.max(max, getEffectiveDiscountPct(item)), 0);
-        const requiresApproval = isSellerRole && maxDiscountPct > SELLER_MAX_DISCOUNT_PCT;
-        const hasPendingApproval = editingQuotation?.discount_approval?.status === 'pending';
-        const shouldCreateApprovalRequest = requiresApproval && !hasPendingApproval;
-        if (requiresApproval && !discountApprovalRequested) {
-            setCreateError(`Si el precio neto manual supera ${SELLER_MAX_DISCOUNT_PCT}% de descuento del precio de sistema, debes usar "Pedir autorización".`);
-            return;
-        }
-        if (shouldCreateApprovalRequest && !approvalReason.trim()) {
-            setCreateError('Debes indicar la razón del sobre descuento antes de solicitar autorización.');
-            return;
-        }
-
         setSubmitting(true);
         setCreateError(null);
 
@@ -1043,13 +1026,8 @@ const Quotations: React.FC = () => {
             const netAmount = calculatedItems.reduce((sum, item) => sum + toWholeMoney(item.total), 0);
             const tax = Math.round(netAmount * 0.19);
             const grandTotal = netAmount + tax;
-            const requestedItems = buildDiscountApprovalRequestedItems(calculatedItems, SELLER_MAX_DISCOUNT_PCT);
-            const sellerName = selectedSellerProfile?.full_name || selectedSellerProfile?.email?.split('@')[0]?.toUpperCase() || 'Vendedor';
-            const sellerEmail = selectedSellerProfile?.email || null;
-            const trimmedApprovalReason = approvalReason.trim();
             const shouldStartAsSent =
-                !shouldCreateApprovalRequest
-                && (selectedInteractionType === 'WhatsApp' || selectedInteractionType === 'Teléfono');
+                selectedInteractionType === 'WhatsApp' || selectedInteractionType === 'Teléfono';
             const initialQuotationStatus = shouldStartAsSent ? 'sent' : 'draft';
             const initialSentAt = shouldStartAsSent ? new Date().toISOString() : null;
 
@@ -1075,35 +1053,6 @@ const Quotations: React.FC = () => {
                         .in('status', ['prospect', 'prospect_new', 'prospect_contacted', 'prospect_evaluating']);
 
                     if (clientStatusError) throw clientStatusError;
-                }
-                if (shouldCreateApprovalRequest) {
-                    const { data: approvalRow, error: approvalError } = await supabase
-                        .from('approval_requests')
-                        .insert({
-                            module: 'sales',
-                            entity_id: editingQuotation.id,
-                            requester_id: profile.id,
-                            approval_type: 'extra_discount',
-                            payload: {
-                                quotation_id: editingQuotation.id,
-                                folio: editingQuotation.folio || null,
-                                client_name: selectedClient?.name || null,
-                                max_discount_pct: Number(maxDiscountPct.toFixed(2)),
-                                limit_pct: SELLER_MAX_DISCOUNT_PCT,
-                                total_amount: grandTotal,
-                                request_reason: trimmedApprovalReason,
-                                seller_name: sellerName,
-                                seller_email: sellerEmail,
-                                requested_items: requestedItems
-                            },
-                            status: 'pending'
-                        } as any)
-                        .select('id')
-                        .single();
-                    if (approvalError) throw approvalError;
-                    if (approvalRow?.id) {
-                        void notifyApprovalPush(approvalRow.id);
-                    }
                 }
                 alert('Cotización actualizada correctamente');
             } else {
@@ -1138,36 +1087,6 @@ const Quotations: React.FC = () => {
                 if (shouldStartAsSent && insertData?.id) {
                     await markQuotationAsSent(insertData.id);
                 }
-                if (shouldCreateApprovalRequest && insertData) {
-                    const { data: approvalRow, error: approvalError } = await supabase
-                        .from('approval_requests')
-                        .insert({
-                            module: 'sales',
-                            entity_id: insertData.id,
-                            requester_id: profile.id,
-                            approval_type: 'extra_discount',
-                            payload: {
-                                quotation_id: insertData.id,
-                                folio: insertData.folio || null,
-                                client_name: selectedClient?.name || null,
-                                max_discount_pct: Number(maxDiscountPct.toFixed(2)),
-                                limit_pct: SELLER_MAX_DISCOUNT_PCT,
-                                total_amount: grandTotal,
-                                request_reason: trimmedApprovalReason,
-                                seller_name: sellerName,
-                                seller_email: sellerEmail,
-                                requested_items: requestedItems
-                            },
-                            status: 'pending'
-                        } as any)
-                        .select('id')
-                        .single();
-                    if (approvalError) throw approvalError;
-                    if (approvalRow?.id) {
-                        void notifyApprovalPush(approvalRow.id);
-                    }
-                }
-
                 let locationNotice = '';
                 if (latitude !== null && longitude !== null && insertData) {
                     const locationResult = await queueQuotationLocation({
@@ -1196,10 +1115,6 @@ const Quotations: React.FC = () => {
             setSelectedClient(null);
             setCreateError(null);
             setEditingQuotation(null);
-            setDiscountApprovalRequested(false);
-            setApprovalReason('');
-            setApprovalReasonError(null);
-            setIsApprovalReasonModalOpen(false);
             setSelectedSellerId((prev) => canAssignQuotationSeller(effectiveRole) ? prev : profile.id);
             localStorage.removeItem('quotation_draft'); // Clear draft
             fetchQuotations();
@@ -1227,8 +1142,33 @@ const Quotations: React.FC = () => {
             alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
             return;
         }
-        if (quotation?.discount_approval?.status === 'pending' || quotation?.discount_approval?.status === 'rejected') {
-            alert('Esta cotización no se puede vender hasta resolver la aprobación de descuento.');
+
+        const approvalGate = await ensureDiscountApprovalBeforeOrderConversion({
+            quotation,
+            requesterId: profile.id,
+            sellerName: quotation?.seller_name,
+            sellerEmail: quotation?.seller_email,
+            latestApproval: quotation?.discount_approval ?? undefined,
+            requestReasonProvider: requestDiscountApprovalReason,
+            onApprovalCreated: (approvalId) => {
+                void notifyApprovalPush(approvalId);
+            },
+        });
+
+        if (!approvalGate.allowed) {
+            if (approvalGate.approval) {
+                setQuotations((prev) => prev.map((item) => (
+                    item.id === quotation.id
+                        ? { ...item, discount_approval: approvalGate.approval }
+                        : item
+                )));
+            }
+            if (approvalGate.message) {
+                alert(approvalGate.message);
+            }
+            if (approvalGate.action === 'requested') {
+                await fetchQuotations();
+            }
             return;
         }
 
@@ -1558,6 +1498,7 @@ const Quotations: React.FC = () => {
         closePaymentProofModal,
         fetchQuotations,
         getQuotationCreditDays,
+        requestDiscountApprovalReason,
         effectiveRole,
         profile?.id,
         syncOrderNotesFromQuotation,
@@ -1660,8 +1601,8 @@ const Quotations: React.FC = () => {
         return filteredQuotations.filter((q) => q.discount_approval?.status === 'pending' && q.seller_id === profile?.id).length;
     }, [filteredQuotations, effectiveRole, profile?.id]);
     const formMaxDiscountPct = useMemo(() => {
-        return formItems.reduce((max, item) => Math.max(max, getEffectiveDiscountPct(item)), 0);
-    }, [formItems, getEffectiveDiscountPct]);
+        return getQuotationMaxDiscountPct(formItems);
+    }, [formItems]);
     const formSubtotal = useMemo(() => {
         return formItems.reduce((sum, item) => {
             const qty = Number(item.qty || 0);
@@ -1778,7 +1719,6 @@ const Quotations: React.FC = () => {
                     </div>
                 ) : (
                     filteredQuotations.map((q) => {
-                        const hasPendingDiscountBlock = q.discount_approval?.status === 'pending' || q.discount_approval?.status === 'rejected';
                         const hasWhatsappTarget = Boolean(normalizePhoneForWhatsapp(q.client_phone || q.client?.phone));
                         const hasEmailTarget = Boolean(String(q.client_email || q.client?.email || '').trim());
                         const canConvertOrder = canCloseQuotationSale(effectiveRole, profile?.id, q.seller_id);
@@ -1876,18 +1816,12 @@ const Quotations: React.FC = () => {
                                 <div className="flex flex-wrap gap-2">
                                     <button
                                         onClick={() => openQuoteViaWhatsApp(q)}
-                                        disabled={!hasWhatsappTarget || hasPendingDiscountBlock}
-                                        className={`flex-1 min-w-[78px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasWhatsappTarget || hasPendingDiscountBlock
+                                        disabled={!hasWhatsappTarget}
+                                        className={`flex-1 min-w-[78px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasWhatsappTarget
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-600 hover:text-white'
                                             }`}
-                                        title={
-                                            hasPendingDiscountBlock
-                                                ? 'Cotización bloqueada por aprobación de descuento'
-                                                : hasWhatsappTarget
-                                                    ? 'Enviar por WhatsApp'
-                                                    : 'Cliente sin celular válido'
-                                        }
+                                        title={hasWhatsappTarget ? 'Enviar por WhatsApp' : 'Cliente sin celular válido'}
                                     >
                                         <MessageSquare size={12} className="mr-1" />
                                         WSP
@@ -1895,18 +1829,12 @@ const Quotations: React.FC = () => {
 
                                     <button
                                         onClick={() => openQuoteViaEmail(q)}
-                                        disabled={!hasEmailTarget || hasPendingDiscountBlock}
-                                        className={`flex-1 min-w-[86px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasEmailTarget || hasPendingDiscountBlock
+                                        disabled={!hasEmailTarget}
+                                        className={`flex-1 min-w-[86px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasEmailTarget
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-600 hover:text-white'
                                             }`}
-                                        title={
-                                            hasPendingDiscountBlock
-                                                ? 'Cotización bloqueada por aprobación de descuento'
-                                                : hasEmailTarget
-                                                    ? 'Compartir PDF con correo como respaldo'
-                                                    : 'Cliente sin correo'
-                                        }
+                                        title={hasEmailTarget ? 'Compartir PDF con correo como respaldo' : 'Cliente sin correo'}
                                     >
                                         <Share2 size={12} className="mr-1" />
                                         Compartir
@@ -1915,8 +1843,8 @@ const Quotations: React.FC = () => {
                                     {q.status !== 'approved' && (
                                         <button
                                             onClick={() => handleConvertToOrder(q)}
-                                            disabled={submitting || hasPendingDiscountBlock || !canConvertOrder}
-                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || hasPendingDiscountBlock || !canConvertOrder
+                                            disabled={submitting || !canConvertOrder}
+                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || !canConvertOrder
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
                                                 }`}
@@ -2045,16 +1973,6 @@ const Quotations: React.FC = () => {
             {
                 selectedForTemplate && (
                     <Suspense fallback={<div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm" />}>
-                        {(() => {
-                            const discountApprovalStatus = selectedForTemplate.discount_approval?.status as string | undefined;
-                            const blockedByDiscountApproval = discountApprovalStatus === 'pending' || discountApprovalStatus === 'rejected';
-                            const shareBlockReason = discountApprovalStatus === 'pending'
-                                ? 'Descuento adicional pendiente de aprobación: no se puede enviar ni descargar hasta su resolución.'
-                                : discountApprovalStatus === 'rejected'
-                                    ? 'Descuento adicional rechazado: ajusta la cotización o solicita nueva aprobación.'
-                                    : undefined;
-
-                            return (
                         <QuotationTemplate
                             data={buildQuotationPreviewData(
                                 selectedForTemplate,
@@ -2064,91 +1982,10 @@ const Quotations: React.FC = () => {
                             onMarkedAsSent={async () => {
                                 await markQuotationAsSent(selectedForTemplate.id);
                             }}
-                            canShareAndDownload={!blockedByDiscountApproval}
-                            shareBlockReason={shareBlockReason}
+                            canShareAndDownload
                             onClose={() => setSelectedForTemplate(null)}
                         />
-                            );
-                        })()}
                     </Suspense>
-                )
-            }
-
-            {/* Client Selector Modal */}
-            {
-                isApprovalReasonModalOpen && (
-                    <div className="fixed inset-0 z-[2050] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-                        <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
-                            <div className="p-6 bg-gradient-to-br from-amber-500 to-orange-600 text-white flex justify-between items-center">
-                                <div>
-                                    <h3 className="font-bold text-lg">Razón del sobre descuento</h3>
-                                    <p className="text-white/80 text-sm">Este motivo se enviará a aprobación.</p>
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        setIsApprovalReasonModalOpen(false);
-                                        setApprovalReasonError(null);
-                                    }}
-                                    className="p-2 hover:bg-white/20 rounded-full transition-all"
-                                >
-                                    <XIcon size={20} />
-                                </button>
-                            </div>
-
-                            <div className="p-6 space-y-4">
-                                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm font-medium text-amber-900">
-                                    Describe por qué esta cotización necesita un descuento superior al {SELLER_MAX_DISCOUNT_PCT}% permitido para vendedor.
-                                </div>
-
-                                <textarea
-                                    value={approvalReason}
-                                    onChange={(e) => {
-                                        setApprovalReason(e.target.value);
-                                        if (approvalReasonError) setApprovalReasonError(null);
-                                    }}
-                                    placeholder="Ej: negociación por volumen, cierre de oportunidad, ajuste comercial aprobado con cliente clave..."
-                                    className="w-full min-h-[140px] rounded-2xl border border-gray-200 px-4 py-3 text-sm font-medium text-gray-700 outline-none focus:ring-2 focus:ring-amber-500 resize-none"
-                                    autoFocus
-                                />
-
-                                {approvalReasonError && (
-                                    <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-                                        {approvalReasonError}
-                                    </div>
-                                )}
-
-                                <div className="flex gap-3 pt-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setIsApprovalReasonModalOpen(false);
-                                            setApprovalReasonError(null);
-                                        }}
-                                        className="flex-1 px-4 py-3 rounded-2xl border border-gray-200 text-gray-600 font-bold hover:bg-gray-50 transition-all"
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            if (!approvalReason.trim()) {
-                                                setApprovalReasonError('Debes escribir la razón del sobre descuento.');
-                                                return;
-                                            }
-                                            setDiscountApprovalRequested(true);
-                                            setApprovalReason(approvalReason.trim());
-                                            setApprovalReasonError(null);
-                                            setCreateError(null);
-                                            setIsApprovalReasonModalOpen(false);
-                                        }}
-                                        className="flex-1 px-4 py-3 rounded-2xl bg-amber-600 text-white font-bold hover:bg-amber-700 transition-all"
-                                    >
-                                        Guardar motivo
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 )
             }
 
@@ -2680,14 +2517,8 @@ const Quotations: React.FC = () => {
                                         </p>
                                         {isSellerRole && formMaxDiscountPct > SELLER_MAX_DISCOUNT_PCT && (
                                             <p className="mt-2 text-xs font-medium text-red-600">
-                                                Supera el {SELLER_MAX_DISCOUNT_PCT}%. Debes solicitar autorización para guardar.
+                                                Supera el {SELLER_MAX_DISCOUNT_PCT}%. La autorización se solicitará cuando intentes pasar la cotización a pedido.
                                             </p>
-                                        )}
-                                        {isSellerRole && discountApprovalRequested && approvalReason.trim() && (
-                                            <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
-                                                <p className="text-[10px] uppercase tracking-widest font-black text-amber-500">Motivo registrado</p>
-                                                <p className="mt-1 text-xs font-medium text-amber-800 line-clamp-3">{approvalReason.trim()}</p>
-                                            </div>
                                         )}
                                         {isSellerRole && formMaxDiscountPct <= SELLER_MAX_DISCOUNT_PCT && (
                                             <p className="mt-2 text-xs font-medium text-gray-500">
@@ -2776,17 +2607,6 @@ const Quotations: React.FC = () => {
                                     )}
                                 </div>
                                 <div className="w-full md:w-auto flex gap-2">
-                                    {isSellerRole && formMaxDiscountPct > SELLER_MAX_DISCOUNT_PCT && (
-                                        <button
-                                            onClick={() => {
-                                                setApprovalReasonError(null);
-                                                setIsApprovalReasonModalOpen(true);
-                                            }}
-                                            className={`w-full md:w-auto px-6 py-3 md:py-4 rounded-2xl font-bold transition-all border ${discountApprovalRequested ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'}`}
-                                        >
-                                            {discountApprovalRequested ? 'Editar motivo autorización' : 'Pedir autorización'}
-                                        </button>
-                                    )}
                                     <button
                                         onClick={() => setIsInteractionModalOpen(true)}
                                         disabled={submitting}

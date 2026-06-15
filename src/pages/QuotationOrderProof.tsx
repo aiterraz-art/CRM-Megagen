@@ -8,6 +8,7 @@ import { logQuotationOrderConversionSafe } from '../utils/quotationOrderConversi
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
 import { uploadFileToStorage } from '../utils/storageUpload';
+import { ensureDiscountApprovalBeforeOrderConversion } from '../utils/quotationDiscountApprovalFlow';
 
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
 const PAYMENT_PROOF_MAX_BYTES = 20 * 1024 * 1024;
@@ -39,6 +40,22 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: 
         return await Promise.race([promise, timeoutPromise]);
     } finally {
         if (timeoutId) clearTimeout(timeoutId);
+    }
+};
+
+const notifyApprovalPush = async (approvalId: string) => {
+    try {
+        const { error } = await supabase.functions.invoke('send-approval-push', {
+            body: {
+                approval_id: approvalId,
+                icon: import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png'
+            }
+        });
+        if (error) {
+            console.warn('No se pudo disparar push de aprobación:', error.message);
+        }
+    } catch (error: any) {
+        console.warn('Error inesperado enviando push de aprobación:', error?.message || error);
     }
 };
 
@@ -76,6 +93,23 @@ const QuotationOrderProof = () => {
     const isAndroidDevice = useMemo(() => {
         if (typeof navigator === 'undefined') return false;
         return /Android/i.test(navigator.userAgent || '');
+    }, []);
+
+    const requestDiscountApprovalReason = useCallback(async ({
+        status,
+        maxDiscountPct,
+        limitPct,
+    }: {
+        status: 'new_request' | 'rejected';
+        maxDiscountPct: number;
+        limitPct: number;
+    }) => {
+        const message = status === 'rejected'
+            ? `La última autorización fue rechazada. Escribe el motivo para reenviar la solicitud de descuento (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%).`
+            : `Esta cotización supera el descuento permitido para vendedor (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%). Escribe el motivo para solicitar autorización antes de generar el pedido.`;
+        const reason = window.prompt(message, '');
+        const trimmed = String(reason || '').trim();
+        return trimmed || null;
     }, []);
 
     const loadDraft = useCallback((): ProofRouteDraft | null => {
@@ -333,6 +367,27 @@ const QuotationOrderProof = () => {
             if (!quotation || !profile?.id) return;
             if (!canCloseQuotationSale(effectiveRole, profile.id, quotation?.seller_id)) {
                 alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
+                return;
+            }
+
+            const approvalGate = await ensureDiscountApprovalBeforeOrderConversion({
+                quotation,
+                requesterId: profile.id,
+                sellerName: quotation?.seller_name,
+                sellerEmail: quotation?.seller_email,
+                requestReasonProvider: requestDiscountApprovalReason,
+                onApprovalCreated: (approvalId) => {
+                    void notifyApprovalPush(approvalId);
+                },
+            });
+
+            if (!approvalGate.allowed) {
+                if (approvalGate.approval) {
+                    setQuotation((current: any) => current ? { ...current, discount_approval: approvalGate.approval } : current);
+                }
+                if (approvalGate.message) {
+                    alert(approvalGate.message);
+                }
                 return;
             }
 
