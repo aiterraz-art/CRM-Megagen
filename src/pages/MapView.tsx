@@ -8,6 +8,7 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { calculateDistance } from '../utils/geo';
 import { checkGPSConnection } from '../utils/gps';
+import { getPreviousBusinessDay } from '../utils/businessDate';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 type ClientInsert = Database['public']['Tables']['clients']['Insert'];
@@ -87,8 +88,7 @@ const MapContent = () => {
         const now = new Date();
         const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterday = getPreviousBusinessDay(now);
         const startOfYesterday = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()).toISOString();
 
         const lastWeek = new Date(now);

@@ -14,6 +14,7 @@ import ActivityChart from '../components/charts/ActivityChart';
 import ZoneDistributionChart from '../components/charts/ZoneDistributionChart';
 import KPICard from '../components/KPICard';
 import { grossToNet } from '../utils/amounts';
+import { getPreviousBusinessDay } from '../utils/businessDate';
 
 const gpsComunaCache = new Map<string, string>();
 
@@ -493,8 +494,7 @@ const Dashboard = () => {
                     const endOfToday = new Date(selectedDate);
                     endOfToday.setHours(23, 59, 59, 999);
 
-                    const yesterdayDate = new Date(startOfToday);
-                    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                    const yesterdayDate = getPreviousBusinessDay(startOfToday);
                     const startOfYesterday = new Date(yesterdayDate);
                     startOfYesterday.setHours(0, 0, 0, 0);
                     const endOfYesterday = new Date(yesterdayDate);
@@ -630,8 +630,7 @@ const Dashboard = () => {
                     const endOfToday = new Date(selectedDate);
                     endOfToday.setHours(23, 59, 59, 999);
 
-                    const yesterdayDate = new Date(startOfToday);
-                    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                    const yesterdayDate = getPreviousBusinessDay(startOfToday);
                     const startOfYesterday = new Date(yesterdayDate);
                     startOfYesterday.setHours(0, 0, 0, 0);
                     const endOfYesterday = new Date(yesterdayDate);

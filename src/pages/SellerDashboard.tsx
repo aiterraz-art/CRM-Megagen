@@ -6,6 +6,7 @@ import { Calendar, ClipboardList, Filter, MapPin, ShoppingBag, ShoppingCart, Tre
 import KPICard from '../components/KPICard';
 import GoalProgressChart from '../components/charts/GoalProgressChart';
 import { grossToNet } from '../utils/amounts';
+import { getPreviousBusinessDay } from '../utils/businessDate';
 
 type VisitRow = {
     id: string;
@@ -141,8 +142,7 @@ const SellerDashboard = () => {
             const todayStart = startOfDayLocal(now);
             const todayEnd = endOfDayLocal(now);
 
-            const yesterday = new Date(now);
-            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterday = getPreviousBusinessDay(now);
             const yesterdayStart = startOfDayLocal(yesterday);
             const yesterdayEnd = endOfDayLocal(yesterday);
 
