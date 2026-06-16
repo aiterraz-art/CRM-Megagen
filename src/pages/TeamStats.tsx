@@ -112,12 +112,12 @@ const TeamStats = () => {
         const monthEnd = new Date(selected.getFullYear(), selected.getMonth() + 1, 0, 23, 59, 59, 999);
 
         let query = supabase.from('profiles').select('*');
-        const canViewAllTeam = normalizedCurrentRole === 'admin';
+        const canViewAllTeam = normalizedCurrentRole === 'admin' || normalizedCurrentRole === 'jefe';
 
         if (!canViewAllTeam) {
             query = query.eq('supervisor_id', currentUser!.id);
         } else {
-            query = query.neq('id', currentUser!.id);
+            query = query.eq('role', 'seller');
         }
 
         const { data: profilesData, error } = await query;

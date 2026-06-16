@@ -99,7 +99,7 @@ const ActiveVisitTimer = ({ startTime }: { startTime: string }) => {
 };
 
 const Dashboard = () => {
-    const { profile, isSupervisor, hasPermission } = useUser();
+    const { profile, isSupervisor, hasPermission, effectiveRole } = useUser();
     const { activeVisit, endVisit } = useVisit();
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState({
@@ -447,7 +447,7 @@ const Dashboard = () => {
             }
 
             if (hasPermission('VIEW_TEAM_STATS')) {
-                const canViewAllTeam = profile?.role === 'admin' || profile?.role === 'jefe';
+                const canViewAllTeam = effectiveRole === 'admin' || effectiveRole === 'jefe';
                 let sellers: any[] = [];
                 let sellerLookupError: any = null;
                 let preloadedTodayVisitsRows: any[] = [];
