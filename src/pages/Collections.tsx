@@ -286,6 +286,57 @@ const Collections = () => {
         return [...base].sort((a, b) => Number(b.outstanding_total || 0) - Number(a.outstanding_total || 0));
     }, [summary, canFilterBySeller, sellerFilter]);
 
+    const filteredClientSummary = useMemo(() => {
+        const grouped = new Map<string, {
+            key: string;
+            client_name: string;
+            client_rut: string;
+            seller_name: string;
+            seller_email: string;
+            documents: number;
+            outstanding_total: number;
+            overdue_total: number;
+            max_aging_days: number;
+            latest_due_date: string | null;
+        }>();
+
+        filteredRows.forEach((row) => {
+            const sellerKey = row.seller_id || normalizeEmail(row.seller_email) || '__unassigned__';
+            const clientKey = normalizeRut(row.client_rut) || normalizeSearchText(row.client_name) || row.client_id || row.id;
+            const key = `${sellerKey}::${clientKey}`;
+            const existing = grouped.get(key);
+            const outstanding = Number(row.outstanding_amount || row.amount || 0);
+            const overdue = Number(row.aging_days || 0) > 0 ? outstanding : 0;
+            const dueTime = toComparableTime(row.due_date);
+
+            if (existing) {
+                existing.documents += 1;
+                existing.outstanding_total += outstanding;
+                existing.overdue_total += overdue;
+                existing.max_aging_days = Math.max(existing.max_aging_days, Number(row.aging_days || 0));
+                if (dueTime > toComparableTime(existing.latest_due_date)) {
+                    existing.latest_due_date = row.due_date || null;
+                }
+                return;
+            }
+
+            grouped.set(key, {
+                key,
+                client_name: row.client_name || 'Sin cliente',
+                client_rut: row.client_rut || '-',
+                seller_name: row.seller_name || '',
+                seller_email: row.seller_email || '',
+                documents: 1,
+                outstanding_total: outstanding,
+                overdue_total: overdue,
+                max_aging_days: Number(row.aging_days || 0),
+                latest_due_date: row.due_date || null,
+            });
+        });
+
+        return Array.from(grouped.values()).sort((a, b) => b.outstanding_total - a.outstanding_total);
+    }, [filteredRows]);
+
     const sellerFilterOptions = useMemo(() => {
         const seen = new Set<string>();
         const options: Array<{ value: string; label: string }> = [];
@@ -1011,18 +1062,61 @@ const Collections = () => {
             </div>
 
             <div className="grid lg:grid-cols-3 gap-4">
-                <div className="bg-white border rounded-2xl p-4 lg:col-span-1">
-                    <h3 className="font-black mb-3">Resumen por vendedor</h3>
-                    <div className="space-y-2 max-h-[420px] overflow-auto">
-                        {filteredSummary.map((s) => (
-                            <div key={s.seller_key} className="p-3 rounded-xl border">
-                                <p className="text-sm font-bold">{s.seller_name || s.seller_email || 'Sin vendedor'}</p>
-                                <p className="text-xs text-gray-500">Docs: {Number(s.documents || 0)}</p>
-                                <p className="text-xs text-gray-500">Pendiente: ${Number(s.outstanding_total || 0).toLocaleString('es-CL')}</p>
-                                <p className="text-xs text-red-600">Vencido: ${Number(s.overdue_total || 0).toLocaleString('es-CL')}</p>
+                <div className="space-y-4 lg:col-span-1">
+                    <div className="bg-white border rounded-2xl p-4">
+                        <h3 className="font-black mb-3">Resumen por vendedor</h3>
+                        <div className="space-y-2 max-h-[220px] overflow-auto">
+                            {filteredSummary.map((s) => (
+                                <div key={s.seller_key} className="p-3 rounded-xl border">
+                                    <p className="text-sm font-bold">{s.seller_name || s.seller_email || 'Sin vendedor'}</p>
+                                    <p className="text-xs text-gray-500">Docs: {Number(s.documents || 0)}</p>
+                                    <p className="text-xs text-gray-500">Pendiente: ${Number(s.outstanding_total || 0).toLocaleString('es-CL')}</p>
+                                    <p className="text-xs text-red-600">Vencido: ${Number(s.overdue_total || 0).toLocaleString('es-CL')}</p>
+                                </div>
+                            ))}
+                            {filteredSummary.length === 0 && <p className="text-xs text-gray-500">Sin datos cargados.</p>}
+                        </div>
+                    </div>
+
+                    <div className="bg-white border rounded-2xl p-4">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                            <div>
+                                <h3 className="font-black">Resumen por cliente</h3>
+                                <p className="text-xs text-gray-500">Deuda consolidada por cliente dentro de cada vendedor.</p>
                             </div>
-                        ))}
-                        {filteredSummary.length === 0 && <p className="text-xs text-gray-500">Sin datos cargados.</p>}
+                            <span className="text-xs font-bold text-gray-500">{filteredClientSummary.length} cliente(s)</span>
+                        </div>
+                        <div className="space-y-2 max-h-[420px] overflow-auto">
+                            {filteredClientSummary.map((item) => (
+                                <div key={item.key} className="p-3 rounded-xl border">
+                                    <p className="text-sm font-bold">{item.client_name}</p>
+                                    <p className="text-[11px] text-gray-500">{item.client_rut}</p>
+                                    <p className="mt-1 text-[11px] text-gray-500">
+                                        {item.seller_name || item.seller_email || 'Sin vendedor'}
+                                    </p>
+                                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                                        <div>
+                                            <p className="text-gray-400 uppercase tracking-[0.18em] font-bold">Docs</p>
+                                            <p className="font-bold text-gray-700">{item.documents}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-gray-400 uppercase tracking-[0.18em] font-bold">Mora máx.</p>
+                                            <p className="font-bold text-gray-700">{item.max_aging_days} días</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-gray-400 uppercase tracking-[0.18em] font-bold">Pendiente</p>
+                                            <p className="font-bold text-gray-900">${item.outstanding_total.toLocaleString('es-CL')}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-gray-400 uppercase tracking-[0.18em] font-bold">Vencido</p>
+                                            <p className="font-bold text-red-600">${item.overdue_total.toLocaleString('es-CL')}</p>
+                                        </div>
+                                    </div>
+                                    <p className="mt-2 text-[11px] text-gray-500">Último vencimiento: {formatShortDate(item.latest_due_date)}</p>
+                                </div>
+                            ))}
+                            {filteredClientSummary.length === 0 && <p className="text-xs text-gray-500">Sin datos consolidados.</p>}
+                        </div>
                     </div>
                 </div>
 
