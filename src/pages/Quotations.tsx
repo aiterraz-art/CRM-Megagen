@@ -21,6 +21,10 @@ import { sendQuotationEmail } from '../utils/quotationEmail';
 import { generateQuotationPdfFile } from '../utils/quotationPdf';
 import { uploadFileToStorage } from '../utils/storageUpload';
 import { isProspectStatus } from '../utils/prospect';
+import {
+    fetchCollectionsDebtSnapshotByRut,
+    type CollectionsDebtSnapshot,
+} from '../utils/collectionsLinking';
 import QuotationOrderConversionHistoryModal from '../components/modals/QuotationOrderConversionHistoryModal';
 import { Database } from '../types/supabase';
 
@@ -125,6 +129,8 @@ const Quotations: React.FC = () => {
     const [selectedClient, setSelectedClient] = useState<any | null>(null);
     const [createError, setCreateError] = useState<string | null>(null);
     const [fetchError, setFetchError] = useState<string | null>(null);
+    const [collectionsDebtWarning, setCollectionsDebtWarning] = useState<CollectionsDebtSnapshot | null>(null);
+    const [collectionsDebtWarningLoading, setCollectionsDebtWarningLoading] = useState(false);
     const [availableClients, setAvailableClients] = useState<any[]>([]);
     const [quotationSearch, setQuotationSearch] = useState('');
     const [clientSelectorSearch, setClientSelectorSearch] = useState('');
@@ -618,6 +624,41 @@ const Quotations: React.FC = () => {
                 : nextPaymentTerms
         ));
     }, [availableClients, selectedClient]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCollectionsWarning = async () => {
+            if (!isItemModalOpen || !selectedClient?.rut) {
+                setCollectionsDebtWarning(null);
+                setCollectionsDebtWarningLoading(false);
+                return;
+            }
+
+            setCollectionsDebtWarningLoading(true);
+            try {
+                const snapshot = await fetchCollectionsDebtSnapshotByRut(selectedClient.rut);
+                if (!cancelled) {
+                    setCollectionsDebtWarning(snapshot);
+                }
+            } catch (warningError) {
+                console.warn('No se pudo cargar alerta de cobranzas para cotización:', warningError);
+                if (!cancelled) {
+                    setCollectionsDebtWarning(null);
+                }
+            } finally {
+                if (!cancelled) {
+                    setCollectionsDebtWarningLoading(false);
+                }
+            }
+        };
+
+        void loadCollectionsWarning();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isItemModalOpen, selectedClient?.id, selectedClient?.rut]);
 
     const handleClientSelect = (client: any) => {
         setSelectedClient(client);
@@ -2323,6 +2364,28 @@ const Quotations: React.FC = () => {
                                         Vista comercial: costos y márgenes internos no se muestran en esta pantalla.
                                         <div className="mt-1 font-semibold">
                                             Puedes editar precio neto manual. Si supera {SELLER_MAX_DISCOUNT_PCT}% de descuento, se solicitará autorización.
+                                        </div>
+                                    </div>
+                                )}
+                                {collectionsDebtWarningLoading && (
+                                    <div className="mb-4 p-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-600 text-xs font-medium">
+                                        Revisando estado de cobranzas del cliente...
+                                    </div>
+                                )}
+                                {!collectionsDebtWarningLoading && collectionsDebtWarning && collectionsDebtWarning.overdue_documents > 0 && (
+                                    <div className="mb-4 p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900">
+                                        <div className="flex items-start gap-3">
+                                            <AlertCircle size={18} className="mt-0.5 text-amber-600 shrink-0" />
+                                            <div>
+                                                <p className="text-sm font-black uppercase tracking-widest">Cliente con deuda vencida</p>
+                                                <p className="mt-1 text-sm font-medium">
+                                                    Tiene {collectionsDebtWarning.overdue_documents} factura(s) vencida(s) por {formatMoney(collectionsDebtWarning.overdue_total)}.
+                                                </p>
+                                                <p className="mt-1 text-xs font-medium text-amber-800">
+                                                    Documento más antiguo: {collectionsDebtWarning.oldest_overdue_document_number || 'N/D'} ·
+                                                    Vencimiento: {collectionsDebtWarning.oldest_overdue_due_date ? new Date(collectionsDebtWarning.oldest_overdue_due_date).toLocaleDateString('es-CL') : 'N/D'}
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
                                 )}

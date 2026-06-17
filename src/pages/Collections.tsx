@@ -7,6 +7,14 @@ import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollections
 import { sendCollectionPaymentEmail } from '../utils/collectionPaymentEmail';
 import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
 import ClientFormModal from '../components/modals/ClientFormModal';
+import CollectionClientDetailModal from '../components/modals/CollectionClientDetailModal';
+import {
+    buildCollectionsDebtSnapshotFromRows,
+    fetchCollectionsCrmCommercialSnapshotByRut,
+    normalizeCollectionsRut,
+    type CollectionsCrmCommercialSnapshot,
+    type CollectionsDebtSnapshot,
+} from '../utils/collectionsLinking';
 import { Database } from '../types/supabase';
 
 type Client = Database['public']['Tables']['clients']['Row'];
@@ -32,8 +40,7 @@ const ALLOWED_COLLECTION_PROOF_TYPES = new Set([
     'image/heif'
 ]);
 
-const normalizeRut = (value: string | null | undefined) =>
-    (value || '').toString().replace(/[^0-9kK]/g, '').toUpperCase();
+const normalizeRut = normalizeCollectionsRut;
 
 const formatShortDate = (value: string | null | undefined) => {
     if (!value) return '-';
@@ -121,6 +128,11 @@ const Collections = () => {
     const [clientCreationContext, setClientCreationContext] = useState<{ row: any; sellerId: string } | null>(null);
     const [proofTargetRow, setProofTargetRow] = useState<any | null>(null);
     const [proofViewerRow, setProofViewerRow] = useState<any | null>(null);
+    const [selectedClientSummary, setSelectedClientSummary] = useState<any | null>(null);
+    const [clientDetailLoading, setClientDetailLoading] = useState(false);
+    const [clientDetailError, setClientDetailError] = useState<string | null>(null);
+    const [clientDetailDebtSnapshot, setClientDetailDebtSnapshot] = useState<CollectionsDebtSnapshot | null>(null);
+    const [clientDetailCrmSnapshot, setClientDetailCrmSnapshot] = useState<CollectionsCrmCommercialSnapshot | null>(null);
 
     const isSeller = effectiveRole === 'seller';
     const isChief = effectiveRole === 'jefe';
@@ -303,6 +315,7 @@ const Collections = () => {
             key: string;
             client_name: string;
             client_rut: string;
+            seller_id: string | null;
             seller_name: string;
             seller_email: string;
             documents: number;
@@ -336,6 +349,7 @@ const Collections = () => {
                 key,
                 client_name: row.client_name || 'Sin cliente',
                 client_rut: row.client_rut || '-',
+                seller_id: row.seller_id || null,
                 seller_name: row.seller_name || '',
                 seller_email: row.seller_email || '',
                 documents: 1,
@@ -390,6 +404,31 @@ const Collections = () => {
         const proofs = collectionProofsMap[row.id];
         if (proofs && proofs.length > 0) return proofs;
         return buildLegacyProofRecord(row);
+    };
+
+    const openClientDetail = async (clientSummary: any) => {
+        setSelectedClientSummary(clientSummary);
+        setClientDetailLoading(true);
+        setClientDetailError(null);
+        setClientDetailCrmSnapshot(null);
+
+        const detailRows = filteredRows.filter((row) => {
+            const sellerKey = row.seller_id || normalizeEmail(row.seller_email) || '__unassigned__';
+            const clientKey = normalizeRut(row.client_rut) || normalizeSearchText(row.client_name) || row.client_id || row.id;
+            return `${sellerKey}::${clientKey}` === clientSummary.key;
+        });
+
+        setClientDetailDebtSnapshot(buildCollectionsDebtSnapshotFromRows(detailRows));
+
+        try {
+            const crmSnapshot = await fetchCollectionsCrmCommercialSnapshotByRut(clientSummary.client_rut);
+            setClientDetailCrmSnapshot(crmSnapshot);
+        } catch (detailError: any) {
+            console.error('Error loading collection client detail:', detailError);
+            setClientDetailError(detailError?.message || 'No se pudo cargar el detalle comercial del cliente.');
+        } finally {
+            setClientDetailLoading(false);
+        }
     };
 
     const fetchData = async () => {
@@ -1222,6 +1261,12 @@ const Collections = () => {
                                         </div>
                                     </div>
                                     <p className="mt-2 text-[11px] text-gray-500">Último vencimiento: {formatShortDate(item.latest_due_date)}</p>
+                                    <button
+                                        onClick={() => void openClientDetail(item)}
+                                        className="mt-3 w-full px-3 py-2 rounded-xl border border-indigo-200 text-indigo-700 text-xs font-black uppercase tracking-widest hover:bg-indigo-50 transition-colors"
+                                    >
+                                        Ver detalle
+                                    </button>
                                 </div>
                             ))}
                             {filteredClientSummary.length === 0 && <p className="text-xs text-gray-500">Sin datos consolidados.</p>}
@@ -1647,6 +1692,21 @@ const Collections = () => {
                 </div>
             </div>
         )}
+        <CollectionClientDetailModal
+            isOpen={Boolean(selectedClientSummary)}
+            onClose={() => {
+                setSelectedClientSummary(null);
+                setClientDetailError(null);
+                setClientDetailDebtSnapshot(null);
+                setClientDetailCrmSnapshot(null);
+                setClientDetailLoading(false);
+            }}
+            clientSummary={selectedClientSummary}
+            debtSnapshot={clientDetailDebtSnapshot}
+            crmSnapshot={clientDetailCrmSnapshot}
+            loading={clientDetailLoading}
+            error={clientDetailError}
+        />
         <input
             ref={proofInputRef}
             type="file"

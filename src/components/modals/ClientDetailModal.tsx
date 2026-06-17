@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { X, MapPin, Phone, Mail, Building2, FileText, ShoppingBag, Clock, FileSpreadsheet, Pencil, CalendarRange, CheckCircle2, AlertTriangle, Send } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { Database } from '../../types/supabase';
@@ -8,22 +8,13 @@ import CallOutcomeModal from './CallOutcomeModal';
 import ScheduleVisitModal from './ScheduleVisitModal';
 import { useUser } from '../../contexts/UserContext';
 import { googleService } from '../../services/googleService';
+import {
+    buildCollectionsDebtSnapshotFromRows,
+    buildCollectionsRutVariants,
+    normalizeCollectionsRut,
+} from '../../utils/collectionsLinking';
 
 type Client = Database['public']['Tables']['clients']['Row'];
-
-const normalizeRutForCollections = (value: string | null | undefined) =>
-    (value || '')
-        .toString()
-        .toLowerCase()
-        .replace(/[^0-9k]/g, '');
-
-const buildRutVariants = (rut: string | null | undefined) => {
-    const raw = (rut || '').trim();
-    if (!raw) return [];
-    const compact = raw.replace(/\./g, '');
-    const noHyphen = compact.replace(/-/g, '');
-    return Array.from(new Set([raw, compact, noHyphen].filter(Boolean)));
-};
 
 const normalizeCollectionSellerEmail = (value: string | null | undefined) =>
     (value || '').trim().toLowerCase();
@@ -63,8 +54,8 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const [showScheduleModal, setShowScheduleModal] = useState(false);
 
     const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
-    const clientRutVariants = buildRutVariants(client.rut);
-    const normalizedClientRut = normalizeRutForCollections(client.rut);
+    const clientRutVariants = buildCollectionsRutVariants(client.rut);
+    const normalizedClientRut = normalizeCollectionsRut(client.rut);
     const mySellerEmail = normalizeCollectionSellerEmail(profile?.email);
 
     const canViewCollectionRow = (row: any) => {
@@ -106,7 +97,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 const approvedQuotations = (quotesData || []).filter((q) => q.status === 'approved').length;
                 const sent = (quotesData || []).filter((q) => q.status === 'sent');
                 const matchedCollections = (collectionData || []).filter((row: any) =>
-                    normalizeRutForCollections(row.client_rut) === normalizedClientRut && canViewCollectionRow(row)
+                    normalizeCollectionsRut(row.client_rut) === normalizedClientRut && canViewCollectionRow(row)
                 );
                 const totalCollectionsOutstanding = matchedCollections.reduce((acc: number, row: any) => acc + Number(row.outstanding_amount || 0), 0);
                 const overdueCollectionsOutstanding = matchedCollections
@@ -189,7 +180,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                         .order('due_date', { ascending: true });
                     if (error) throw error;
                     setCollections((data || []).filter((row: any) =>
-                        normalizeRutForCollections(row.client_rut) === normalizedClientRut && canViewCollectionRow(row)
+                        normalizeCollectionsRut(row.client_rut) === normalizedClientRut && canViewCollectionRow(row)
                     ));
                 }
             } else if (activeTab === 'emails') {
@@ -211,6 +202,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const formatDateTime = (iso: string) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'N/A';
     const formatCurrency = (amount: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(amount);
     const lastVisitAgeDays = stats.lastVisit ? Math.floor((Date.now() - new Date(stats.lastVisit).getTime()) / (1000 * 60 * 60 * 24)) : null;
+    const collectionsSnapshot = useMemo(() => buildCollectionsDebtSnapshotFromRows(collections), [collections]);
 
     const handleVisit = () => navigate(`/visit/${client.id}`);
     const handleQuote = () => navigate('/quotations', { state: { client: client } });
@@ -387,6 +379,51 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                 <p className="text-2xl font-black text-red-600 mt-1">{formatCurrency(stats.overdueCollectionsOutstanding)}</p>
                                             </div>
                                         </div>
+                                        {collectionsSnapshot.documents > 0 && (
+                                            <div className={`rounded-3xl border p-6 shadow-sm ${collectionsSnapshot.overdue_documents > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-100'}`}>
+                                                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                                                    <div>
+                                                        <h3 className="font-bold text-gray-900 mb-2 flex items-center gap-2">
+                                                            <AlertTriangle size={18} className={collectionsSnapshot.overdue_documents > 0 ? 'text-amber-600' : 'text-indigo-600'} />
+                                                            Estado de cobranzas
+                                                        </h3>
+                                                        {collectionsSnapshot.overdue_documents > 0 ? (
+                                                            <p className="text-sm font-medium text-amber-800">
+                                                                Cliente con {collectionsSnapshot.overdue_documents} factura(s) vencida(s) por {formatCurrency(collectionsSnapshot.overdue_total)}.
+                                                            </p>
+                                                        ) : (
+                                                            <p className="text-sm font-medium text-gray-600">
+                                                                Cliente con documentos pendientes, pero sin deuda vencida.
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setActiveTab('collections')}
+                                                        className="px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-bold hover:bg-gray-800 transition-colors"
+                                                    >
+                                                        Ver cobranzas completas
+                                                    </button>
+                                                </div>
+                                                <div className="mt-4 space-y-2">
+                                                    {collectionsSnapshot.invoices.slice(0, 5).map((invoice) => (
+                                                        <div key={invoice.id} className="flex items-center justify-between gap-3 rounded-2xl bg-white/80 border border-white px-4 py-3">
+                                                            <div>
+                                                                <p className="font-bold text-gray-900">{invoice.document_number || 'Sin documento'}</p>
+                                                                <p className="text-xs text-gray-500">
+                                                                    Vence {formatDate(invoice.due_date || '')}
+                                                                </p>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <p className="font-black text-gray-900">{formatCurrency(invoice.outstanding_amount)}</p>
+                                                                <p className={`text-xs font-bold ${invoice.aging_days > 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                                                                    {invoice.aging_days > 0 ? `${invoice.aging_days} días de mora` : 'Pendiente'}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                         <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
                                             <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><FileText size={20} className="text-indigo-600" /> Información de Contacto</h3>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
