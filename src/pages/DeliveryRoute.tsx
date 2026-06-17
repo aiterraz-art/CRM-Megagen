@@ -4,6 +4,7 @@ import { useUser } from '../contexts/UserContext';
 import { MapPin, Phone, CheckCircle2, Camera, Navigation, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { APIProvider, Map as GoogleMap, AdvancedMarker, Pin, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { checkGPSConnection, watchCurrentLocation } from '../utils/gps';
+import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
 
 // Helper for distance calc (Haversine formula)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -22,6 +23,16 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
 };
 
 const DEFAULT_SANTIAGO_CENTER = { lat: -33.4489, lng: -70.6693 };
+const DELIVERY_PROOF_DRAFT_KEY = 'delivery_route_proof_draft';
+const DELIVERY_PROOF_RESTORE_MESSAGE = 'La app se recargo mientras seleccionabas la foto de entrega. Vuelve a elegir la imagen y luego finaliza la entrega.';
+
+type DeliveryProofDraft = {
+    actorId: string;
+    orderId: string;
+    routeId: string | null;
+    pendingPicker: boolean;
+    updatedAt: string;
+};
 
 const isDefaultFallbackCoordinate = (lat: unknown, lng: unknown) => {
     const parsedLat = Number(lat);
@@ -32,6 +43,31 @@ const isDefaultFallbackCoordinate = (lat: unknown, lng: unknown) => {
         Math.abs(parsedLat - DEFAULT_SANTIAGO_CENTER.lat) < 0.0001 &&
         Math.abs(parsedLng - DEFAULT_SANTIAGO_CENTER.lng) < 0.0001
     );
+};
+
+const loadDeliveryProofDraft = (): DeliveryProofDraft | null => {
+    if (typeof window === 'undefined') return null;
+
+    try {
+        const raw = window.localStorage.getItem(DELIVERY_PROOF_DRAFT_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<DeliveryProofDraft>;
+        if (!parsed.actorId || !parsed.orderId) {
+            window.localStorage.removeItem(DELIVERY_PROOF_DRAFT_KEY);
+            return null;
+        }
+
+        return {
+            actorId: String(parsed.actorId),
+            orderId: String(parsed.orderId),
+            routeId: parsed.routeId ? String(parsed.routeId) : null,
+            pendingPicker: Boolean(parsed.pendingPicker),
+            updatedAt: String(parsed.updatedAt || ''),
+        };
+    } catch {
+        window.localStorage.removeItem(DELIVERY_PROOF_DRAFT_KEY);
+        return null;
+    }
 };
 
 // Internal Component for Directions
@@ -106,6 +142,8 @@ const DeliveryRoute: React.FC = () => {
     // For Photo Upload
     const [photoFile, setPhotoFile] = useState<File | null>(null);
     const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+    const [photoPreparing, setPhotoPreparing] = useState(false);
+    const [photoMessage, setPhotoMessage] = useState<string | null>(null);
     const [deliveryGps, setDeliveryGps] = useState<{ lat: number; lng: number } | null>(null);
     const [deliveryGpsStatus, setDeliveryGpsStatus] = useState<'idle' | 'searching' | 'ready' | 'error'>('idle');
 
@@ -116,6 +154,42 @@ const DeliveryRoute: React.FC = () => {
     const [mapsApiLoaded, setMapsApiLoaded] = useState(false);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
     const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+
+    const clearPhotoSelection = () => {
+        setPhotoFile(null);
+        setPhotoMessage(null);
+        if (photoPreview) URL.revokeObjectURL(photoPreview);
+        setPhotoPreview(null);
+    };
+
+    const saveDeliveryProofDraft = (order: any, pendingPicker: boolean) => {
+        if (typeof window === 'undefined' || !profile?.id || !order?.id) return;
+
+        window.localStorage.setItem(DELIVERY_PROOF_DRAFT_KEY, JSON.stringify({
+            actorId: profile.id,
+            orderId: String(order.id),
+            routeId: order.route_id ? String(order.route_id) : null,
+            pendingPicker,
+            updatedAt: new Date().toISOString(),
+        } satisfies DeliveryProofDraft));
+    };
+
+    const clearDeliveryProofDraft = () => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.removeItem(DELIVERY_PROOF_DRAFT_KEY);
+    };
+
+    const openDeliveryModal = (order: any) => {
+        clearPhotoSelection();
+        clearDeliveryProofDraft();
+        setSelectedOrder(order);
+    };
+
+    const closeDeliveryModal = () => {
+        clearDeliveryProofDraft();
+        clearPhotoSelection();
+        setSelectedOrder(null);
+    };
 
     const fetchRoute = async () => {
         setLoading(true);
@@ -257,6 +331,30 @@ const DeliveryRoute: React.FC = () => {
     }, [profile?.id]); // Re-fetch if profile changes (Impersonation)
 
     useEffect(() => {
+        if (!profile?.id || loading) return;
+
+        const draft = loadDeliveryProofDraft();
+        if (!draft || draft.actorId !== profile.id || !draft.pendingPicker) return;
+
+        const draftOrder = orders.find((order) => {
+            if (String(order.id) !== draft.orderId) return false;
+            if (!draft.routeId) return true;
+            return String(order.route_id || '') === draft.routeId;
+        });
+
+        if (draftOrder) {
+            setSelectedOrder((current: any) => (current?.id === draftOrder.id ? current : draftOrder));
+            setPhotoMessage(DELIVERY_PROOF_RESTORE_MESSAGE);
+            saveDeliveryProofDraft(draftOrder, false);
+            return;
+        }
+
+        if (orders.length === 0) {
+            clearDeliveryProofDraft();
+        }
+    }, [loading, orders, profile?.id]);
+
+    useEffect(() => {
         if (mapsApiLoaded) return;
         if (typeof window !== 'undefined' && window.google?.maps?.Geocoder) {
             setMapsApiLoaded(true);
@@ -343,12 +441,43 @@ const DeliveryRoute: React.FC = () => {
         return true;
     };
 
-    const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
+    const handlePhotoInputClick = () => {
+        if (!selectedOrder) return;
+        saveDeliveryProofDraft(selectedOrder, true);
+        if (photoMessage === DELIVERY_PROOF_RESTORE_MESSAGE) {
+            setPhotoMessage(null);
+        }
+    };
+
+    const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0] || null;
+        e.target.value = '';
+        if (selectedOrder) {
+            saveDeliveryProofDraft(selectedOrder, false);
+        }
+
+        if (!file) {
+            return;
+        }
+
+        setPhotoPreparing(true);
+        setPhotoMessage(null);
+
+        try {
+            const inMemoryFile = await materializeBrowserFile(file);
+            const normalizedFile = await convertHeicToJpeg(inMemoryFile);
+
             if (photoPreview) URL.revokeObjectURL(photoPreview);
-            setPhotoFile(file);
-            setPhotoPreview(URL.createObjectURL(file));
+            setPhotoFile(normalizedFile);
+            setPhotoPreview(URL.createObjectURL(normalizedFile));
+            setPhotoMessage(isHeicLikeFile(file) ? 'Archivo HEIC convertido automaticamente a JPG para compatibilidad.' : null);
+        } catch (error: any) {
+            setPhotoFile(null);
+            if (photoPreview) URL.revokeObjectURL(photoPreview);
+            setPhotoPreview(null);
+            setPhotoMessage(error?.message || 'No se pudo procesar la foto seleccionada.');
+        } finally {
+            setPhotoPreparing(false);
         }
     };
 
@@ -357,6 +486,12 @@ const DeliveryRoute: React.FC = () => {
             if (photoPreview) URL.revokeObjectURL(photoPreview);
         };
     }, [photoPreview]);
+
+    useEffect(() => {
+        if (!selectedOrder) {
+            clearPhotoSelection();
+        }
+    }, [selectedOrder]);
 
     useEffect(() => {
         if (!selectedOrder) {
@@ -548,10 +683,7 @@ const DeliveryRoute: React.FC = () => {
             });
 
             alert("¡Entrega completada exitosamente! Se ha enviado un correo al cliente.");
-            setSelectedOrder(null);
-            setPhotoFile(null);
-            if (photoPreview) URL.revokeObjectURL(photoPreview);
-            setPhotoPreview(null);
+            closeDeliveryModal();
             fetchRoute(); // Refresh list
 
         } catch (error: any) {
@@ -642,7 +774,7 @@ const DeliveryRoute: React.FC = () => {
                                             alert('La ruta está asignada, pero aún no se ha iniciado.');
                                             return;
                                         }
-                                        if (validateGeofence(order)) setSelectedOrder(order);
+                                        if (validateGeofence(order)) openDeliveryModal(order);
                                     }}
                                 >
                                     <Pin
@@ -701,7 +833,7 @@ const DeliveryRoute: React.FC = () => {
                                             alert('Debes iniciar la ruta antes de registrar entregas.');
                                             return;
                                         }
-                                        if (validateGeofence(order)) setSelectedOrder(order);
+                                        if (validateGeofence(order)) openDeliveryModal(order);
                                     }}
                                     className="w-full mt-4 bg-slate-900 text-white py-3 rounded-xl font-bold text-sm shadow-lg active:bg-slate-800"
                                 >
@@ -732,7 +864,7 @@ const DeliveryRoute: React.FC = () => {
                                 <h2 className="text-xl font-black">Finalizar Entrega</h2>
                                 <p className="text-sm text-gray-400">Pedido #{selectedOrder.folio}</p>
                             </div>
-                            <button onClick={() => setSelectedOrder(null)} className="p-2 bg-gray-100 rounded-full">
+                            <button onClick={closeDeliveryModal} className="p-2 bg-gray-100 rounded-full">
                                 <ArrowLeft size={20} />
                             </button>
                         </div>
@@ -752,9 +884,21 @@ const DeliveryRoute: React.FC = () => {
                                 type="file"
                                 accept="image/*"
                                 capture="environment"
+                                onClick={handlePhotoInputClick}
                                 onChange={handlePhotoSelect}
                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                             />
+                        </div>
+
+                        <div className="mb-4 min-h-[20px]">
+                            {photoPreparing && (
+                                <p className="text-xs font-bold text-amber-600">Procesando foto...</p>
+                            )}
+                            {!photoPreparing && photoMessage && (
+                                <p className={`text-xs font-bold ${photoMessage === DELIVERY_PROOF_RESTORE_MESSAGE ? 'text-amber-600' : 'text-indigo-600'}`}>
+                                    {photoMessage}
+                                </p>
+                            )}
                         </div>
 
                         <div className="mb-4 p-3 rounded-xl border bg-gray-50">
@@ -776,12 +920,12 @@ const DeliveryRoute: React.FC = () => {
                         </div>
 
                         <button
-                            disabled={!photoFile || uploading || deliveryGpsStatus !== 'ready' || !deliveryGps}
+                            disabled={!photoFile || uploading || photoPreparing || deliveryGpsStatus !== 'ready' || !deliveryGps}
                             onClick={handleCompleteDelivery}
                             className="w-full bg-green-500 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-green-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                            {uploading ? (
-                                'Subiendo...'
+                            {uploading || photoPreparing ? (
+                                photoPreparing ? 'Procesando foto...' : 'Subiendo...'
                             ) : (
                                 <>
                                     <CheckCircle2 size={20} />
