@@ -2,7 +2,8 @@ import { sendGmailMessage } from './gmail';
 import { getCompanyConfig } from './companyConfig';
 
 type CollectionPaymentEmailInput = {
-    attachment: File;
+    attachment?: File | null;
+    attachments?: File[];
     row: {
         client_name?: string | null;
         client_rut?: string | null;
@@ -39,7 +40,8 @@ const formatDate = (value: string | null | undefined) => {
 };
 
 export const sendCollectionPaymentEmail = async ({
-    attachment,
+    attachment = null,
+    attachments = [],
     row,
     profileId,
     senderEmail,
@@ -57,6 +59,7 @@ export const sendCollectionPaymentEmail = async ({
     const amount = Number(row.amount || 0);
     const outstandingAmount = Number(row.outstanding_amount || row.amount || 0);
 
+    const attachmentCount = attachments.length + (attachment ? 1 : 0);
     const message = [
         'Equipo de pagos,',
         '',
@@ -68,6 +71,7 @@ export const sendCollectionPaymentEmail = async ({
         `Vencimiento: ${formatDate(row.due_date)}`,
         `Monto factura: ${formatMoney(amount)}`,
         `Saldo registrado: ${formatMoney(outstandingAmount)}`,
+        `Adjuntos: ${attachmentCount || 1}`,
         `Comentario vendedor: ${String(row.seller_comment || '').trim() || 'Sin comentario.'}`,
         `Enviado por: ${sellerLabel}`,
         '',
@@ -79,6 +83,7 @@ export const sendCollectionPaymentEmail = async ({
         subject,
         message,
         attachment,
+        attachments,
         clientId: row.client_id || undefined,
         profileId: profileId || undefined,
     });

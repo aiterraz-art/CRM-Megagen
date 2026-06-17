@@ -10,6 +10,16 @@ import ClientFormModal from '../components/modals/ClientFormModal';
 import { Database } from '../types/supabase';
 
 type Client = Database['public']['Tables']['clients']['Row'];
+type CollectionProofRecord = {
+    id: string;
+    collection_id: string;
+    storage_path: string;
+    file_name: string;
+    mime_type: string | null;
+    uploaded_at: string | null;
+    uploaded_by: string | null;
+};
+
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
 const MAX_COLLECTION_PROOF_BYTES = 20 * 1024 * 1024;
 const ALLOWED_COLLECTION_PROOF_TYPES = new Set([
@@ -88,6 +98,7 @@ const Collections = () => {
     const [activeBatch, setActiveBatch] = useState<any>(null);
     const [rejectedRows, setRejectedRows] = useState<CollectionUploadRejected[]>([]);
     const [sellerOptions, setSellerOptions] = useState<any[]>([]);
+    const [collectionProofsMap, setCollectionProofsMap] = useState<Record<string, CollectionProofRecord[]>>({});
 
     const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
     const [sellerAssignments, setSellerAssignments] = useState<Record<string, string>>({});
@@ -109,6 +120,7 @@ const Collections = () => {
     const [existingClientRutSet, setExistingClientRutSet] = useState<Set<string>>(new Set());
     const [clientCreationContext, setClientCreationContext] = useState<{ row: any; sellerId: string } | null>(null);
     const [proofTargetRow, setProofTargetRow] = useState<any | null>(null);
+    const [proofViewerRow, setProofViewerRow] = useState<any | null>(null);
 
     const isSeller = effectiveRole === 'seller';
     const isChief = effectiveRole === 'jefe';
@@ -361,6 +373,25 @@ const Collections = () => {
             .sort((a, b) => a.localeCompare(b, 'es'));
     }, [rows]);
 
+    const buildLegacyProofRecord = (row: any): CollectionProofRecord[] => {
+        if (!row?.id || !row?.payment_proof_path) return [];
+        return [{
+            id: `legacy-${row.id}`,
+            collection_id: row.id,
+            storage_path: row.payment_proof_path,
+            file_name: row.payment_proof_name || 'comprobante_pago',
+            mime_type: row.payment_proof_mime_type || null,
+            uploaded_at: row.payment_proof_uploaded_at || null,
+            uploaded_by: null,
+        }];
+    };
+
+    const getRowProofs = (row: any): CollectionProofRecord[] => {
+        const proofs = collectionProofsMap[row.id];
+        if (proofs && proofs.length > 0) return proofs;
+        return buildLegacyProofRecord(row);
+    };
+
     const fetchData = async () => {
         setLoading(true);
         setError(null);
@@ -376,10 +407,40 @@ const Collections = () => {
             if (firstError) throw firstError;
 
             const loadedRows = rowsRes.data || [];
+            const loadedPaidRows = paidRowsRes.data || [];
             setAllRows(loadedRows);
-            setAllPaidRows(paidRowsRes.data || []);
+            setAllPaidRows(loadedPaidRows);
             setAllSummary(summaryRes.data || []);
             setActiveBatch(batchRes.data || null);
+
+            const collectionIds = Array.from(new Set(
+                [...loadedRows, ...loadedPaidRows].map((row: any) => row.id).filter(Boolean)
+            ));
+
+            if (collectionIds.length > 0) {
+                try {
+                    const { data: proofRows, error: proofRowsError } = await (supabase as any)
+                        .from('collection_payment_proofs')
+                        .select('id, collection_id, storage_path, file_name, mime_type, uploaded_at, uploaded_by')
+                        .in('collection_id', collectionIds)
+                        .order('uploaded_at', { ascending: false });
+
+                    if (proofRowsError) throw proofRowsError;
+
+                    const groupedProofs = (proofRows || []).reduce((acc: Record<string, CollectionProofRecord[]>, proof: CollectionProofRecord) => {
+                        if (!acc[proof.collection_id]) acc[proof.collection_id] = [];
+                        acc[proof.collection_id].push(proof);
+                        return acc;
+                    }, {});
+
+                    setCollectionProofsMap(groupedProofs);
+                } catch (proofLoadError) {
+                    console.warn('No se pudieron cargar los comprobantes múltiples de cobranza:', proofLoadError);
+                    setCollectionProofsMap({});
+                }
+            } else {
+                setCollectionProofsMap({});
+            }
 
             const initialDrafts: Record<string, string> = {};
             loadedRows.forEach((row: any) => {
@@ -597,31 +658,55 @@ const Collections = () => {
         }
     };
 
-    const uploadCollectionProof = async (row: any, file: File) => {
+    const uploadCollectionProofs = async (row: any, files: File[]) => {
         if (!profile?.id) throw new Error('No autenticado');
         if (!canEditComment) throw new Error('Sin permisos para subir comprobantes');
 
-        const mimeType = file.type || 'application/octet-stream';
-        if (!ALLOWED_COLLECTION_PROOF_TYPES.has(mimeType)) {
-            throw new Error('Formato no permitido. Usa PDF, JPG, PNG, WEBP o HEIC.');
+        if (files.length === 0) throw new Error('Debes seleccionar al menos un comprobante.');
+
+        const uploadedProofs: CollectionProofRecord[] = [];
+
+        for (const file of files) {
+            const mimeType = file.type || 'application/octet-stream';
+            if (!ALLOWED_COLLECTION_PROOF_TYPES.has(mimeType)) {
+                throw new Error('Formato no permitido. Usa PDF, JPG, PNG, WEBP o HEIC.');
+            }
+            if (file.size > MAX_COLLECTION_PROOF_BYTES) {
+                throw new Error('El archivo supera el máximo de 20MB.');
+            }
+
+            const fileName = sanitizeFileName(file.name || 'comprobante_pago');
+            const path = `${profile.id}/collections/${row.id}/${Date.now()}_${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from(PAYMENT_PROOFS_BUCKET)
+                .upload(path, file, { contentType: mimeType, upsert: false });
+            if (uploadError) throw uploadError;
+
+            const proofPayload = {
+                collection_id: row.id,
+                storage_path: path,
+                file_name: file.name || fileName,
+                mime_type: mimeType,
+                uploaded_by: profile.id
+            };
+
+            const { data: insertedProof, error: insertProofError } = await (supabase as any)
+                .from('collection_payment_proofs')
+                .insert(proofPayload)
+                .select('id, collection_id, storage_path, file_name, mime_type, uploaded_at, uploaded_by')
+                .single();
+            if (insertProofError) throw insertProofError;
+
+            uploadedProofs.push(insertedProof as CollectionProofRecord);
         }
-        if (file.size > MAX_COLLECTION_PROOF_BYTES) {
-            throw new Error('El archivo supera el máximo de 20MB.');
-        }
 
-        const fileName = sanitizeFileName(file.name || 'comprobante_pago');
-        const path = `${profile.id}/collections/${row.id}/${Date.now()}_${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-            .from(PAYMENT_PROOFS_BUCKET)
-            .upload(path, file, { contentType: mimeType, upsert: false });
-        if (uploadError) throw uploadError;
-
+        const latestProof = uploadedProofs[uploadedProofs.length - 1];
         const payload = {
-            payment_proof_path: path,
-            payment_proof_name: file.name || fileName,
-            payment_proof_mime_type: mimeType,
-            payment_proof_uploaded_at: new Date().toISOString(),
+            payment_proof_path: latestProof.storage_path,
+            payment_proof_name: latestProof.file_name,
+            payment_proof_mime_type: latestProof.mime_type,
+            payment_proof_uploaded_at: latestProof.uploaded_at || new Date().toISOString(),
             payment_proof_uploaded_by: profile.id
         };
 
@@ -633,6 +718,18 @@ const Collections = () => {
 
         setAllRows((prev) => prev.map((item: any) => item.id === row.id ? { ...item, ...payload } : item));
         setAllPaidRows((prev) => prev.map((item: any) => item.id === row.id ? { ...item, ...payload } : item));
+        setCollectionProofsMap((prev) => {
+            const existing = prev[row.id] || buildLegacyProofRecord(row);
+            const dedupedExisting = existing.filter((proof) => !uploadedProofs.some((uploaded) => uploaded.storage_path === proof.storage_path));
+            return {
+                ...prev,
+                [row.id]: [...uploadedProofs.slice().reverse(), ...dedupedExisting].sort(
+                    (left, right) => toComparableTime(right.uploaded_at) - toComparableTime(left.uploaded_at)
+                )
+            };
+        });
+
+        return uploadedProofs;
     };
 
     const handleProofUploadClick = (row: any) => {
@@ -642,19 +739,24 @@ const Collections = () => {
     };
 
     const handleProofFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
+        const files = Array.from(event.target.files || []);
         const targetRow = proofTargetRow;
         event.target.value = '';
-        if (!file || !targetRow) return;
+        if (files.length === 0 || !targetRow) return;
 
         setProofUploadingId(targetRow.id);
         try {
-            const inMemoryFile = await materializeBrowserFile(file);
-            const normalizedFile = await convertHeicToJpeg(inMemoryFile);
-            await uploadCollectionProof(targetRow, normalizedFile);
+            const normalizedFiles: File[] = [];
+            for (const file of files) {
+                const inMemoryFile = await materializeBrowserFile(file);
+                const normalizedFile = await convertHeicToJpeg(inMemoryFile);
+                normalizedFiles.push(normalizedFile);
+            }
+
+            await uploadCollectionProofs(targetRow, normalizedFiles);
             try {
                 await sendCollectionPaymentEmail({
-                    attachment: normalizedFile,
+                    attachments: normalizedFiles,
                     row: {
                         client_name: targetRow.client_name,
                         client_rut: targetRow.client_rut,
@@ -669,9 +771,16 @@ const Collections = () => {
                     senderEmail: profile?.email || null,
                     senderName: (profile as any)?.full_name || null,
                 });
-                alert(isHeicLikeFile(file)
-                    ? 'Comprobante HEIC convertido a JPG, cargado y enviado a pagos correctamente.'
-                    : 'Comprobante de pago cargado y enviado a pagos correctamente.');
+                const convertedHeicCount = files.filter((file) => isHeicLikeFile(file)).length;
+                if (normalizedFiles.length > 1) {
+                    alert(convertedHeicCount > 0
+                        ? `Se cargaron ${normalizedFiles.length} comprobantes, incluyendo ${convertedHeicCount} HEIC convertidos a JPG, y se enviaron a pagos correctamente.`
+                        : `Se cargaron ${normalizedFiles.length} comprobantes y se enviaron a pagos correctamente.`);
+                } else {
+                    alert(convertedHeicCount > 0
+                        ? 'Comprobante HEIC convertido a JPG, cargado y enviado a pagos correctamente.'
+                        : 'Comprobante de pago cargado y enviado a pagos correctamente.');
+                }
             } catch (emailError: any) {
                 alert(`Comprobante cargado, pero el correo a pagos falló: ${emailError?.message || 'desconocido'}`);
             }
@@ -683,13 +792,13 @@ const Collections = () => {
         }
     };
 
-    const openCollectionProof = async (row: any) => {
-        if (!row.payment_proof_path) return;
-        setProofOpeningId(row.id);
+    const openCollectionProof = async (proof: { storage_path: string; file_name?: string | null; id?: string | null }) => {
+        if (!proof?.storage_path) return;
+        setProofOpeningId(proof.id || proof.storage_path);
         try {
             const { data, error: signedUrlError } = await supabase.storage
                 .from(PAYMENT_PROOFS_BUCKET)
-                .createSignedUrl(row.payment_proof_path, 60 * 60);
+                .createSignedUrl(proof.storage_path, 60 * 60);
             if (signedUrlError) throw signedUrlError;
             window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
         } catch (openError: any) {
@@ -1207,15 +1316,15 @@ const Collections = () => {
                                                     className="px-3 py-2 rounded-xl border border-indigo-200 text-indigo-700 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
                                                 >
                                                     <Paperclip size={14} />
-                                                    {proofUploadingId === r.id ? 'Subiendo...' : 'Subir comprobante'}
+                                                    {proofUploadingId === r.id ? 'Subiendo...' : 'Subir comprobantes'}
                                                 </button>
                                                 <button
-                                                    onClick={() => openCollectionProof(r)}
-                                                    disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                    onClick={() => setProofViewerRow(r)}
+                                                    disabled={getRowProofs(r).length === 0}
                                                     className="px-3 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
                                                 >
                                                     <Eye size={14} />
-                                                    {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                                    {getRowProofs(r).length > 0 ? `Ver comprobantes (${getRowProofs(r).length})` : 'Sin comprobantes'}
                                                 </button>
                                             </div>
                                         </div>
@@ -1223,12 +1332,12 @@ const Collections = () => {
                                         <div className="space-y-2">
                                             <p className="text-sm text-gray-700">{r.seller_comment || '-'}</p>
                                             <button
-                                                onClick={() => openCollectionProof(r)}
-                                                disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                onClick={() => setProofViewerRow(r)}
+                                                disabled={getRowProofs(r).length === 0}
                                                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
                                             >
                                                 <Eye size={14} />
-                                                {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                                {getRowProofs(r).length > 0 ? `Ver comprobantes (${getRowProofs(r).length})` : 'Sin comprobantes'}
                                             </button>
                                         </div>
                                     )}
@@ -1325,15 +1434,15 @@ const Collections = () => {
                                                             className="px-2 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
                                                         >
                                                             <Paperclip size={12} />
-                                                            {proofUploadingId === r.id ? 'Subiendo...' : 'Subir comprobante'}
+                                                            {proofUploadingId === r.id ? 'Subiendo...' : 'Subir comprobantes'}
                                                         </button>
                                                         <button
-                                                            onClick={() => openCollectionProof(r)}
-                                                            disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                            onClick={() => setProofViewerRow(r)}
+                                                            disabled={getRowProofs(r).length === 0}
                                                             className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
                                                         >
                                                             <Eye size={12} />
-                                                            {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                                            {getRowProofs(r).length > 0 ? `Ver comprobantes (${getRowProofs(r).length})` : 'Sin comprobantes'}
                                                         </button>
                                                     </div>
                                                 </div>
@@ -1341,12 +1450,12 @@ const Collections = () => {
                                                 <div className="space-y-2">
                                                     <span className="text-xs text-gray-600 block">{r.seller_comment || '-'}</span>
                                                     <button
-                                                        onClick={() => openCollectionProof(r)}
-                                                        disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                        onClick={() => setProofViewerRow(r)}
+                                                        disabled={getRowProofs(r).length === 0}
                                                         className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
                                                     >
                                                         <Eye size={12} />
-                                                        {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                                        {getRowProofs(r).length > 0 ? `Ver comprobantes (${getRowProofs(r).length})` : 'Sin comprobantes'}
                                                     </button>
                                                 </div>
                                             )}
@@ -1415,12 +1524,12 @@ const Collections = () => {
                                 <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400 font-bold">Descargo</p>
                                 <p className="mt-1 text-sm text-gray-700">{r.seller_comment || '-'}</p>
                                 <button
-                                    onClick={() => openCollectionProof(r)}
-                                    disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                    onClick={() => setProofViewerRow(r)}
+                                    disabled={getRowProofs(r).length === 0}
                                     className="mt-2 w-full px-3 py-2 rounded-xl border border-gray-200 text-gray-700 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
                                 >
                                     <Eye size={14} />
-                                    {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                    {getRowProofs(r).length > 0 ? `Ver comprobantes (${getRowProofs(r).length})` : 'Sin comprobantes'}
                                 </button>
                             </div>
                         </div>
@@ -1458,12 +1567,12 @@ const Collections = () => {
                                         <div className="space-y-2">
                                             <span className="block">{r.seller_comment || '-'}</span>
                                             <button
-                                                onClick={() => openCollectionProof(r)}
-                                                disabled={!r.payment_proof_path || proofOpeningId === r.id}
+                                                onClick={() => setProofViewerRow(r)}
+                                                disabled={getRowProofs(r).length === 0}
                                                 className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
                                             >
                                                 <Eye size={12} />
-                                                {proofOpeningId === r.id ? 'Abriendo...' : (r.payment_proof_path ? 'Ver comprobante' : 'Sin comprobante')}
+                                                {getRowProofs(r).length > 0 ? `Ver comprobantes (${getRowProofs(r).length})` : 'Sin comprobantes'}
                                             </button>
                                         </div>
                                     </td>
@@ -1497,10 +1606,52 @@ const Collections = () => {
                 onSave={handleCreateClientFromCollection}
             />
         )}
+        {proofViewerRow && (
+            <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center">
+                <div className="w-full max-w-2xl bg-white rounded-3xl border shadow-2xl overflow-hidden">
+                    <div className="px-6 py-4 border-b flex items-center justify-between gap-4">
+                        <div>
+                            <h3 className="text-lg font-black text-gray-900">Comprobantes de pago</h3>
+                            <p className="text-sm text-gray-500">{proofViewerRow.client_name} • {proofViewerRow.document_number}</p>
+                        </div>
+                        <button
+                            onClick={() => setProofViewerRow(null)}
+                            className="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700"
+                        >
+                            Cerrar
+                        </button>
+                    </div>
+                    <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
+                        {getRowProofs(proofViewerRow).map((proof) => (
+                            <div key={proof.id || proof.storage_path} className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-4 rounded-2xl border">
+                                <div>
+                                    <p className="font-bold text-gray-900 break-all">{proof.file_name || 'Comprobante'}</p>
+                                    <p className="text-xs text-gray-500">
+                                        Subido: {formatShortDate(proof.uploaded_at)} {proof.uploaded_at ? new Date(proof.uploaded_at).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : ''}
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => openCollectionProof(proof)}
+                                    disabled={proofOpeningId === (proof.id || proof.storage_path)}
+                                    className="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 inline-flex items-center justify-center gap-2 disabled:opacity-50"
+                                >
+                                    <Eye size={14} />
+                                    {proofOpeningId === (proof.id || proof.storage_path) ? 'Abriendo...' : 'Abrir'}
+                                </button>
+                            </div>
+                        ))}
+                        {getRowProofs(proofViewerRow).length === 0 && (
+                            <p className="text-sm text-gray-500">Este documento todavía no tiene comprobantes adjuntos.</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
         <input
             ref={proofInputRef}
             type="file"
             accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif"
+            multiple
             className="hidden"
             onChange={handleProofFileChange}
         />
