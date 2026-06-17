@@ -347,6 +347,7 @@ const Quotations: React.FC = () => {
 
                 let profilesMap: Record<string, any> = {};
                 let locationsMap: Record<string, any> = {};
+                let ordersByQuotationId: Record<string, any> = {};
 
                 // Parallel fetches
                 const promises = [];
@@ -391,6 +392,20 @@ const Quotations: React.FC = () => {
                                 }
                             })
                     );
+                    promises.push(
+                        supabase
+                            .from('orders')
+                            .select('id, folio, quotation_id, status')
+                            .in('quotation_id', quotationIds)
+                            .then(({ data }) => {
+                                if (data) {
+                                    data.forEach((order) => {
+                                        if (!order.quotation_id || ordersByQuotationId[order.quotation_id]) return;
+                                        ordersByQuotationId[order.quotation_id] = order;
+                                    });
+                                }
+                            })
+                    );
                 }
 
                 await Promise.all(promises);
@@ -398,6 +413,7 @@ const Quotations: React.FC = () => {
                 const formattedData = quotesData.map((q: any) => {
                     const sellerProfile = profilesMap[q.seller_id];
                     const loc = locationsMap[q.id];
+                    const linkedOrder = ordersByQuotationId[q.id] || null;
                     // Handle both object and array join formats
                     const client = Array.isArray(q.clients) ? q.clients[0] : q.clients;
 
@@ -414,6 +430,10 @@ const Quotations: React.FC = () => {
                         client_comuna: client?.comuna || '',
                         seller_email: sellerProfile?.email || 'N/A',
                         seller_name: sellerProfile?.full_name || sellerProfile?.email?.split('@')[0].toUpperCase() || 'Vendedor',
+                        linked_order_id: linkedOrder?.id || null,
+                        linked_order_folio: linkedOrder?.folio || null,
+                        linked_order_status: linkedOrder?.status || null,
+                        has_order: Boolean(linkedOrder?.id),
                         location: loc || null,
                         items: typeof q.items === 'string' ? (() => { try { return JSON.parse(q.items) } catch { return [] } })() : (q.items || []),
                         discount_approval: locationsMap[`approval-${q.id}`] || null
@@ -553,6 +573,11 @@ const Quotations: React.FC = () => {
     };
 
     const handleEditQuotation = (q: any) => {
+        if (q?.has_order || q?.linked_order_id) {
+            const orderRef = q?.linked_order_folio ? `#${q.linked_order_folio}` : 'existente';
+            alert(`Esta cotización ya fue convertida a pedido ${orderRef} y ya no se puede editar.`);
+            return;
+        }
         setEditingQuotation(q);
         setSelectedClient(q.client);
         const loadedItems = (q.items || []).map((item: any) => {
@@ -1512,6 +1537,11 @@ const Quotations: React.FC = () => {
             alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
             return;
         }
+        if (quotation?.has_order || quotation?.linked_order_id) {
+            const orderRef = quotation?.linked_order_folio ? `#${quotation.linked_order_folio}` : 'existente';
+            alert(`Esta cotización ya fue convertida a pedido ${orderRef}. Revisa el módulo de Pedidos para su seguimiento.`);
+            return;
+        }
         if (!canCloseQuotationSale(effectiveRole, profile.id, quotation?.seller_id)) {
             alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
             return;
@@ -1840,18 +1870,24 @@ const Quotations: React.FC = () => {
                                         Compartir
                                     </button>
 
-                                    {q.status !== 'approved' && (
+                                    {(q.status !== 'approved' || q.has_order) && (
                                         <button
                                             onClick={() => handleConvertToOrder(q)}
-                                            disabled={submitting || !canConvertOrder}
-                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || !canConvertOrder
+                                            disabled={submitting || !canConvertOrder || q.has_order}
+                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || !canConvertOrder || q.has_order
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
                                                 }`}
-                                            title={canConvertOrder ? 'Convertir en Pedido' : 'Solo el vendedor dueño, un admin o facturación pueden convertir y enviar el correo'}
+                                            title={
+                                                q.has_order
+                                                    ? `Esta cotización ya fue convertida a pedido${q.linked_order_folio ? ` #${q.linked_order_folio}` : ''}.`
+                                                    : canConvertOrder
+                                                        ? 'Convertir en Pedido'
+                                                        : 'Solo el vendedor dueño, un admin o facturación pueden convertir y enviar el correo'
+                                            }
                                         >
                                             <ShoppingBag size={12} className="mr-1" />
-                                            {q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}
+                                            {q.has_order ? 'Pedido generado' : q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}
                                         </button>
                                     )}
                                 </div>
@@ -1886,8 +1922,14 @@ const Quotations: React.FC = () => {
                                                 <>
                                                 <button
                                                     onClick={() => handleEditQuotation(q)}
-                                                    className="p-2 bg-white text-gray-400 rounded-lg border border-gray-100 hover:text-amber-600 hover:bg-amber-50 transition-all"
-                                                    title="Editar"
+                                                    disabled={q.has_order}
+                                                    className={`p-2 bg-white rounded-lg border border-gray-100 transition-all ${q.has_order
+                                                        ? 'text-gray-300 cursor-not-allowed'
+                                                        : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'
+                                                        }`}
+                                                    title={q.has_order
+                                                        ? `La cotización ya fue convertida a pedido${q.linked_order_folio ? ` #${q.linked_order_folio}` : ''} y ya no se puede editar.`
+                                                        : 'Editar'}
                                                 >
                                                     <Edit2 size={14} />
                                                 </button>
