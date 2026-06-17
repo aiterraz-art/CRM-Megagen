@@ -233,6 +233,41 @@ const Quotations: React.FC = () => {
         ));
     }, []);
 
+    const markQuotationAsConvertedLocally = useCallback((
+        quotationId: string,
+        linkedOrder?: {
+            id?: string | null;
+            folio?: number | string | null;
+            status?: string | null;
+        }
+    ) => {
+        if (!quotationId) return;
+
+        const patch = {
+            status: 'approved',
+            has_order: true,
+            linked_order_id: linkedOrder?.id ?? null,
+            linked_order_folio: linkedOrder?.folio ?? null,
+            linked_order_status: linkedOrder?.status ?? 'pending',
+        };
+
+        setQuotations((prev) => prev.map((quote) => (
+            quote.id === quotationId
+                ? { ...quote, ...patch }
+                : quote
+        )));
+        setSelectedForTemplate((prev: any) => (
+            prev?.id === quotationId
+                ? { ...prev, ...patch }
+                : prev
+        ));
+        setEditingQuotation((prev: any) => (
+            prev?.id === quotationId
+                ? { ...prev, ...patch }
+                : prev
+        ));
+    }, []);
+
     const normalizePhoneForWhatsapp = useCallback((raw: string | null | undefined): string | null => {
         const digits = String(raw || '').replace(/\D/g, '');
         if (!digits) return null;
@@ -598,7 +633,7 @@ const Quotations: React.FC = () => {
     };
 
     const handleEditQuotation = (q: any) => {
-        if (q?.has_order || q?.linked_order_id) {
+        if (q?.has_order || q?.linked_order_id || q?.status === 'approved') {
             const orderRef = q?.linked_order_folio ? `#${q.linked_order_folio}` : 'existente';
             alert(`Esta cotización ya fue convertida a pedido ${orderRef} y ya no se puede editar.`);
             return;
@@ -1402,6 +1437,11 @@ const Quotations: React.FC = () => {
                 },
             });
             if (response?.already_exists) {
+                markQuotationAsConvertedLocally(quotation.id, {
+                    id: response?.order_id || null,
+                    folio: response?.order_folio || null,
+                    status: 'pending',
+                });
                 await logQuotationOrderConversionSafe({
                     attemptId,
                     quotationId: quotation.id,
@@ -1416,11 +1456,16 @@ const Quotations: React.FC = () => {
                 });
                 closePaymentProofModal();
                 alert('Esta cotización ya tenía un pedido asociado. Revisa el módulo de Pedidos para su estado de correo.');
-                fetchQuotations();
+                void fetchQuotations();
                 return;
             }
 
             createdOrderId = response?.order_id || null;
+            markQuotationAsConvertedLocally(quotation.id, {
+                id: createdOrderId,
+                folio: response?.order_folio || null,
+                status: 'pending',
+            });
             await syncOrderNotesFromQuotation(createdOrderId, quotation);
             const orderFolio = response?.order_folio || response?.order_id?.slice?.(0, 8) || 'N/A';
 
@@ -1474,7 +1519,7 @@ const Quotations: React.FC = () => {
                 },
             });
             closePaymentProofModal();
-            fetchQuotations();
+            void fetchQuotations();
         } catch (error: any) {
             if (uploadedProof?.path && !createdOrderId) {
                 void supabase.storage
@@ -1548,6 +1593,7 @@ const Quotations: React.FC = () => {
         closePaymentProofModal,
         fetchQuotations,
         getQuotationCreditDays,
+        markQuotationAsConvertedLocally,
         requestDiscountApprovalReason,
         effectiveRole,
         profile?.id,
@@ -1562,7 +1608,7 @@ const Quotations: React.FC = () => {
             alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
             return;
         }
-        if (quotation?.has_order || quotation?.linked_order_id) {
+        if (quotation?.has_order || quotation?.linked_order_id || quotation?.status === 'approved') {
             const orderRef = quotation?.linked_order_folio ? `#${quotation.linked_order_folio}` : 'existente';
             alert(`Esta cotización ya fue convertida a pedido ${orderRef}. Revisa el módulo de Pedidos para su seguimiento.`);
             return;
@@ -1777,6 +1823,7 @@ const Quotations: React.FC = () => {
                         const hasWhatsappTarget = Boolean(normalizePhoneForWhatsapp(q.client_phone || q.client?.phone));
                         const hasEmailTarget = Boolean(String(q.client_email || q.client?.email || '').trim());
                         const canConvertOrder = canCloseQuotationSale(effectiveRole, profile?.id, q.seller_id);
+                        const isConvertedQuotation = Boolean(q.has_order || q.linked_order_id || q.status === 'approved');
 
                         return (
                         <div key={q.id} className="premium-card p-4 flex flex-col justify-between group">
@@ -1895,16 +1942,16 @@ const Quotations: React.FC = () => {
                                         Compartir
                                     </button>
 
-                                    {(q.status !== 'approved' || q.has_order) && (
+                                    {(q.status !== 'approved' || isConvertedQuotation) && (
                                         <button
                                             onClick={() => handleConvertToOrder(q)}
-                                            disabled={submitting || !canConvertOrder || q.has_order}
-                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || !canConvertOrder || q.has_order
+                                            disabled={submitting || !canConvertOrder || isConvertedQuotation}
+                                            className={`flex-1 min-w-[110px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${submitting || !canConvertOrder || isConvertedQuotation
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
                                                 }`}
                                             title={
-                                                q.has_order
+                                                isConvertedQuotation
                                                     ? `Esta cotización ya fue convertida a pedido${q.linked_order_folio ? ` #${q.linked_order_folio}` : ''}.`
                                                     : canConvertOrder
                                                         ? 'Convertir en Pedido'
@@ -1912,7 +1959,7 @@ const Quotations: React.FC = () => {
                                             }
                                         >
                                             <ShoppingBag size={12} className="mr-1" />
-                                            {q.has_order ? 'Pedido generado' : q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}
+                                            {isConvertedQuotation ? 'Pedido generado' : q.status === 'sent' ? 'Cerrar Venta' : 'Vender'}
                                         </button>
                                     )}
                                 </div>
@@ -1947,12 +1994,12 @@ const Quotations: React.FC = () => {
                                                 <>
                                                 <button
                                                     onClick={() => handleEditQuotation(q)}
-                                                    disabled={q.has_order}
-                                                    className={`p-2 bg-white rounded-lg border border-gray-100 transition-all ${q.has_order
+                                                    disabled={isConvertedQuotation}
+                                                    className={`p-2 bg-white rounded-lg border border-gray-100 transition-all ${isConvertedQuotation
                                                         ? 'text-gray-300 cursor-not-allowed'
                                                         : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'
                                                         }`}
-                                                    title={q.has_order
+                                                    title={isConvertedQuotation
                                                         ? `La cotización ya fue convertida a pedido${q.linked_order_folio ? ` #${q.linked_order_folio}` : ''} y ya no se puede editar.`
                                                         : 'Editar'}
                                                 >
