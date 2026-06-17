@@ -1,9 +1,11 @@
-import { AlertTriangle, Calendar, FileText, ShoppingBag, X } from 'lucide-react';
+import { AlertTriangle, Calendar, Download, FileText, ShoppingBag, X } from 'lucide-react';
+import { useState } from 'react';
 import {
     CollectionInvoiceSummary,
     CollectionsCrmCommercialSnapshot,
     CollectionsDebtSnapshot,
 } from '../../utils/collectionsLinking';
+import { generateCollectionDebtPdfFile } from '../../utils/collectionDebtPdf';
 
 type CollectionClientDetailModalProps = {
     isOpen: boolean;
@@ -70,9 +72,40 @@ const CollectionClientDetailModal = ({
     loading,
     error,
 }: CollectionClientDetailModalProps) => {
+    const [downloadingPdf, setDownloadingPdf] = useState(false);
+
     if (!isOpen) return null;
 
     const invoices: CollectionInvoiceSummary[] = debtSnapshot?.invoices || [];
+    const overdueInvoices = invoices.filter((invoice) => invoice.aging_days > 0);
+
+    const handleDownloadOverduePdf = async () => {
+        if (!clientSummary || overdueInvoices.length === 0) return;
+
+        setDownloadingPdf(true);
+        try {
+            const file = await generateCollectionDebtPdfFile({
+                clientName: clientSummary.client_name,
+                clientRut: clientSummary.client_rut,
+                sellerName: clientSummary.seller_name,
+                sellerEmail: clientSummary.seller_email,
+                generatedAt: new Date().toISOString(),
+                overdueInvoices,
+            });
+            const blobUrl = URL.createObjectURL(file);
+            const anchor = document.createElement('a');
+            anchor.href = blobUrl;
+            anchor.download = file.name;
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+            URL.revokeObjectURL(blobUrl);
+        } catch (error: any) {
+            alert(error?.message || 'No se pudo generar el PDF de facturas vencidas.');
+        } finally {
+            setDownloadingPdf(false);
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-[2200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -86,12 +119,23 @@ const CollectionClientDetailModal = ({
                             {clientSummary?.seller_name || clientSummary?.seller_email || 'Sin vendedor asignado'}
                         </p>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors"
-                    >
-                        <X size={20} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => void handleDownloadOverduePdf()}
+                            disabled={loading || downloadingPdf || overdueInvoices.length === 0}
+                            className="px-3 py-2 rounded-xl bg-white text-slate-900 text-sm font-black inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={overdueInvoices.length > 0 ? 'Descargar PDF de facturas vencidas' : 'Este cliente no tiene facturas vencidas'}
+                        >
+                            <Download size={16} />
+                            {downloadingPdf ? 'Generando PDF...' : 'PDF vencidas'}
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors"
+                        >
+                            <X size={20} />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto bg-gray-50 p-6">
