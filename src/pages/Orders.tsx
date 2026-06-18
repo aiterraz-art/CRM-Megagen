@@ -485,7 +485,7 @@ const Orders = () => {
     const buildOrderPdfPayload = useCallback(async (order: EnrichedOrder): Promise<{ orderRow: any; orderPdfData: OrderPdfData; creditDays: number }> => {
         const { data: orderRow, error: orderError } = await supabase
             .from('orders')
-            .select('id, folio, client_id, user_id, total_amount, payment_proof_path, payment_proof_name, payment_proof_mime_type')
+            .select('id, folio, client_id, user_id, total_amount, notes, payment_proof_path, payment_proof_name, payment_proof_mime_type')
             .eq('id', order.id)
             .single();
 
@@ -515,6 +515,8 @@ const Orders = () => {
         const client = clientRes.data;
         const seller = sellerRes.data;
         const creditDays = getClientCreditDays(client);
+        const normalizedComments = String(orderRow.notes || '').trim()
+            || (order.quotation_folio ? `Pedido generado desde cotización #${order.quotation_folio}.` : 'Pedido generado desde CRM.');
 
         return {
             orderRow,
@@ -545,7 +547,7 @@ const Orders = () => {
                     total: Number(item.total_price || 0)
                 })),
                 totalAmount: Number(orderRow.total_amount || 0),
-                comments: order.quotation_folio ? `Pedido generado desde cotización #${order.quotation_folio}.` : 'Pedido generado desde CRM.'
+                comments: normalizedComments
             }
         };
     }, []);
