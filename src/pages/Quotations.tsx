@@ -19,6 +19,7 @@ import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../ut
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import { generateQuotationPdfFile } from '../utils/quotationPdf';
+import { formatOrderConversionErrorMessage } from '../utils/orderConversionErrors';
 import { uploadFileToStorage } from '../utils/storageUpload';
 import { isProspectStatus } from '../utils/prospect';
 import {
@@ -1610,7 +1611,10 @@ const Quotations: React.FC = () => {
                     });
             }
             console.error('Error converting to order:', error);
-            const errorMessage = error?.message || error?.details || 'Ocurrió un error al generar el pedido.';
+            const errorMessage = formatOrderConversionErrorMessage(
+                error?.message || error?.details || 'Ocurrió un error al generar el pedido.',
+                quotation?.items || []
+            );
             await logQuotationOrderConversionSafe({
                 attemptId,
                 quotationId: quotation.id,

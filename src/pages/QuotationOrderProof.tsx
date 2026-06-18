@@ -7,6 +7,7 @@ import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { logQuotationOrderConversionSafe } from '../utils/quotationOrderConversionLog';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
+import { formatOrderConversionErrorMessage } from '../utils/orderConversionErrors';
 import { uploadFileToStorage } from '../utils/storageUpload';
 import { ensureDiscountApprovalBeforeOrderConversion } from '../utils/quotationDiscountApprovalFlow';
 
@@ -641,8 +642,12 @@ const QuotationOrderProof = () => {
             if (uploadedProof?.path && !createdOrderId) {
                 void supabase.storage.from(PAYMENT_PROOFS_BUCKET).remove([uploadedProof.path]);
             }
-            setPaymentProofError(error?.message || 'No se pudo generar el pedido.');
-            alert(error?.message || 'No se pudo generar el pedido.');
+            const normalizedErrorMessage = formatOrderConversionErrorMessage(
+                error?.message || error?.details || 'No se pudo generar el pedido.',
+                quotation?.items || []
+            );
+            setPaymentProofError(normalizedErrorMessage);
+            alert(normalizedErrorMessage);
         } finally {
             setSubmitting(false);
             setOrderConversionStage(null);
