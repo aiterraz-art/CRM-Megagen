@@ -80,6 +80,19 @@ const canCloseQuotationSale = (
     quotationSellerId: string | null | undefined
 ) => quotationSellerId === actorId || role === 'admin' || role === 'facturador';
 
+const getSellerDisplayName = (sellerProfile: SellerOption | null | undefined) => {
+    const fullName = String(sellerProfile?.full_name || '').trim();
+    if (fullName) return fullName;
+
+    const email = String(sellerProfile?.email || '').trim();
+    if (email) {
+        const [emailName] = email.split('@');
+        return String(emailName || email).trim().toUpperCase() || 'Vendedor';
+    }
+
+    return 'Vendedor';
+};
+
 type PaymentProofModalDraft = {
     quotationId: string;
     actorId: string;
@@ -496,7 +509,7 @@ const Quotations: React.FC = () => {
                         client_giro: client?.giro || '',
                         client_comuna: client?.comuna || '',
                         seller_email: sellerProfile?.email || 'N/A',
-                        seller_name: sellerProfile?.full_name || sellerProfile?.email?.split('@')[0].toUpperCase() || 'Vendedor',
+                        seller_name: getSellerDisplayName(sellerProfile),
                         linked_order_id: linkedOrder?.id || null,
                         linked_order_folio: linkedOrder?.folio || null,
                         linked_order_status: linkedOrder?.status || null,
