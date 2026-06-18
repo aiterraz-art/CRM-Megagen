@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { MapPin, Phone, CheckCircle2, Camera, Navigation, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { APIProvider, Map as GoogleMap, AdvancedMarker, Pin, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { checkGPSConnection, watchCurrentLocation } from '../utils/gps';
 import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
+import { completeDeliveryProof } from '../utils/deliveryProof';
 
 // Helper for distance calc (Haversine formula)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -128,6 +130,7 @@ const Directions = ({ orders, userLocation }: { orders: any[], userLocation: { l
 
 const DeliveryRoute: React.FC = () => {
     const { profile, effectiveRole, hasPermission } = useUser();
+    const navigate = useNavigate();
     const [orders, setOrders] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -154,6 +157,10 @@ const DeliveryRoute: React.FC = () => {
     const [mapsApiLoaded, setMapsApiLoaded] = useState(false);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
     const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+    const isAndroidDevice = useMemo(() => {
+        if (typeof navigator === 'undefined') return false;
+        return /Android/i.test(navigator.userAgent || '');
+    }, []);
 
     const clearPhotoSelection = () => {
         setPhotoFile(null);
@@ -180,6 +187,11 @@ const DeliveryRoute: React.FC = () => {
     };
 
     const openDeliveryModal = (order: any) => {
+        if (isAndroidDevice) {
+            clearDeliveryProofDraft();
+            navigate(`/delivery/${order.id}/proof`);
+            return;
+        }
         clearPhotoSelection();
         clearDeliveryProofDraft();
         setSelectedOrder(order);
@@ -580,7 +592,6 @@ const DeliveryRoute: React.FC = () => {
 
         setUploading(true);
         try {
-            const deliveredAtIso = new Date().toISOString();
             let deliveryPosition = deliveryGps || userLocation;
             if (!deliveryPosition) {
                 try {
@@ -597,89 +608,11 @@ const DeliveryRoute: React.FC = () => {
                 }
             }
 
-            // 1. Upload Photo
-            const fileExt = photoFile.name.split('.').pop();
-            const fileName = `${selectedOrder.id}_${Date.now()}.${fileExt}`;
-            const filePath = `${fileName}`;
-
-            const { error: uploadError } = await supabase.storage
-                .from(deliveryProofsBucket)
-                .upload(filePath, photoFile);
-
-            if (uploadError) throw uploadError;
-
-            // Get Public URL
-            const { data: { publicUrl } } = supabase.storage
-                .from(deliveryProofsBucket)
-                .getPublicUrl(filePath);
-
-            // 2. Update Order
-            const { error: updateError } = await supabase
-                .from('orders')
-                .update({
-                    delivery_status: 'delivered',
-                    delivered_at: deliveredAtIso,
-                    delivery_photo_url: publicUrl,
-                    delivered_lat: deliveryPosition?.lat ?? null,
-                    delivered_lng: deliveryPosition?.lng ?? null
-                })
-                .eq('id', selectedOrder.id);
-
-            if (updateError) throw updateError;
-
-            // 2b. Update Route Item Status (Dual-write)
-            let routeItemUpdate: any = supabase
-                .from('route_items')
-                .update({
-                    status: 'delivered',
-                    delivered_at: deliveredAtIso,
-                    proof_photo_url: publicUrl,
-                    delivered_lat: deliveryPosition?.lat ?? null,
-                    delivered_lng: deliveryPosition?.lng ?? null
-                });
-
-            if (selectedOrder.route_item_id) {
-                routeItemUpdate = routeItemUpdate.eq('id', selectedOrder.route_item_id);
-            } else {
-                routeItemUpdate = routeItemUpdate.eq('order_id', selectedOrder.id);
-                if (selectedOrder.route_id) {
-                    routeItemUpdate = routeItemUpdate.eq('route_id', selectedOrder.route_id);
-                }
-            }
-
-            const { error: itemError } = await routeItemUpdate;
-
-            if (itemError) console.warn("Could not update route_item status:", itemError);
-
-            // 2c. Auto-close route if everything is delivered
-            if (selectedOrder.route_id) {
-                const { count: remainingItems, error: remainingError } = await supabase
-                    .from('route_items')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('route_id', selectedOrder.route_id)
-                    .in('status', ['pending', 'rescheduled', 'failed']);
-
-                if (remainingError) {
-                    console.warn("Could not validate remaining items:", remainingError);
-                } else if ((remainingItems || 0) === 0) {
-                    const { error: routeCloseError } = await supabase
-                        .from('delivery_routes')
-                        .update({ status: 'completed' })
-                        .eq('id', selectedOrder.route_id)
-                        .neq('status', 'completed');
-
-                    if (routeCloseError) {
-                        console.warn("Could not close route automatically:", routeCloseError);
-                    }
-                }
-            }
-
-            // 3. Trigger Email Notification (Non-blocking)
-            supabase.functions.invoke('send-delivery-notification', {
-                body: { order_id: selectedOrder.id }
-            }).then(({ error }) => {
-                if (error) console.error("Error sending email:", error);
-                else console.log("Email notification sent successfully.");
+            await completeDeliveryProof({
+                order: selectedOrder,
+                photoFile,
+                deliveryPosition,
+                bucket: deliveryProofsBucket,
             });
 
             alert("¡Entrega completada exitosamente! Se ha enviado un correo al cliente.");

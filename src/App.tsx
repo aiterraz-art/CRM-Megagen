@@ -34,6 +34,7 @@ const MetaLeads = loadable(() => import('./pages/MetaLeads'));
 const ColdVisit = loadable(() => import('./pages/ColdVisit'));
 const Dispatch = loadable(() => import('./pages/Dispatch'));
 const DeliveryRoute = loadable(() => import('./pages/DeliveryRoute'));
+const DeliveryProofCapture = loadable(() => import('./pages/DeliveryProofCapture'));
 const DriverDashboard = loadable(() => import('./pages/DriverDashboard'));
 const SellerDashboard = loadable(() => import('./pages/SellerDashboard'));
 const AdministrativeDashboard = loadable(() => import('./pages/AdministrativeDashboard'));
@@ -267,6 +268,7 @@ function App() {
                             <Route path="lead-messages" element={<LeadModuleGuard><LeadMessages /></LeadModuleGuard>} />
                             <Route path="dispatch" element={<Dispatch />} />
                             <Route path="delivery" element={<DeliveryRoute />} />
+                            <Route path="delivery/:orderId/proof" element={<DeliveryProofCapture />} />
                             <Route path="my-deliveries" element={<MyDeliveries />} />
                             <Route path="operations" element={<OperationsCenter />} />
                             <Route path="collections" element={<Collections />} />
