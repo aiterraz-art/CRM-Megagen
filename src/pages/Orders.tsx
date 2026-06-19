@@ -491,7 +491,7 @@ const Orders = () => {
 
         if (orderError) throw orderError;
 
-        const [clientRes, sellerRes, itemsRes] = await Promise.all([
+        const [clientRes, sellerRes, itemsRes, quotationRes] = await Promise.all([
             supabase
                 .from('clients')
                 .select('id, name, rut, address, office, phone, email, giro, credit_days, comuna, zone, purchase_contact')
@@ -505,17 +505,26 @@ const Orders = () => {
             supabase
                 .from('order_items')
                 .select('quantity, unit_price, total_price, inventory(name, sku)')
-                .eq('order_id', order.id)
+                .eq('order_id', order.id),
+            order.quotation_id
+                ? supabase
+                    .from('quotations')
+                    .select('id, comments')
+                    .eq('id', order.quotation_id)
+                    .single()
+                : Promise.resolve({ data: null, error: null })
         ]);
 
         if (clientRes.error) throw clientRes.error;
         if (sellerRes.error) throw sellerRes.error;
         if (itemsRes.error) throw itemsRes.error;
+        if (quotationRes?.error) throw quotationRes.error;
 
         const client = clientRes.data;
         const seller = sellerRes.data;
         const creditDays = getClientCreditDays(client);
         const normalizedComments = String(orderRow.notes || '').trim()
+            || String(quotationRes?.data?.comments || '').trim()
             || (order.quotation_folio ? `Pedido generado desde cotización #${order.quotation_folio}.` : 'Pedido generado desde CRM.');
 
         return {
