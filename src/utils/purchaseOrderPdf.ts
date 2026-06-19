@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import PurchaseOrderDocumentContent from '../components/PurchaseOrderDocumentContent';
 
 export type PurchaseOrderPdfItem = {
@@ -82,7 +83,9 @@ export const generatePurchaseOrderPdfBlob = async (data: PurchaseOrderPdfData): 
     const root = createRoot(mountNode);
 
     try {
-        root.render(React.createElement(PurchaseOrderDocumentContent, { data }));
+        flushSync(() => {
+            root.render(React.createElement(PurchaseOrderDocumentContent, { data }));
+        });
         await waitForNextPaint();
         await waitForImages(mountNode);
 
@@ -110,8 +113,12 @@ export const generatePurchaseOrderPdfBlob = async (data: PurchaseOrderPdfData): 
         pdf.addImage(imgData, 'PNG', horizontalMargin, topMargin, imgWidth, imgHeight);
         return pdf.output('blob');
     } finally {
-        root.unmount();
-        document.body.removeChild(sandbox);
+        try {
+            root.unmount();
+        } catch {
+            // Best-effort cleanup.
+        }
+        sandbox.remove();
     }
 };
 

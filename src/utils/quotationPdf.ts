@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import type { QuotationPreviewData } from './quotationPreview';
 import QuotationDocumentContent from '../components/QuotationDocumentContent';
 
@@ -48,7 +49,9 @@ export const generateQuotationPdfBlob = async (data: QuotationPreviewData): Prom
     const root = createRoot(mountNode);
 
     try {
-        root.render(React.createElement(QuotationDocumentContent, { data }));
+        flushSync(() => {
+            root.render(React.createElement(QuotationDocumentContent, { data }));
+        });
         await waitForNextPaint();
         await waitForImages(mountNode);
 
@@ -73,8 +76,12 @@ export const generateQuotationPdfBlob = async (data: QuotationPreviewData): Prom
         pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
         return pdf.output('blob');
     } finally {
-        root.unmount();
-        document.body.removeChild(sandbox);
+        try {
+            root.unmount();
+        } catch {
+            // Best-effort cleanup.
+        }
+        sandbox.remove();
     }
 };
 
