@@ -198,6 +198,7 @@ const ClientsContent = () => {
     // Client Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isEditing, setIsEditing] = useState<string | null>(null);
+    const [editScope, setEditScope] = useState<'full' | 'credit'>('full');
     const [submitting, setSubmitting] = useState(false);
 
     // Email Modal State
@@ -226,7 +227,7 @@ const ClientsContent = () => {
     const isSellerRole = effectiveRole === 'seller';
     const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canAssignClientOwner = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'tesorero';
-    const canManageClientCredit = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canManageClientCredit = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'facturador';
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
@@ -465,9 +466,10 @@ const ClientsContent = () => {
         }
     }, [profile?.id, portfolioTab]);
 
-    const handleOpenModal = (clientToEdit?: Client) => {
+    const handleOpenModal = (clientToEdit?: Client, mode: 'full' | 'credit' = 'full') => {
         if (clientToEdit) {
             setIsEditing(clientToEdit.id);
+            setEditScope(mode);
             setClientForm({
                 ...buildClientFormState(clientToEdit.created_by || ''),
                 name: clientToEdit.name,
@@ -491,6 +493,7 @@ const ClientsContent = () => {
             }
         } else {
             setIsEditing(null);
+            setEditScope('full');
             setClientForm(buildClientFormState(profile?.id || ''));
             setManualLocation(null);
         }
@@ -607,9 +610,9 @@ const ClientsContent = () => {
 
         try {
             if (isEditing) {
-                const { error } = await supabase
-                    .from('clients')
-                    .update({
+                const updatePayload = editScope === 'credit'
+                    ? { ...(canManageClientCredit ? { credit_days: sanitizedCreditDays } : {}) }
+                    : {
                         name: clientForm.name,
                         rut: normalizedRut,
                         phone: clientForm.phone,
@@ -623,11 +626,15 @@ const ClientsContent = () => {
                         office: clientForm.office,
                         ...(canManageClientCredit ? { credit_days: sanitizedCreditDays } : {}),
                         ...(canAssignClientOwner ? { created_by: clientForm.assignedSellerId, pending_seller_email: null } : {})
-                    })
+                    };
+
+                const { error } = await supabase
+                    .from('clients')
+                    .update(updatePayload)
                     .eq('id', isEditing);
 
                 if (error) throw error;
-                alert('¡Cliente actualizado exitosamente!');
+                alert(editScope === 'credit' ? '¡Días de crédito actualizados exitosamente!' : '¡Cliente actualizado exitosamente!');
 
             } else {
                 // VERIFICACIÓN DE SEGURIDAD (RUT ÚNICO GLOBAL)
@@ -1576,6 +1583,15 @@ const ClientsContent = () => {
                                                     </button>
                                                 </>
                                             )}
+                                            {!hasPermission('MANAGE_CLIENTS') && !isOwner && canManageClientCredit && (
+                                                <button
+                                                    onClick={() => handleOpenModal(client, 'credit')}
+                                                    className="p-3 text-gray-300 hover:text-sky-600 hover:bg-sky-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                                                    title="Editar días de crédito"
+                                                >
+                                                    <CheckCircle2 size={18} />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
 
@@ -1708,7 +1724,7 @@ const ClientsContent = () => {
                         onClose={() => setSelectedClient(null)}
                         onEdit={() => {
                             setSelectedClient(null);
-                            handleOpenModal(selectedClient);
+                            handleOpenModal(selectedClient, (hasPermission('MANAGE_CLIENTS') || selectedClient.created_by === profile?.id) ? 'full' : 'credit');
                         }}
                         onEmail={() => {
                             const clientToEmail = selectedClient;
@@ -1864,9 +1880,13 @@ const ClientsContent = () => {
                                 <div className="flex-1 p-8 md:p-12">
                                     <div className="flex justify-between items-center mb-8">
                                         <div>
-                                            <h3 className="text-2xl font-black text-gray-900">{isEditing ? 'Editar Cliente' : 'Nuevo Cliente'}</h3>
+                                            <h3 className="text-2xl font-black text-gray-900">
+                                                {isEditing ? (editScope === 'credit' ? 'Editar Días de Crédito' : 'Editar Cliente') : 'Nuevo Cliente'}
+                                            </h3>
                                             <p className="text-gray-400 font-bold text-sm">
-                                                {isEditing ? 'Actualiza los datos del cliente' : 'Ingresa los datos fiscales y de contacto'}
+                                                {isEditing
+                                                    ? (editScope === 'credit' ? 'Actualiza solo la condición de crédito del cliente' : 'Actualiza los datos del cliente')
+                                                    : 'Ingresa los datos fiscales y de contacto'}
                                             </p>
                                         </div>
                                         <button onClick={() => setIsModalOpen(false)} className="p-2 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors">
@@ -1874,110 +1894,147 @@ const ClientsContent = () => {
                                         </button>
                                     </div>
                                     <form onSubmit={handleSaveClient} className="space-y-5">
-                                        <div className="grid grid-cols-2 gap-5">
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">RUT Empresa <span className="text-red-500">*</span></label>
-                                                <input
-                                                    required
-                                                    type="text"
-                                                    placeholder="76.xxx.xxx-k"
-                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
-                                                    value={clientForm.rut}
-                                                    onChange={e => {
-                                                        const val = e.target.value;
-                                                        setClientForm({ ...clientForm, rut: val })
-                                                    }}
-                                                    onBlur={() => {
-                                                        setClientForm(prev => ({ ...prev, rut: normalizeRut(prev.rut) }))
-                                                    }}
-                                                />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Razón Social <span className="text-red-500">*</span></label>
-                                                <input
-                                                    required
-                                                    type="text"
-                                                    placeholder="Nombre de la clínica..."
-                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
-                                                    value={clientForm.name}
-                                                    onChange={e => setClientForm({ ...clientForm, name: e.target.value })}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-5">
-                                            <div className="col-span-2 space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Dirección Comercial <span className="text-red-500">*</span></label>
-                                                <div className="relative">
+                                        <fieldset disabled={Boolean(isEditing && editScope === 'credit')} className="space-y-5 disabled:opacity-60">
+                                            <div className="grid grid-cols-2 gap-5">
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">RUT Empresa <span className="text-red-500">*</span></label>
                                                     <input
-                                                        ref={inputRef}
                                                         required
                                                         type="text"
-                                                        placeholder="Escribe una dirección y selecciónala desde Google Maps"
-                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
-                                                        value={clientForm.address}
-                                                        onChange={e => setClientForm({ ...clientForm, address: e.target.value })}
+                                                        placeholder="76.xxx.xxx-k"
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                                        value={clientForm.rut}
+                                                        onChange={e => {
+                                                            const val = e.target.value;
+                                                            setClientForm({ ...clientForm, rut: val })
+                                                        }}
+                                                        onBlur={() => {
+                                                            setClientForm(prev => ({ ...prev, rut: normalizeRut(prev.rut) }))
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Razón Social <span className="text-red-500">*</span></label>
+                                                    <input
+                                                        required
+                                                        type="text"
+                                                        placeholder="Nombre de la clínica..."
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                                        value={clientForm.name}
+                                                        onChange={e => setClientForm({ ...clientForm, name: e.target.value })}
                                                     />
                                                 </div>
                                             </div>
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Oficina / Depto</label>
-                                                <input
-                                                    type="text"
-                                                    placeholder="Ej: Of 402"
-                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
-                                                    value={clientForm.office}
-                                                    onChange={e => setClientForm({ ...clientForm, office: e.target.value })}
-                                                />
+                                            <div className="grid grid-cols-3 gap-5">
+                                                <div className="col-span-2 space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Dirección Comercial <span className="text-red-500">*</span></label>
+                                                    <div className="relative">
+                                                        <input
+                                                            ref={inputRef}
+                                                            required
+                                                            type="text"
+                                                            placeholder="Escribe una dirección y selecciónala desde Google Maps"
+                                                            className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                            value={clientForm.address}
+                                                            onChange={e => setClientForm({ ...clientForm, address: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Oficina / Depto</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Ej: Of 402"
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                        value={clientForm.office}
+                                                        onChange={e => setClientForm({ ...clientForm, office: e.target.value })}
+                                                    />
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-5">
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Teléfono <span className="text-red-500">*</span></label>
-                                                <input
-                                                    required
-                                                    type="tel"
-                                                    placeholder="+56 9..."
-                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
-                                                    value={clientForm.phone}
-                                                    onChange={e => setClientForm({ ...clientForm, phone: e.target.value })}
-                                                />
+                                            <div className="grid grid-cols-2 gap-5">
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Teléfono <span className="text-red-500">*</span></label>
+                                                    <input
+                                                        required
+                                                        type="tel"
+                                                        placeholder="+56 9..."
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                        value={clientForm.phone}
+                                                        onChange={e => setClientForm({ ...clientForm, phone: e.target.value })}
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Email Contacto <span className="text-red-500">*</span></label>
+                                                    <input
+                                                        required
+                                                        type="email"
+                                                        placeholder="contacto@clinica.cl"
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                        value={clientForm.email}
+                                                        onChange={e => setClientForm({ ...clientForm, email: e.target.value })}
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Email Contacto <span className="text-red-500">*</span></label>
-                                                <input
-                                                    required
-                                                    type="email"
-                                                    placeholder="contacto@clinica.cl"
-                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
-                                                    value={clientForm.email}
-                                                    onChange={e => setClientForm({ ...clientForm, email: e.target.value })}
-                                                />
-                                            </div>
-                                        </div>
 
-                                        <div className="grid grid-cols-2 gap-5">
+                                            <div className="grid grid-cols-2 gap-5">
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Giro <span className="text-red-500">*</span></label>
+                                                    <input
+                                                        required
+                                                        type="text"
+                                                        placeholder="Ej: Clínica Dental, Insumos..."
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                        value={clientForm.giro}
+                                                        onChange={e => setClientForm({ ...clientForm, giro: e.target.value })}
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Comuna</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Ej: San Miguel"
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                        value={clientForm.comuna}
+                                                        onChange={e => setClientForm({ ...clientForm, comuna: e.target.value })}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {canAssignClientOwner && (
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Vendedor Asignado <span className="text-red-500">*</span></label>
+                                                    <select
+                                                        required
+                                                        className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                        value={clientForm.assignedSellerId}
+                                                        onChange={e => setClientForm({ ...clientForm, assignedSellerId: e.target.value })}
+                                                    >
+                                                        <option value="">Selecciona vendedor</option>
+                                                        {sellerOptions.map((seller) => (
+                                                            <option key={seller.id} value={seller.id}>
+                                                                {seller.full_name || seller.email}
+                                                            </option>
+                                                        ))}
+                                                        {clientForm.assignedSellerId && !sellerOptions.some((s) => s.id === clientForm.assignedSellerId) && (
+                                                            <option value={clientForm.assignedSellerId}>
+                                                                {ownersById[clientForm.assignedSellerId] || 'Vendedor actual'}
+                                                            </option>
+                                                        )}
+                                                    </select>
+                                                </div>
+                                            )}
+
                                             <div className="space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Giro <span className="text-red-500">*</span></label>
-                                                <input
-                                                    required
-                                                    type="text"
-                                                    placeholder="Ej: Clínica Dental, Insumos..."
-                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
-                                                    value={clientForm.giro}
-                                                    onChange={e => setClientForm({ ...clientForm, giro: e.target.value })}
+                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Notas Internas <span className="text-gray-300 font-normal lowercase tracking-normal">(opcional)</span></label>
+                                                <textarea
+                                                    rows={3}
+                                                    placeholder="Horarios, contacto de adquisiciones, preferencias..."
+                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none resize-none"
+                                                    value={clientForm.notes}
+                                                    onChange={e => setClientForm({ ...clientForm, notes: e.target.value })}
                                                 />
                                             </div>
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Comuna</label>
-                                                <input
-                                                    type="text"
-                                                    placeholder="Ej: San Miguel"
-                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
-                                                    value={clientForm.comuna}
-                                                    onChange={e => setClientForm({ ...clientForm, comuna: e.target.value })}
-                                                />
-                                            </div>
-                                        </div>
+                                        </fieldset>
 
                                         {isEditing && canManageClientCredit && (
                                             <div className="space-y-2">
@@ -1990,13 +2047,13 @@ const ClientsContent = () => {
                                                     value={clientForm.creditDays}
                                                     onChange={e => setClientForm({ ...clientForm, creditDays: Math.max(0, Math.trunc(Number(e.target.value || 0))) })}
                                                 />
-                                                <p className="text-xs text-gray-400 font-medium ml-1">Solo admin o jefe pueden modificar el crédito del cliente.</p>
+                                                <p className="text-xs text-gray-400 font-medium ml-1">Admin, jefe y facturador pueden modificar el crédito del cliente.</p>
                                             </div>
                                         )}
 
                                         {!isEditing && (
                                             <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-800">
-                                                Todo cliente nuevo se crea sin crédito. Si corresponde, admin o jefe pueden asignarlo después.
+                                                Todo cliente nuevo se crea sin crédito. Si corresponde, admin, jefe o facturador pueden asignarlo después.
                                             </div>
                                         )}
 
@@ -2007,40 +2064,6 @@ const ClientsContent = () => {
                                             </div>
                                         )}
 
-                                        {canAssignClientOwner && (
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Vendedor Asignado <span className="text-red-500">*</span></label>
-                                                <select
-                                                    required
-                                                    className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
-                                                    value={clientForm.assignedSellerId}
-                                                    onChange={e => setClientForm({ ...clientForm, assignedSellerId: e.target.value })}
-                                                >
-                                                    <option value="">Selecciona vendedor</option>
-                                                    {sellerOptions.map((seller) => (
-                                                        <option key={seller.id} value={seller.id}>
-                                                            {seller.full_name || seller.email}
-                                                        </option>
-                                                    ))}
-                                                    {clientForm.assignedSellerId && !sellerOptions.some((s) => s.id === clientForm.assignedSellerId) && (
-                                                        <option value={clientForm.assignedSellerId}>
-                                                            {ownersById[clientForm.assignedSellerId] || 'Vendedor actual'}
-                                                        </option>
-                                                    )}
-                                                </select>
-                                            </div>
-                                        )}
-
-                                        <div className="space-y-2">
-                                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Notas Internas <span className="text-gray-300 font-normal lowercase tracking-normal">(opcional)</span></label>
-                                            <textarea
-                                                rows={3}
-                                                placeholder="Horarios, contacto de adquisiciones, preferencias..."
-                                                className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none resize-none"
-                                                value={clientForm.notes}
-                                                onChange={e => setClientForm({ ...clientForm, notes: e.target.value })}
-                                            />
-                                        </div>
                                         <div className="pt-6 flex gap-4">
                                             <button
                                                 type="button"
@@ -2059,7 +2082,7 @@ const ClientsContent = () => {
                                                 ) : (
                                                     <>
                                                         <CheckCircle2 size={20} className="mr-2" />
-                                                        {isEditing ? 'Actualizar Cliente' : 'Registrar Cliente'}
+                                                        {isEditing ? (editScope === 'credit' ? 'Actualizar Crédito' : 'Actualizar Cliente') : 'Registrar Cliente'}
                                                     </>
                                                 )}
                                             </button>
