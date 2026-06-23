@@ -1303,9 +1303,9 @@ const ClientsContent = () => {
                     )}
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-stretch gap-3 md:items-center md:justify-end">
                     {canViewAll && (
-                        <div className="flex bg-gray-100 p-1 rounded-xl">
+                        <div className="flex bg-gray-100 p-1 rounded-xl order-20 md:order-none">
                             <button
                                 onClick={() => setViewMode('all')}
                                 className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${viewMode === 'all' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
@@ -1332,7 +1332,7 @@ const ClientsContent = () => {
                             />
                             <button
                                 onClick={downloadTemplate}
-                                className="bg-green-50 text-green-700 px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-green-100 transition-all text-sm"
+                                className="bg-green-50 text-green-700 px-4 py-4 rounded-2xl font-bold flex items-center justify-center hover:bg-green-100 transition-all text-sm order-30 md:order-none"
                                 title="Descargar Plantilla Excel"
                             >
                                 <FileText size={18} className="mr-2" />
@@ -1341,7 +1341,7 @@ const ClientsContent = () => {
                             <button
                                 onClick={() => csvInputRef.current?.click()}
                                 disabled={importing}
-                                className="bg-green-600 text-white px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-green-700 shadow-lg shadow-green-100 transition-all text-sm disabled:opacity-50"
+                                className="bg-green-600 text-white px-4 py-4 rounded-2xl font-bold flex items-center justify-center hover:bg-green-700 shadow-lg shadow-green-100 transition-all text-sm disabled:opacity-50 order-30 md:order-none"
                                 title="Importar Excel"
                             >
                                 {importing ? (
@@ -1356,7 +1356,7 @@ const ClientsContent = () => {
 
                     <button
                         onClick={exportClientsList}
-                        className="bg-white text-gray-700 px-4 py-4 rounded-2xl font-bold flex items-center border border-gray-200 hover:bg-gray-50 transition-all text-sm"
+                        className="bg-white text-gray-700 px-4 py-4 rounded-2xl font-bold flex items-center justify-center border border-gray-200 hover:bg-gray-50 transition-all text-sm order-30 md:order-none"
                         title="Exportar clientes visibles"
                     >
                         <Download size={18} className="mr-2" />
@@ -1374,7 +1374,7 @@ const ClientsContent = () => {
                             />
                             <button
                                 onClick={downloadCreditDaysList}
-                                className="bg-sky-50 text-sky-700 px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-sky-100 transition-all text-sm"
+                                className="bg-sky-50 text-sky-700 px-4 py-4 rounded-2xl font-bold flex items-center justify-center hover:bg-sky-100 transition-all text-sm order-30 md:order-none"
                                 title="Descargar listado de clientes con días de crédito"
                             >
                                 <CheckCircle2 size={18} className="mr-2" />
@@ -1383,7 +1383,7 @@ const ClientsContent = () => {
                             <button
                                 onClick={() => creditDaysInputRef.current?.click()}
                                 disabled={creditDaysImporting}
-                                className="bg-sky-600 text-white px-4 py-4 rounded-2xl font-bold flex items-center hover:bg-sky-700 shadow-lg shadow-sky-100 transition-all text-sm disabled:opacity-50"
+                                className="bg-sky-600 text-white px-4 py-4 rounded-2xl font-bold flex items-center justify-center hover:bg-sky-700 shadow-lg shadow-sky-100 transition-all text-sm disabled:opacity-50 order-30 md:order-none"
                                 title="Importar días de crédito"
                             >
                                 {creditDaysImporting ? (
@@ -1396,16 +1396,16 @@ const ClientsContent = () => {
                         </>
                     )}
 
-                    <div className="flex bg-gray-100/50 p-1 rounded-2xl border border-gray-100 self-center md:self-auto">
+                    <div className="flex bg-gray-100/50 p-1 rounded-2xl border border-gray-100 order-20 self-stretch md:self-center md:order-none">
                         <button
                             onClick={() => setNeglectFilter('all')}
-                            className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${neglectFilter === 'all' ? 'bg-white shadow text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
+                            className={`flex-1 px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all md:flex-none ${neglectFilter === 'all' ? 'bg-white shadow text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
                         >
                             Todos
                         </button>
                         <button
                             onClick={() => setNeglectFilter('neglected')}
-                            className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center ${neglectFilter === 'neglected' ? 'bg-red-500 text-white shadow-lg shadow-red-200' : 'text-gray-400 hover:text-red-500'}`}
+                            className={`flex-1 px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center md:flex-none ${neglectFilter === 'neglected' ? 'bg-red-500 text-white shadow-lg shadow-red-200' : 'text-gray-400 hover:text-red-500'}`}
                         >
                             <AlertCircle size={12} className="mr-1.5" />
                             En Riesgo
@@ -1414,14 +1414,14 @@ const ClientsContent = () => {
 
                     <button
                         onClick={() => handleOpenModal()}
-                        className="bg-gray-900 text-white px-6 py-4 rounded-2xl font-bold flex items-center shadow-lg hover:bg-black active:scale-95 transition-all text-sm"
+                        className="order-10 w-full bg-gray-900 text-white px-6 py-4 rounded-2xl font-bold flex items-center justify-center shadow-lg hover:bg-black active:scale-95 transition-all text-sm md:order-none md:w-auto"
                     >
                         <Plus size={18} className="mr-2" />
                         Nuevo Cliente
                     </button>
                     <button
                         onClick={fetchClients}
-                        className="bg-white text-gray-700 px-4 py-4 rounded-2xl font-bold flex items-center border border-gray-200 hover:bg-gray-50 transition-all text-sm"
+                        className="bg-white text-gray-700 px-4 py-4 rounded-2xl font-bold flex items-center justify-center border border-gray-200 hover:bg-gray-50 transition-all text-sm order-20 md:order-none"
                         title="Actualizar cartera"
                     >
                         <RefreshCw size={16} className="mr-2" />
