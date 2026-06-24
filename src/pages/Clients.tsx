@@ -1124,7 +1124,7 @@ const ClientsContent = () => {
         if (!file) return;
 
         if (!canManageClientCredit) {
-            alert('Acceso denegado: Solo admin o jefe pueden importar días de crédito.');
+            alert('Acceso denegado: Solo admin, jefe o facturador pueden importar días de crédito.');
             if (creditDaysInputRef.current) creditDaysInputRef.current.value = '';
             return;
         }
