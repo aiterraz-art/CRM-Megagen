@@ -47,6 +47,7 @@ const Inventory = () => {
     const isSellerReadOnly = effectiveRole === 'seller';
     const canViewAnalytics = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canManageInventory = !isSellerReadOnly && hasPermission('MANAGE_INVENTORY');
+    const canManagePricing = !isSellerReadOnly && hasPermission('MANAGE_PRICING');
     const canManageStocklessOrders = effectiveRole === 'admin' || effectiveRole === 'bodega';
     const canManageStockControls = canManageInventory && canViewAnalytics;
     const canUploadInventory = !isSellerReadOnly && hasPermission('UPLOAD_EXCEL');
@@ -698,7 +699,7 @@ const Inventory = () => {
     };
 
     const saveManualPrice = async (item: InventoryItem) => {
-        if (!canManageInventory) return;
+        if (!canManagePricing) return;
 
         const nextPrice = Math.max(0, Number(editingPriceValue || 0));
         if (!Number.isFinite(nextPrice)) {
@@ -1295,7 +1296,7 @@ const Inventory = () => {
                                             </td>
                                             {!isSellerReadOnly && (
                                                 <td className="px-6 py-5 text-center text-sm font-bold text-gray-900">
-                                                    {canManageInventory && editingPriceId === item.id ? (
+                                                    {canManagePricing && editingPriceId === item.id ? (
                                                         <div className="flex items-center justify-center gap-2">
                                                             <input
                                                                 type="number"
@@ -1338,7 +1339,7 @@ const Inventory = () => {
                                                     ) : (
                                                         <div className="flex items-center justify-center gap-2">
                                                             <span>${item.price?.toLocaleString()}</span>
-                                                            {canManageInventory && (
+                                                            {canManagePricing && (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => startPriceEdit(item)}
