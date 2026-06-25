@@ -714,16 +714,17 @@ const Inventory = () => {
             });
 
             if (syncError) {
+                const syncMessage = String(syncError.message || '');
+
+                if (syncMessage.includes('set_inventory_manual_price')) {
+                    throw new Error('La base aún no tiene la migración de precios manuales. Debes aplicar la migración 20260625000097_persist_manual_inventory_prices.sql en esta instancia antes de editar precios manualmente.');
+                }
+
                 if (!isMissingBackendFeatureError(syncError)) {
                     throw syncError;
                 }
 
-                const { error: fallbackError } = await supabase
-                    .from('inventory')
-                    .update({ price: nextPrice })
-                    .eq('id', item.id);
-
-                if (fallbackError) throw fallbackError;
+                throw syncError;
             }
 
             await fetchInventory();
