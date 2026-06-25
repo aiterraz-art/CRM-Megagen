@@ -708,14 +708,25 @@ const Inventory = () => {
 
         setSavingPriceId(item.id);
         try {
-            const { error } = await supabase.from('inventory').update({ price: nextPrice }).eq('id', item.id);
-            if (error) throw error;
+            const { error: syncError } = await supabase.rpc('set_inventory_manual_price', {
+                p_inventory_id: item.id,
+                p_price: nextPrice
+            });
 
-            setItems((previous) => previous.map((row) => (
-                row.id === item.id
-                    ? { ...row, price: nextPrice }
-                    : row
-            )));
+            if (syncError) {
+                if (!isMissingBackendFeatureError(syncError)) {
+                    throw syncError;
+                }
+
+                const { error: fallbackError } = await supabase
+                    .from('inventory')
+                    .update({ price: nextPrice })
+                    .eq('id', item.id);
+
+                if (fallbackError) throw fallbackError;
+            }
+
+            await fetchInventory();
             cancelPriceEdit();
             alert('Precio actualizado y guardado en la lista permanente.');
         } catch (error: any) {
