@@ -10,6 +10,7 @@ import { useUser } from './contexts/UserContext';
 import { VisitProvider } from './contexts/VisitContext';
 import { startLocationQueueWorker } from './services/locationQueue';
 import { lazyRetry } from './utils/lazyRetry';
+import { checkForAppUpdate } from './utils/appVersion';
 
 const loadable = <T extends React.ComponentType<any>>(importer: () => Promise<{ default: T }>) =>
     lazy(() => lazyRetry(importer));
@@ -111,6 +112,36 @@ const PermissionGuard = ({ permission, children }: { permission: string; childre
 function App() {
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const verifyFreshBuild = async () => {
+            if (cancelled || document.visibilityState === 'hidden') return;
+            await checkForAppUpdate();
+        };
+
+        void verifyFreshBuild();
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                void verifyFreshBuild();
+            }
+        };
+
+        const handleFocus = () => {
+            void verifyFreshBuild();
+        };
+
+        window.addEventListener('focus', handleFocus);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            cancelled = true;
+            window.removeEventListener('focus', handleFocus);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, []);
 
     useEffect(() => {
         const timeout = setTimeout(() => {
