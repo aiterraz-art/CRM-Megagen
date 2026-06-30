@@ -4,6 +4,8 @@ export type QuotationPreviewItem = {
     subDetail?: string;
     qty: number;
     unit: string;
+    listPrice?: number;
+    unitPrice: number;
     price: number;
     discount: number;
     total: number;
@@ -42,7 +44,9 @@ const parseItems = (value: any): QuotationPreviewItem[] => {
         subDetail: item?.subDetail ? String(item.subDetail) : undefined,
         qty: Math.max(0, Math.trunc(Number(item?.qty || 0))),
         unit: String(item?.unit || 'UN'),
-        price: toWholeMoney(item?.price),
+        listPrice: toWholeMoney(item?.price),
+        unitPrice: toWholeMoney(item?.net_price ?? item?.netPrice ?? item?.price),
+        price: toWholeMoney(item?.net_price ?? item?.netPrice ?? item?.price),
         discount: toWholeMoney(item?.discount),
         total: toWholeMoney(item?.total)
     }));

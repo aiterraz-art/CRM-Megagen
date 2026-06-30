@@ -226,7 +226,7 @@ const QuotationDocumentContent: React.FC<{ data: QuotationPreviewData }> = ({ da
                                     <td className="p-2 font-medium">{item.code}</td>
                                     <td className="p-2 font-black uppercase tracking-tight">{item.detail}</td>
                                     <td className="p-2 text-center uppercase">{item.qty} {item.unit}</td>
-                                    <td className="p-2 text-right">${toWholeMoney(item.price).toLocaleString('es-CL')}</td>
+                                    <td className="p-2 text-right">${toWholeMoney(item.unitPrice ?? item.price).toLocaleString('es-CL')}</td>
                                     <td className="p-2 text-right border-l border-gray-50 text-gray-400">${toWholeMoney(item.discount).toLocaleString('es-CL')}</td>
                                     <td className="p-2 text-right font-bold border-l border-gray-50">${toWholeMoney(item.total).toLocaleString('es-CL')}</td>
                                 </tr>
