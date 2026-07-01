@@ -80,6 +80,7 @@ const Inventory = () => {
     const [rotationLoading, setRotationLoading] = useState(false);
     const [movementsLoading, setMovementsLoading] = useState(false);
     const [movementsError, setMovementsError] = useState('');
+    const [clearingDormantMinimums, setClearingDormantMinimums] = useState(false);
     const [movementPage, setMovementPage] = useState(1);
     const [movementHasMore, setMovementHasMore] = useState(false);
     const [movementLoadedOnce, setMovementLoadedOnce] = useState(false);
@@ -1236,6 +1237,103 @@ const Inventory = () => {
         XLSX.writeFile(workbook, `pedido_${safeSupplierName}_${timestamp}.xlsx`);
     };
 
+    const clearDormantProductsMinimumStock = async () => {
+        if (!canManageStockControls || !profile?.id) return;
+
+        const candidateItems = rotationDisplayRows
+            .map((row) => row.item)
+            .filter((item): item is InventoryItem => Boolean(item));
+
+        if (candidateItems.length === 0) {
+            alert('No hay productos en la vista actual para revisar.');
+            return;
+        }
+
+        setClearingDormantMinimums(true);
+        try {
+            const cutoffDate = new Date();
+            cutoffDate.setMonth(cutoffDate.getMonth() - 3);
+            const cutoffIso = cutoffDate.toISOString();
+            const candidateIds = candidateItems.map((item) => item.id);
+
+            const { data: recentMovements, error: recentMovementsError } = await (supabase.from('inventory_movements') as any)
+                .select('inventory_id')
+                .eq('movement_type', 'sale_outbound')
+                .in('inventory_id', candidateIds)
+                .gte('created_at', cutoffIso);
+
+            let recentSoldIds = new Set<string>();
+
+            if (recentMovementsError) {
+                if (!isMissingBackendFeatureError(recentMovementsError)) {
+                    throw recentMovementsError;
+                }
+
+                const { data: fallbackSales, error: fallbackSalesError } = await supabase
+                    .from('order_items')
+                    .select(`
+                        product_id,
+                        created_at,
+                        orders (
+                            status
+                        )
+                    `)
+                    .in('product_id', candidateIds)
+                    .gte('created_at', cutoffIso);
+
+                if (fallbackSalesError) throw fallbackSalesError;
+
+                recentSoldIds = new Set<string>(
+                    (fallbackSales || [])
+                        .filter((sale: any) => String(sale?.orders?.status || '').toLowerCase() !== 'cancelled')
+                        .map((sale: any) => sale.product_id)
+                        .filter(Boolean)
+                );
+            } else {
+                recentSoldIds = new Set<string>(
+                    ((recentMovements || []) as Array<{ inventory_id: string | null }>).map((movement) => movement.inventory_id).filter(Boolean) as string[]
+                );
+            }
+
+            const dormantItems = candidateItems.filter((item) => !recentSoldIds.has(item.id) && Math.max(0, Number(item.min_stock_alert || 0)) > 0);
+
+            if (dormantItems.length === 0) {
+                alert('No se encontraron productos con mínimo activo y sin ventas en los últimos 3 meses en la vista actual.');
+                setClearingDormantMinimums(false);
+                return;
+            }
+
+            const confirmed = window.confirm(
+                `Se quitará el stock mínimo a ${dormantItems.length} producto(s) sin ventas en los últimos 3 meses dentro de la vista actual. Esta acción pondrá el mínimo en 0.`
+            );
+
+            if (!confirmed) {
+                setClearingDormantMinimums(false);
+                return;
+            }
+
+            const { error } = await supabase
+                .from('inventory')
+                .update({
+                    min_stock_alert: 0,
+                    last_stock_reviewed_at: new Date().toISOString(),
+                    last_stock_reviewed_by: profile.id
+                })
+                .in('id', dormantItems.map((item) => item.id));
+
+            if (error) throw error;
+
+            alert(`Se eliminó el stock mínimo de ${dormantItems.length} producto(s) sin ventas recientes.`);
+            await refreshAll();
+        } catch (error: any) {
+            console.error('Error clearing dormant minimum stock:', error);
+            alert(`No se pudieron quitar los mínimos: ${error.message}`);
+            setClearingDormantMinimums(false);
+        } finally {
+            setClearingDormantMinimums(false);
+        }
+    };
+
     const filteredMovements = useMemo(() => {
         return movements.filter((movement) => {
             const haystack = [
@@ -1838,6 +1936,15 @@ const Inventory = () => {
                         >
                             Recalcular rotación
                         </button>
+                        {canManageStockControls && (
+                            <button
+                                onClick={() => void clearDormantProductsMinimumStock()}
+                                disabled={clearingDormantMinimums}
+                                className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700 transition-all hover:bg-rose-100 disabled:opacity-60"
+                            >
+                                {clearingDormantMinimums ? 'Quitando mínimos...' : 'Quitar mínimos sin venta 3 meses'}
+                            </button>
+                        )}
                         {supplierPlanningEnabled && (
                             <button
                                 onClick={downloadSupplierPurchasePlan}
@@ -1848,6 +1955,11 @@ const Inventory = () => {
                             </button>
                         )}
                     </div>
+                    {canManageStockControls && (
+                        <p className="text-xs font-medium text-slate-500">
+                            Esta acción revisa solo los productos visibles con los filtros actuales y pone el mínimo en 0 si no tuvieron ventas en los últimos 3 meses.
+                        </p>
+                    )}
 
                     {rotationLoading ? (
                         <div className="space-y-4">
