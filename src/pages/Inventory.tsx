@@ -68,6 +68,9 @@ const Inventory = () => {
     const [rotationCategoryFilter, setRotationCategoryFilter] = useState<'all' | string>('all');
     const [rotationSupplierFilter, setRotationSupplierFilter] = useState<'all' | 'none' | string>('all');
     const [rotationRequestFilter, setRotationRequestFilter] = useState<'all' | 'with_request' | 'without_request'>('all');
+    const [supplierPlanCoverageDays, setSupplierPlanCoverageDays] = useState('30');
+    const [supplierPlanLeadTimeDays, setSupplierPlanLeadTimeDays] = useState('0');
+    const [supplierPlanSafetyDays, setSupplierPlanSafetyDays] = useState('0');
     const [movementTypeFilter, setMovementTypeFilter] = useState<'all' | string>('all');
     const [movementOriginFilter, setMovementOriginFilter] = useState<'all' | string>('all');
     const [movementUserFilter, setMovementUserFilter] = useState<'all' | string>('all');
@@ -222,6 +225,14 @@ const Inventory = () => {
             minute: '2-digit'
         });
     };
+
+    const formatCurrency = (value: number | null | undefined) =>
+        new Intl.NumberFormat('es-CL', {
+            style: 'currency',
+            currency: 'CLP',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        }).format(Number(value || 0));
 
     const getMovementOriginLabel = (movement: InventoryMovement) => {
         if (movement.shipment_id) return 'Embarque';
@@ -1051,6 +1062,25 @@ const Inventory = () => {
         });
     };
 
+    const requestSuggestedPurchaseWithQty = (metric: RotationMetric, requestedQty: number, requestNote: string) => {
+        navigate('/procurement', {
+            state: {
+                activeTab: 'requests',
+                openRequestModal: true,
+                prefillRequest: {
+                    productId: metric.inventory_id,
+                    sku: metric.sku || null,
+                    name: metric.name,
+                    stockQty: metric.stock_qty,
+                    requestedQty: Math.max(requestedQty, 1),
+                    reasonType: metric.stock_qty <= 0 ? 'no_stock' : 'low_stock',
+                    priority: metric.alert_level === 'critical' ? 'high' : 'normal',
+                    requestNote
+                }
+            }
+        });
+    };
+
     const filteredItems = useMemo(() => {
         const term = search.trim().toLowerCase();
         if (!term) return items;
@@ -1074,6 +1104,137 @@ const Inventory = () => {
             return true;
         });
     }, [inventoryById, rotationAlertFilter, rotationCategoryFilter, rotationMetrics, rotationRequestFilter, rotationSearch, rotationSupplierFilter]);
+
+    const selectedRotationSupplier = useMemo(
+        () => (rotationSupplierFilter !== 'all' && rotationSupplierFilter !== 'none'
+            ? supplierMap.get(rotationSupplierFilter) || null
+            : null),
+        [rotationSupplierFilter, supplierMap]
+    );
+
+    const supplierPlanCoverageValue = Math.max(1, Math.trunc(Number(supplierPlanCoverageDays || 0)) || 30);
+    const supplierPlanLeadTimeValue = Math.max(0, Math.trunc(Number(supplierPlanLeadTimeDays || 0)) || 0);
+    const supplierPlanSafetyValue = Math.max(0, Math.trunc(Number(supplierPlanSafetyDays || 0)) || 0);
+    const supplierPlanningEnabled = Boolean(selectedRotationSupplier);
+
+    const rotationDisplayRows = useMemo(() => {
+        return filteredRotationMetrics.map((metric) => {
+            const item = inventoryById.get(metric.inventory_id) || null;
+            const supplier = supplierMap.get(item?.supplier_id || '') || null;
+            const avgDailySales = Math.max(Number(metric.avg_daily_sales || 0), 0);
+            const planningCoverageDays = supplierPlanningEnabled ? supplierPlanCoverageValue : Math.max(1, Math.trunc(Number(metric.target_coverage_days || 30)));
+            const planningLeadTimeDays = supplierPlanningEnabled ? supplierPlanLeadTimeValue : 0;
+            const planningSafetyDays = supplierPlanningEnabled ? supplierPlanSafetyValue : 0;
+            const planningTargetDays = planningCoverageDays + planningLeadTimeDays + planningSafetyDays;
+            const planningTargetStock = Math.max(
+                Math.max(0, metric.min_stock_alert || 0),
+                Math.ceil(avgDailySales * planningTargetDays)
+            );
+            const planningSuggestedQty = Math.max(0, planningTargetStock - Math.max(0, metric.stock_qty || 0));
+            const displayedSuggestedQty = supplierPlanningEnabled ? planningSuggestedQty : Math.max(0, metric.suggested_reorder_qty || 0);
+            const displayedObjectiveDays = supplierPlanningEnabled ? planningCoverageDays : Math.max(1, Math.trunc(Number(metric.target_coverage_days || 30)));
+
+            return {
+                metric,
+                item,
+                supplier,
+                supplierName: supplier?.name || 'Sin proveedor',
+                avgDailySales,
+                planningCoverageDays,
+                planningLeadTimeDays,
+                planningSafetyDays,
+                planningTargetDays,
+                planningTargetStock,
+                planningSuggestedQty,
+                displayedSuggestedQty,
+                displayedObjectiveDays,
+                estimatedLineCost: displayedSuggestedQty * Math.max(0, Number(item?.price || 0))
+            };
+        });
+    }, [
+        filteredRotationMetrics,
+        inventoryById,
+        supplierMap,
+        supplierPlanCoverageValue,
+        supplierPlanLeadTimeValue,
+        supplierPlanSafetyValue,
+        supplierPlanningEnabled
+    ]);
+
+    const supplierPlanningRows = useMemo(
+        () => (supplierPlanningEnabled ? rotationDisplayRows.filter((row) => row.item) : []),
+        [rotationDisplayRows, supplierPlanningEnabled]
+    );
+
+    const supplierPlanningSuggestedRows = useMemo(
+        () => supplierPlanningRows.filter((row) => row.displayedSuggestedQty > 0),
+        [supplierPlanningRows]
+    );
+
+    const supplierPlanningTotalUnits = supplierPlanningSuggestedRows.reduce((accumulator, row) => accumulator + row.displayedSuggestedQty, 0);
+    const supplierPlanningEstimatedAmount = supplierPlanningSuggestedRows.reduce((accumulator, row) => accumulator + row.estimatedLineCost, 0);
+
+    const downloadSupplierPurchasePlan = () => {
+        if (!selectedRotationSupplier) {
+            alert('Selecciona un proveedor específico para preparar el pedido.');
+            return;
+        }
+
+        if (supplierPlanningSuggestedRows.length === 0) {
+            alert('No hay líneas sugeridas para descargar con los filtros y parámetros actuales.');
+            return;
+        }
+
+        const today = new Date();
+        const timestamp = today.toISOString().slice(0, 10);
+        const safeSupplierName = selectedRotationSupplier.name
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'proveedor';
+
+        const summaryRows = [
+            { Campo: 'Proveedor', Valor: selectedRotationSupplier.name },
+            { Campo: 'Email', Valor: selectedRotationSupplier.email || 'Sin email' },
+            { Campo: 'Contacto', Valor: selectedRotationSupplier.contact_name || 'Sin contacto' },
+            { Campo: 'Teléfono', Valor: selectedRotationSupplier.phone || 'Sin teléfono' },
+            { Campo: 'Cobertura planificada', Valor: `${supplierPlanCoverageValue} días` },
+            { Campo: 'Lead time', Valor: `${supplierPlanLeadTimeValue} días` },
+            { Campo: 'Seguridad extra', Valor: `${supplierPlanSafetyValue} días` },
+            { Campo: 'Ítems sugeridos', Valor: supplierPlanningSuggestedRows.length },
+            { Campo: 'Unidades sugeridas', Valor: supplierPlanningTotalUnits },
+            { Campo: 'Monto estimado', Valor: formatCurrency(supplierPlanningEstimatedAmount) },
+            { Campo: 'Generado el', Valor: formatDateTime(today.toISOString()) },
+        ];
+
+        const detailRows = supplierPlanningSuggestedRows.map((row, index) => ({
+            Item: index + 1,
+            SKU: row.metric.sku || '',
+            Producto: row.metric.name,
+            Categoría: row.metric.category || 'General',
+            'Stock Actual': row.metric.stock_qty || 0,
+            'Mínimo': row.metric.min_stock_alert || 0,
+            'Venta 30 Días': row.metric.units_sold_window || 0,
+            'Promedio Diario': Number(row.avgDailySales.toFixed(2)),
+            'Cobertura Deseada (días)': row.planningCoverageDays,
+            'Lead Time (días)': row.planningLeadTimeDays,
+            'Seguridad (días)': row.planningSafetyDays,
+            'Stock Objetivo': row.planningTargetStock,
+            'Cantidad Sugerida': row.displayedSuggestedQty,
+            'Precio Referencial': Math.max(0, Number(row.item?.price || 0)),
+            'Total Estimado': row.estimatedLineCost,
+            'Última Venta': formatDate(row.metric.last_sale_at)
+        }));
+
+        const workbook = XLSX.utils.book_new();
+        const summarySheet = XLSX.utils.json_to_sheet(summaryRows, { header: ['Campo', 'Valor'] });
+        const detailSheet = XLSX.utils.json_to_sheet(detailRows);
+
+        XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resumen');
+        XLSX.utils.book_append_sheet(workbook, detailSheet, 'Pedido');
+        XLSX.writeFile(workbook, `pedido_${safeSupplierName}_${timestamp}.xlsx`);
+    };
 
     const filteredMovements = useMemo(() => {
         return movements.filter((movement) => {
@@ -1580,6 +1741,86 @@ const Inventory = () => {
                         </select>
                     </div>
 
+                    {supplierPlanningEnabled ? (
+                        <div className="rounded-3xl border border-cyan-100 bg-cyan-50/70 p-5">
+                            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+                                <div className="space-y-2">
+                                    <p className="text-[11px] font-black uppercase tracking-[0.3em] text-cyan-600">Plan de Pedido por Proveedor</p>
+                                    <h3 className="text-2xl font-black text-slate-900">{selectedRotationSupplier?.name}</h3>
+                                    <p className="text-sm font-medium text-slate-600">
+                                        Ajusta cobertura, lead time y seguridad para recalcular el pedido sugerido antes de descargarlo.
+                                    </p>
+                                    <div className="flex flex-wrap gap-2 text-xs font-bold text-slate-500">
+                                        <span className="rounded-full border border-cyan-200 bg-white px-3 py-1">
+                                            {selectedRotationSupplier?.email || 'Sin email'}
+                                        </span>
+                                        <span className="rounded-full border border-cyan-200 bg-white px-3 py-1">
+                                            {selectedRotationSupplier?.contact_name || 'Sin contacto'}
+                                        </span>
+                                        <span className="rounded-full border border-cyan-200 bg-white px-3 py-1">
+                                            {selectedRotationSupplier?.phone || 'Sin teléfono'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:min-w-[560px]">
+                                    <div>
+                                        <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Cobertura deseada</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            value={supplierPlanCoverageDays}
+                                            onChange={(event) => setSupplierPlanCoverageDays(event.target.value)}
+                                            className="w-full rounded-2xl border border-cyan-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-cyan-400"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Lead Time</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="1"
+                                            value={supplierPlanLeadTimeDays}
+                                            onChange={(event) => setSupplierPlanLeadTimeDays(event.target.value)}
+                                            className="w-full rounded-2xl border border-cyan-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-cyan-400"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Seguridad Extra</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="1"
+                                            value={supplierPlanSafetyDays}
+                                            onChange={(event) => setSupplierPlanSafetyDays(event.target.value)}
+                                            className="w-full rounded-2xl border border-cyan-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-cyan-400"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+                                <div className="rounded-2xl border border-white/70 bg-white px-4 py-4">
+                                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Ítems Sugeridos</p>
+                                    <p className="mt-2 text-2xl font-black text-slate-900">{supplierPlanningSuggestedRows.length}</p>
+                                </div>
+                                <div className="rounded-2xl border border-white/70 bg-white px-4 py-4">
+                                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Unidades a Pedir</p>
+                                    <p className="mt-2 text-2xl font-black text-slate-900">{supplierPlanningTotalUnits}</p>
+                                </div>
+                                <div className="rounded-2xl border border-white/70 bg-white px-4 py-4">
+                                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Monto Estimado</p>
+                                    <p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(supplierPlanningEstimatedAmount)}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-5 py-4 text-sm font-medium text-slate-500">
+                            Selecciona un proveedor específico arriba para definir cobertura, lead time y descargar el pedido sugerido listo para enviar.
+                        </div>
+                    )}
+
                     <div className="flex flex-wrap items-center gap-3">
                         <button
                             onClick={() => {
@@ -1597,6 +1838,15 @@ const Inventory = () => {
                         >
                             Recalcular rotación
                         </button>
+                        {supplierPlanningEnabled && (
+                            <button
+                                onClick={downloadSupplierPurchasePlan}
+                                className="flex items-center rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-cyan-100 transition-all hover:bg-cyan-700"
+                            >
+                                <Download size={16} className="mr-2" />
+                                Descargar pedido proveedor
+                            </button>
+                        )}
                     </div>
 
                     {rotationLoading ? (
@@ -1614,25 +1864,24 @@ const Inventory = () => {
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Proveedor</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Stock</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Mínimo</th>
-                                        <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Objetivo</th>
+                                        <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">{supplierPlanningEnabled ? 'Plan Cobertura' : 'Objetivo'}</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Venta 30d</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Promedio Diario</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Cobertura</th>
-                                        <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Sugerido</th>
+                                        <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">{supplierPlanningEnabled ? 'Pedir Ahora' : 'Sugerido'}</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Alerta</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Solicitud</th>
                                         <th className="px-6 py-4 text-right text-[10px] font-black uppercase tracking-widest text-slate-400">Acciones</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {filteredRotationMetrics.map((metric) => {
-                                        const item = inventoryById.get(metric.inventory_id) || null;
-                                        const supplierName = supplierMap.get(item?.supplier_id || '')?.name || 'Sin proveedor';
+                                    {rotationDisplayRows.map((row) => {
+                                        const { metric, item, supplierName } = row;
                                         const alertClass = metric.alert_level === 'critical'
                                             ? 'border-rose-200 bg-rose-50 text-rose-700'
                                             : metric.alert_level === 'low'
                                                 ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                                : metric.alert_level === 'warning'
+                                            : metric.alert_level === 'warning'
                                                     ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                                                     : 'border-emerald-200 bg-emerald-50 text-emerald-700';
 
@@ -1650,11 +1899,29 @@ const Inventory = () => {
                                                 </td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-900">{metric.stock_qty}</td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-700">{metric.min_stock_alert}</td>
-                                                <td className="px-6 py-5 text-center font-bold text-slate-700">{metric.target_coverage_days} días</td>
+                                                <td className="px-6 py-5 text-center">
+                                                    {supplierPlanningEnabled ? (
+                                                        <div>
+                                                            <p className="font-bold text-slate-900">{row.displayedObjectiveDays} días</p>
+                                                            <p className="mt-1 text-[11px] font-bold text-slate-400">
+                                                                +{row.planningLeadTimeDays} LT · +{row.planningSafetyDays} seg.
+                                                            </p>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="font-bold text-slate-700">{metric.target_coverage_days} días</span>
+                                                    )}
+                                                </td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-900">{metric.units_sold_window}</td>
-                                                <td className="px-6 py-5 text-center font-bold text-slate-900">{Number(metric.avg_daily_sales || 0).toFixed(2)}</td>
+                                                <td className="px-6 py-5 text-center font-bold text-slate-900">{row.avgDailySales.toFixed(2)}</td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-900">{metric.days_of_coverage != null ? `${metric.days_of_coverage} días` : 'Sin ventas'}</td>
-                                                <td className="px-6 py-5 text-center font-bold text-indigo-700">{metric.suggested_reorder_qty}</td>
+                                                <td className="px-6 py-5 text-center">
+                                                    <p className="font-bold text-indigo-700">{row.displayedSuggestedQty}</p>
+                                                    {supplierPlanningEnabled && (
+                                                        <p className="mt-1 text-[11px] font-bold text-slate-400">
+                                                            stock meta {row.planningTargetStock}
+                                                        </p>
+                                                    )}
+                                                </td>
                                                 <td className="px-6 py-5 text-center">
                                                     <span className={`rounded-full border px-3 py-1 text-xs font-black uppercase tracking-wide ${alertClass}`}>
                                                         {metric.alert_level}
@@ -1668,7 +1935,13 @@ const Inventory = () => {
                                                 <td className="px-6 py-5 text-right">
                                                     <div className="flex flex-wrap justify-end gap-2">
                                                         <button
-                                                            onClick={() => requestSuggestedPurchase(metric)}
+                                                            onClick={() => supplierPlanningEnabled
+                                                                ? requestSuggestedPurchaseWithQty(
+                                                                    metric,
+                                                                    row.displayedSuggestedQty,
+                                                                    `Pedido planificado por proveedor ${supplierName}. Cobertura ${row.planningCoverageDays} días + lead time ${row.planningLeadTimeDays} días + seguridad ${row.planningSafetyDays} días. Venta 30 días: ${metric.units_sold_window} uds.`
+                                                                )
+                                                                : requestSuggestedPurchase(metric)}
                                                             className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-indigo-700 transition-all hover:bg-indigo-100"
                                                         >
                                                             Solicitar compra
