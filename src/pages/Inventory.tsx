@@ -66,6 +66,7 @@ const Inventory = () => {
     const [rotationOnlyAlerts, setRotationOnlyAlerts] = useState(false);
     const [rotationAlertFilter, setRotationAlertFilter] = useState<'all' | 'critical' | 'low' | 'warning' | 'healthy'>('all');
     const [rotationCategoryFilter, setRotationCategoryFilter] = useState<'all' | string>('all');
+    const [rotationSupplierFilter, setRotationSupplierFilter] = useState<'all' | 'none' | string>('all');
     const [rotationRequestFilter, setRotationRequestFilter] = useState<'all' | 'with_request' | 'without_request'>('all');
     const [movementTypeFilter, setMovementTypeFilter] = useState<'all' | string>('all');
     const [movementOriginFilter, setMovementOriginFilter] = useState<'all' | string>('all');
@@ -94,6 +95,9 @@ const Inventory = () => {
     const [minStockItem, setMinStockItem] = useState<InventoryItem | null>(null);
     const [minStockValue, setMinStockValue] = useState('');
     const [savingMinStock, setSavingMinStock] = useState(false);
+    const [coverageItem, setCoverageItem] = useState<InventoryItem | null>(null);
+    const [coverageValue, setCoverageValue] = useState('');
+    const [savingCoverage, setSavingCoverage] = useState(false);
     const [supplierItem, setSupplierItem] = useState<InventoryItem | null>(null);
     const [supplierValue, setSupplierValue] = useState('');
     const [savingSupplier, setSavingSupplier] = useState(false);
@@ -244,6 +248,10 @@ const Inventory = () => {
     const supplierMap = useMemo(
         () => new Map(suppliers.map((supplier) => [supplier.id, supplier])),
         [suppliers]
+    );
+    const inventoryById = useMemo(
+        () => new Map(items.map((item) => [item.id, item])),
+        [items]
     );
 
     const isMissingBackendFeatureError = (error: any) => {
@@ -802,6 +810,17 @@ const Inventory = () => {
         setSavingMinStock(false);
     };
 
+    const openCoverageModal = (item: InventoryItem) => {
+        setCoverageItem(item);
+        setCoverageValue(String(Math.max(1, Math.trunc(Number(item.target_coverage_days || 30)))));
+    };
+
+    const closeCoverageModal = () => {
+        setCoverageItem(null);
+        setCoverageValue('');
+        setSavingCoverage(false);
+    };
+
     const openSupplierModal = (item: InventoryItem) => {
         setSupplierItem(item);
         setSupplierValue(item.supplier_id || '');
@@ -899,6 +918,39 @@ const Inventory = () => {
             console.error('Error updating min stock alert:', error);
             alert(`No se pudo actualizar el mínimo: ${error.message}`);
             setSavingMinStock(false);
+        }
+    };
+
+    const saveCoverageTarget = async () => {
+        if (!coverageItem || !profile?.id) return;
+
+        const parsedCoverage = Number(coverageValue || 0);
+        const nextCoverage = Math.max(1, Math.trunc(parsedCoverage));
+        if (!Number.isFinite(parsedCoverage)) {
+            alert('Debes ingresar una cobertura válida.');
+            return;
+        }
+
+        setSavingCoverage(true);
+        try {
+            const { error } = await supabase
+                .from('inventory')
+                .update({
+                    target_coverage_days: nextCoverage,
+                    last_stock_reviewed_at: new Date().toISOString(),
+                    last_stock_reviewed_by: profile.id
+                })
+                .eq('id', coverageItem.id);
+
+            if (error) throw error;
+
+            alert('Cobertura objetivo actualizada.');
+            closeCoverageModal();
+            await refreshAll();
+        } catch (error: any) {
+            console.error('Error updating coverage target:', error);
+            alert(`No se pudo actualizar la cobertura: ${error.message}`);
+            setSavingCoverage(false);
         }
     };
 
@@ -1011,14 +1063,17 @@ const Inventory = () => {
     const filteredRotationMetrics = useMemo(() => {
         return rotationMetrics.filter((metric) => {
             const haystack = [metric.sku, metric.name, metric.category].filter(Boolean).join(' ').toLowerCase();
+            const item = inventoryById.get(metric.inventory_id) || null;
             if (rotationSearch.trim() && !haystack.includes(rotationSearch.trim().toLowerCase())) return false;
             if (rotationAlertFilter !== 'all' && metric.alert_level !== rotationAlertFilter) return false;
             if (rotationCategoryFilter !== 'all' && (metric.category || 'General') !== rotationCategoryFilter) return false;
+            if (rotationSupplierFilter === 'none' && item?.supplier_id) return false;
+            if (rotationSupplierFilter !== 'all' && rotationSupplierFilter !== 'none' && (item?.supplier_id || '') !== rotationSupplierFilter) return false;
             if (rotationRequestFilter === 'with_request' && !metric.has_open_request) return false;
             if (rotationRequestFilter === 'without_request' && metric.has_open_request) return false;
             return true;
         });
-    }, [rotationAlertFilter, rotationCategoryFilter, rotationMetrics, rotationRequestFilter, rotationSearch]);
+    }, [inventoryById, rotationAlertFilter, rotationCategoryFilter, rotationMetrics, rotationRequestFilter, rotationSearch, rotationSupplierFilter]);
 
     const filteredMovements = useMemo(() => {
         return movements.filter((movement) => {
@@ -1472,7 +1527,7 @@ const Inventory = () => {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-5">
+                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-6">
                         <div className="relative xl:col-span-2">
                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                             <input
@@ -1501,6 +1556,17 @@ const Inventory = () => {
                             <option value="all">Todas las categorías</option>
                             {inventoryCategories.map((category) => (
                                 <option key={category} value={category}>{category}</option>
+                            ))}
+                        </select>
+                        <select
+                            value={rotationSupplierFilter}
+                            onChange={(event) => setRotationSupplierFilter(event.target.value)}
+                            className="rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-700 outline-none focus:border-indigo-300"
+                        >
+                            <option value="all">Todos los proveedores</option>
+                            <option value="none">Sin proveedor</option>
+                            {activeSuppliers.map((supplier) => (
+                                <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
                             ))}
                         </select>
                         <select
@@ -1545,8 +1611,10 @@ const Inventory = () => {
                                 <thead className="bg-slate-50/70">
                                     <tr>
                                         <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Producto</th>
+                                        <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Proveedor</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Stock</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Mínimo</th>
+                                        <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Objetivo</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Venta 30d</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Promedio Diario</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">Cobertura</th>
@@ -1558,7 +1626,8 @@ const Inventory = () => {
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {filteredRotationMetrics.map((metric) => {
-                                        const item = items.find((candidate) => candidate.id === metric.inventory_id) || null;
+                                        const item = inventoryById.get(metric.inventory_id) || null;
+                                        const supplierName = supplierMap.get(item?.supplier_id || '')?.name || 'Sin proveedor';
                                         const alertClass = metric.alert_level === 'critical'
                                             ? 'border-rose-200 bg-rose-50 text-rose-700'
                                             : metric.alert_level === 'low'
@@ -1574,8 +1643,14 @@ const Inventory = () => {
                                                     <p className="mt-1 text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">{metric.sku || 'SIN-SKU'} · {metric.category || 'General'}</p>
                                                     <p className="mt-2 text-xs text-slate-500">Última venta: {formatDate(metric.last_sale_at)}</p>
                                                 </td>
+                                                <td className="px-6 py-5 text-center">
+                                                    <span className="rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">
+                                                        {supplierName}
+                                                    </span>
+                                                </td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-900">{metric.stock_qty}</td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-700">{metric.min_stock_alert}</td>
+                                                <td className="px-6 py-5 text-center font-bold text-slate-700">{metric.target_coverage_days} días</td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-900">{metric.units_sold_window}</td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-900">{Number(metric.avg_daily_sales || 0).toFixed(2)}</td>
                                                 <td className="px-6 py-5 text-center font-bold text-slate-900">{metric.days_of_coverage != null ? `${metric.days_of_coverage} días` : 'Sin ventas'}</td>
@@ -1606,6 +1681,20 @@ const Inventory = () => {
                                                                 >
                                                                     Editar mínimo
                                                                 </button>
+                                                                <button
+                                                                    onClick={() => openCoverageModal(item)}
+                                                                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-wide text-slate-700 transition-all hover:bg-slate-50"
+                                                                >
+                                                                    Cobertura
+                                                                </button>
+                                                                {canManageInventory && (
+                                                                    <button
+                                                                        onClick={() => openSupplierModal(item)}
+                                                                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-wide text-slate-700 transition-all hover:bg-slate-50"
+                                                                    >
+                                                                        Proveedor
+                                                                    </button>
+                                                                )}
                                                                 <button
                                                                     onClick={() => void fetchHistory(item)}
                                                                     className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-wide text-slate-700 transition-all hover:bg-slate-50"
@@ -2168,6 +2257,49 @@ const Inventory = () => {
                                 </button>
                                 <button onClick={() => void saveMinStock()} disabled={savingMinStock} className="rounded-2xl bg-amber-500 px-5 py-3 font-black text-white shadow-lg shadow-amber-100 disabled:opacity-60">
                                     {savingMinStock ? 'Guardando...' : 'Guardar mínimo'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {coverageItem && canManageStockControls && (
+                <div className="fixed inset-0 z-[2017] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
+                        <div className="flex items-center justify-between bg-indigo-600 p-6 text-white">
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-[0.3em] text-indigo-100">Cobertura Objetivo</p>
+                                <h3 className="text-xl font-black">{coverageItem.name}</h3>
+                            </div>
+                            <button onClick={closeCoverageModal} className="rounded-full p-2 transition-all hover:bg-white/20">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="space-y-5 p-6">
+                            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4">
+                                <p className="text-sm font-bold text-indigo-900">SKU: {coverageItem.sku || 'SIN-SKU'}</p>
+                                <p className="mt-1 text-xs text-indigo-700">
+                                    Define cuántos días de stock quieres cubrir para este producto. El sugerido de compra se recalcula usando este valor junto al promedio de venta.
+                                </p>
+                            </div>
+                            <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Días objetivo de cobertura</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    value={coverageValue}
+                                    onChange={(event) => setCoverageValue(event.target.value)}
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
+                                />
+                            </div>
+                            <div className="flex justify-end gap-3">
+                                <button onClick={closeCoverageModal} className="rounded-2xl border border-slate-200 px-5 py-3 font-black text-slate-700">
+                                    Cancelar
+                                </button>
+                                <button onClick={() => void saveCoverageTarget()} disabled={savingCoverage} className="rounded-2xl bg-indigo-600 px-5 py-3 font-black text-white shadow-lg shadow-indigo-100 disabled:opacity-60">
+                                    {savingCoverage ? 'Guardando...' : 'Guardar cobertura'}
                                 </button>
                             </div>
                         </div>
