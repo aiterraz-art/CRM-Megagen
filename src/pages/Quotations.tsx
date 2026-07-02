@@ -178,6 +178,9 @@ const Quotations: React.FC = () => {
     const [products, setProducts] = useState<any[]>([]);
     const [suggestions, setSuggestions] = useState<any[]>([]);
     const [activeSuggestion, setActiveSuggestion] = useState<{ index: number, field: 'code' | 'detail' } | null>(null);
+    const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+    const suggestionSearchTimeoutRef = useRef<number | null>(null);
+    const suggestionRequestIdRef = useRef(0);
 
     const { profile, isSupervisor, hasPermission, permissions, effectiveRole } = useUser();
     const { activeVisit } = useVisit();
@@ -539,6 +542,78 @@ const Quotations: React.FC = () => {
         if (data) setProducts(data);
     }, []);
 
+    const upsertProductsCache = useCallback((incomingProducts: any[]) => {
+        if (!Array.isArray(incomingProducts) || incomingProducts.length === 0) return;
+
+        setProducts((currentProducts) => {
+            const byId = new globalThis.Map(currentProducts.map((product) => [product.id, product]));
+            incomingProducts.forEach((product) => {
+                if (!product?.id) return;
+                byId.set(product.id, {
+                    ...(byId.get(product.id) || {}),
+                    ...product,
+                });
+            });
+            return Array.from(byId.values());
+        });
+    }, []);
+
+    const fetchLiveProductSuggestions = useCallback(async (
+        searchValue: string,
+        field: 'code' | 'detail',
+        itemIndex: number
+    ) => {
+        const trimmedValue = searchValue.trim();
+        const minimumLength = field === 'code' ? 2 : 3;
+
+        if (suggestionSearchTimeoutRef.current) {
+            window.clearTimeout(suggestionSearchTimeoutRef.current);
+            suggestionSearchTimeoutRef.current = null;
+        }
+
+        if (trimmedValue.length < minimumLength) {
+            suggestionRequestIdRef.current += 1;
+            setSuggestions([]);
+            setSuggestionsLoading(false);
+            setActiveSuggestion(null);
+            return;
+        }
+
+        setActiveSuggestion({ index: itemIndex, field });
+        setSuggestionsLoading(true);
+        const requestId = ++suggestionRequestIdRef.current;
+
+        suggestionSearchTimeoutRef.current = window.setTimeout(async () => {
+            try {
+                const query = supabase
+                    .from('inventory')
+                    .select('id, sku, name, price, stock_qty, category')
+                    .order(field === 'code' ? 'sku' : 'name')
+                    .limit(8);
+
+                const { data, error } = await (field === 'code'
+                    ? query.ilike('sku', `%${trimmedValue}%`)
+                    : query.ilike('name', `%${trimmedValue}%`));
+
+                if (requestId !== suggestionRequestIdRef.current) return;
+                if (error) throw error;
+
+                const liveSuggestions = data || [];
+                upsertProductsCache(liveSuggestions);
+                setSuggestions(liveSuggestions);
+                setActiveSuggestion({ index: itemIndex, field });
+            } catch (error) {
+                if (requestId !== suggestionRequestIdRef.current) return;
+                console.error('Error fetching live quotation suggestions:', error);
+                setSuggestions([]);
+            } finally {
+                if (requestId === suggestionRequestIdRef.current) {
+                    setSuggestionsLoading(false);
+                }
+            }
+        }, 180);
+    }, [upsertProductsCache]);
+
     const fetchAvailableSellers = useCallback(async () => {
         if (!canAssignQuotationSeller(effectiveRole)) {
             setAvailableSellers([]);
@@ -600,6 +675,14 @@ const Quotations: React.FC = () => {
         if (!isItemModalOpen) return;
         void fetchProducts();
     }, [fetchProducts, isItemModalOpen]);
+
+    useEffect(() => {
+        return () => {
+            if (suggestionSearchTimeoutRef.current) {
+                window.clearTimeout(suggestionSearchTimeoutRef.current);
+            }
+        };
+    }, []);
 
     // Persist Draft Logic
     useEffect(() => {
@@ -2475,23 +2558,20 @@ const Quotations: React.FC = () => {
                                                         newItems[index].code = val;
                                                         newItems[index].productId = null;
                                                         setFormItems(newItems);
-
-                                                        if (val.length > 1) {
-                                                            const filtered = products.filter(p => p.sku?.toLowerCase().includes(val.toLowerCase()));
-                                                            setSuggestions(filtered);
-                                                            setActiveSuggestion({ index, field: 'code' });
-                                                        } else {
-                                                            setSuggestions([]);
-                                                            setActiveSuggestion(null);
-                                                        }
+                                                        void fetchLiveProductSuggestions(val, 'code', index);
                                                     }}
                                                     onBlur={() => setTimeout(() => setActiveSuggestion(null), 200)}
                                                 />
-                                                {activeSuggestion?.index === index && activeSuggestion.field === 'code' && suggestions.length > 0 && (
+                                                {activeSuggestion?.index === index && activeSuggestion.field === 'code' && (suggestionsLoading || suggestions.length > 0) && (
                                                     <div
                                                         className="absolute z-50 w-64 max-h-72 overflow-y-auto overscroll-contain bg-white border border-gray-100 rounded-xl shadow-2xl mt-1"
                                                         onMouseDown={(e) => e.preventDefault()}
                                                     >
+                                                        {suggestionsLoading && suggestions.length === 0 && (
+                                                            <div className="px-4 py-3 text-[11px] font-bold text-gray-500">
+                                                                Buscando stock en tiempo real...
+                                                            </div>
+                                                        )}
                                                         {suggestions.map((p, i) => (
                                                             <button
                                                                 key={i}
@@ -2533,23 +2613,20 @@ const Quotations: React.FC = () => {
                                                         newItems[index].detail = val;
                                                         newItems[index].productId = null;
                                                         setFormItems(newItems);
-
-                                                        if (val.length > 2) {
-                                                            const filtered = products.filter(p => p.name?.toLowerCase().includes(val.toLowerCase()));
-                                                            setSuggestions(filtered);
-                                                            setActiveSuggestion({ index, field: 'detail' });
-                                                        } else {
-                                                            setSuggestions([]);
-                                                            setActiveSuggestion(null);
-                                                        }
+                                                        void fetchLiveProductSuggestions(val, 'detail', index);
                                                     }}
                                                     onBlur={() => setTimeout(() => setActiveSuggestion(null), 200)}
                                                 />
-                                                {activeSuggestion?.index === index && activeSuggestion.field === 'detail' && suggestions.length > 0 && (
+                                                {activeSuggestion?.index === index && activeSuggestion.field === 'detail' && (suggestionsLoading || suggestions.length > 0) && (
                                                     <div
                                                         className="absolute z-50 w-full max-h-72 overflow-y-auto overscroll-contain bg-white border border-gray-100 rounded-xl shadow-2xl mt-1"
                                                         onMouseDown={(e) => e.preventDefault()}
                                                     >
+                                                        {suggestionsLoading && suggestions.length === 0 && (
+                                                            <div className="px-4 py-3 text-[11px] font-bold text-gray-500">
+                                                                Buscando stock en tiempo real...
+                                                            </div>
+                                                        )}
                                                         {suggestions.map((p, i) => (
                                                             <button
                                                                 key={i}
