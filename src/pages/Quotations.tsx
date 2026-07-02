@@ -205,9 +205,12 @@ const Quotations: React.FC = () => {
         maxDiscountPct: number;
         limitPct: number;
     }) => {
+        const approvalReasonText = limitPct <= 0
+            ? `Este cliente requiere aprobación para cualquier descuento (${maxDiscountPct.toFixed(2)}% aplicado).`
+            : `Esta cotización supera el descuento permitido para vendedor (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%).`;
         const message = status === 'rejected'
-            ? `La última autorización fue rechazada. Escribe el motivo para reenviar la solicitud de descuento (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%).`
-            : `Esta cotización supera el descuento permitido para vendedor (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%). Escribe el motivo para solicitar autorización antes de generar el pedido.`;
+            ? `La última autorización fue rechazada. ${approvalReasonText} Escribe el motivo para reenviar la solicitud de descuento.`
+            : `${approvalReasonText} Escribe el motivo para solicitar autorización antes de generar el pedido.`;
         const reason = window.prompt(message, '');
         const trimmed = String(reason || '').trim();
         return trimmed || null;
@@ -385,7 +388,7 @@ const Quotations: React.FC = () => {
                 .from('quotations')
                 .select(`
                     *,
-                    clients (id, name, rut, address, zone, purchase_contact, status, phone, email, giro, comuna, office, credit_days)
+                    clients (id, name, rut, address, zone, purchase_contact, status, phone, email, giro, comuna, office, credit_days, requires_discount_approval)
                 `);
 
             if (isSellerRole && profile?.id) {

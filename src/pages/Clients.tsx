@@ -155,7 +155,8 @@ const buildClientFormState = (assignedSellerId = '') => ({
     comuna: '',
     office: '',
     assignedSellerId,
-    creditDays: 0
+    creditDays: 0,
+    requiresDiscountApproval: false
 });
 
 const chunkArray = <T,>(items: T[], size: number) => {
@@ -484,7 +485,8 @@ const ClientsContent = () => {
                 comuna: clientToEdit.comuna || '',
                 office: clientToEdit.office || '',
                 assignedSellerId: clientToEdit.created_by || '',
-                creditDays: clientToEdit.credit_days ?? 0
+                creditDays: clientToEdit.credit_days ?? 0,
+                requiresDiscountApproval: Boolean(clientToEdit.requires_discount_approval)
             });
             if (clientToEdit.lat && clientToEdit.lng) {
                 setManualLocation({ lat: clientToEdit.lat, lng: clientToEdit.lng });
@@ -624,6 +626,7 @@ const ClientsContent = () => {
                         giro: clientForm.giro,
                         comuna: finalComuna,
                         office: clientForm.office,
+                        ...(effectiveRole === 'admin' ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {}),
                         ...(canManageClientCredit ? { credit_days: sanitizedCreditDays } : {}),
                         ...(canAssignClientOwner ? { created_by: clientForm.assignedSellerId, pending_seller_email: null } : {})
                     };
@@ -674,7 +677,8 @@ const ClientsContent = () => {
                         giro: clientForm.giro,
                         comuna: finalComuna,
                         office: clientForm.office,
-                        credit_days: 0
+                        credit_days: 0,
+                        ...(effectiveRole === 'admin' ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {})
                     });
 
                 if (insertError) throw insertError;
@@ -2021,6 +2025,25 @@ const ClientsContent = () => {
                                                             </option>
                                                         )}
                                                     </select>
+                                                </div>
+                                            )}
+
+                                            {effectiveRole === 'admin' && editScope === 'full' && (
+                                                <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-4">
+                                                    <label className="flex items-start gap-3 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={clientForm.requiresDiscountApproval}
+                                                            onChange={(e) => setClientForm({ ...clientForm, requiresDiscountApproval: e.target.checked })}
+                                                            className="mt-1 h-5 w-5 rounded border-amber-300 text-amber-600 focus:ring-amber-400"
+                                                        />
+                                                        <div>
+                                                            <p className="text-sm font-black text-amber-900">Requiere aprobación para descuentos</p>
+                                                            <p className="mt-1 text-xs font-medium text-amber-800">
+                                                                Si está activo, cualquier descuento aplicado a este cliente deberá pasar por aprobación antes de generar el pedido.
+                                                            </p>
+                                                        </div>
+                                                    </label>
                                                 </div>
                                             )}
 

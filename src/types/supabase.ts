@@ -34,6 +34,7 @@ export interface Database {
                     comuna: string | null
                     office: string | null
                     lead_score: number | null
+                    requires_discount_approval: boolean
                 }
                 Insert: {
                     address?: string | null
@@ -58,6 +59,7 @@ export interface Database {
                     comuna?: string | null
                     office?: string | null
                     lead_score?: number | null
+                    requires_discount_approval?: boolean
                 }
                 Update: {
                     address?: string | null
@@ -82,6 +84,7 @@ export interface Database {
                     comuna?: string | null
                     office?: string | null
                     lead_score?: number | null
+                    requires_discount_approval?: boolean
                 }
             }
             client_followup_settings: {

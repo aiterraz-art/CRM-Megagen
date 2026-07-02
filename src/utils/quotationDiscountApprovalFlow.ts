@@ -18,6 +18,12 @@ export const getQuotationMaxDiscountPct = (items: any[]) => {
     }, 0);
 };
 
+const quotationRequiresDiscountApproval = (quotation: any) => Boolean(
+    quotation?.client?.requires_discount_approval
+    ?? quotation?.clients?.requires_discount_approval
+    ?? quotation?.requires_discount_approval
+);
+
 export const fetchLatestDiscountApproval = async (quotationId: string) => {
     const { data, error } = await supabase
         .from('approval_requests')
@@ -69,7 +75,8 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
     limitPct = SELLER_MAX_DISCOUNT_PCT,
 }: EnsureDiscountApprovalParams): Promise<EnsureDiscountApprovalResult> => {
     const maxDiscountPct = getQuotationMaxDiscountPct(quotation?.items || []);
-    if (maxDiscountPct <= limitPct) {
+    const effectiveLimitPct = quotationRequiresDiscountApproval(quotation) ? 0 : limitPct;
+    if (maxDiscountPct <= effectiveLimitPct) {
         return { allowed: true, action: 'not_required' };
     }
 
@@ -94,7 +101,7 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
         quotation,
         status: currentApproval?.status === 'rejected' ? 'rejected' : 'new_request',
         maxDiscountPct,
-        limitPct,
+        limitPct: effectiveLimitPct,
     });
 
     if (!requestReason) {
@@ -104,7 +111,7 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
         };
     }
 
-    const requestedItems = buildDiscountApprovalRequestedItems(quotation?.items || [], limitPct);
+    const requestedItems = buildDiscountApprovalRequestedItems(quotation?.items || [], effectiveLimitPct);
     const { data: approvalRow, error: approvalError } = await supabase
         .from('approval_requests')
         .insert({
@@ -117,7 +124,7 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
                 folio: quotation?.folio || null,
                 client_name: quotation?.client_name || quotation?.client?.name || null,
                 max_discount_pct: Number(maxDiscountPct.toFixed(2)),
-                limit_pct: limitPct,
+                limit_pct: effectiveLimitPct,
                 total_amount: Number(quotation?.total_amount || 0),
                 request_reason: requestReason,
                 seller_name: sellerName || quotation?.seller_name || null,
