@@ -156,7 +156,7 @@ const buildClientFormState = (assignedSellerId = '') => ({
     office: '',
     assignedSellerId,
     creditDays: 0,
-    requiresDiscountApproval: false
+    requiresDiscountApproval: true
 });
 
 const chunkArray = <T,>(items: T[], size: number) => {
@@ -2040,7 +2040,7 @@ const ClientsContent = () => {
                                                         <div>
                                                             <p className="text-sm font-black text-amber-900">Requiere aprobación para descuentos</p>
                                                             <p className="mt-1 text-xs font-medium text-amber-800">
-                                                                Si está activo, cualquier descuento aplicado a este cliente deberá pasar por aprobación antes de generar el pedido.
+                                                                Viene activo por defecto para todos los clientes. Desmárcalo solo si este cliente puede operar sin solicitar aprobación adicional por descuentos.
                                                             </p>
                                                         </div>
                                                     </label>
