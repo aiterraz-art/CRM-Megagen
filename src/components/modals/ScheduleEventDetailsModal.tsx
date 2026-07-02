@@ -9,8 +9,10 @@ type ScheduleEventDetailsModalProps = {
     isOpen: boolean;
     isOwnCalendar: boolean;
     canDeleteVisit: boolean;
+    canEditEvent?: boolean;
     onClose: () => void;
     onRefresh: () => void;
+    onEditEvent?: (event: CalendarEvent) => void;
     onDeleteVisit?: (visitId: string) => Promise<void>;
 };
 
@@ -71,8 +73,10 @@ const ScheduleEventDetailsModal = ({
     isOpen,
     isOwnCalendar,
     canDeleteVisit,
+    canEditEvent = false,
     onClose,
     onRefresh,
+    onEditEvent,
     onDeleteVisit,
 }: ScheduleEventDetailsModalProps) => {
     const { profile } = useUser();
@@ -267,6 +271,15 @@ const ScheduleEventDetailsModal = ({
                     )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {canEditEvent && onEditEvent && (
+                            <button
+                                onClick={() => onEditEvent(effectiveEvent)}
+                                className="rounded-2xl py-3 px-4 bg-amber-50 text-amber-700 font-black text-sm flex items-center justify-center gap-2 hover:bg-amber-100 transition-all"
+                            >
+                                <Clock size={16} />
+                                Editar reunión
+                            </button>
+                        )}
                         {effectiveEvent.htmlLink && (
                             <button
                                 onClick={() => window.open(effectiveEvent.htmlLink, '_blank')}

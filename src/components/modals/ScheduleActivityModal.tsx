@@ -15,12 +15,22 @@ interface ScheduleActivityModalProps {
     onClose: () => void;
     onSaved: () => void;
     preSelectedAssigneeId?: string; // If supervisor was viewing a specific calendar
+    editingEvent?: {
+        linkedEntityId?: string;
+        googleEventId?: string;
+        calendarId?: string;
+        summary?: string;
+        description?: string;
+        start?: { dateTime?: string; date?: string };
+        end?: { dateTime?: string; date?: string };
+    } | null;
 }
 
-const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId }: ScheduleActivityModalProps) => {
+const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId, editingEvent }: ScheduleActivityModalProps) => {
     const [loading, setLoading] = useState(false);
     const [sellers, setSellers] = useState<Profile[]>([]);
     const [inviteAll, setInviteAll] = useState(false);
+    const isEditMode = Boolean(editingEvent?.linkedEntityId);
 
     const getDefaultEndTime = (time: string) => {
         const [hours, minutes] = time.split(':').map(Number);
@@ -63,11 +73,32 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
     useEffect(() => {
         if (!isOpen) return;
         setInviteAll(false);
+        if (editingEvent) {
+            const startValue = editingEvent.start?.dateTime || editingEvent.start?.date || '';
+            const endValue = editingEvent.end?.dateTime || editingEvent.end?.date || '';
+            const startDate = startValue ? new Date(startValue) : new Date();
+            const endDate = endValue ? new Date(endValue) : new Date(startDate.getTime() + 60 * 60 * 1000);
+
+            setFormData({
+                assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [],
+                date: startDate.toISOString().split('T')[0],
+                time: `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`,
+                endTime: `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`,
+                title: editingEvent.summary || '',
+                notes: editingEvent.description || ''
+            });
+            return;
+        }
+
         setFormData(prev => ({
             ...prev,
-            assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : []
+            assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [],
+            title: '',
+            notes: '',
+            time: '09:00',
+            endTime: '10:00'
         }));
-    }, [isOpen, preSelectedAssigneeId]);
+    }, [editingEvent, isOpen, preSelectedAssigneeId]);
 
     const toggleAssignee = (sellerId: string) => {
         setInviteAll(false);
@@ -95,11 +126,11 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
     if (!isOpen) return null;
 
     const handleSave = async () => {
-        if (!inviteAll && formData.assigneeIds.length === 0) {
+        if (!isEditMode && !inviteAll && formData.assigneeIds.length === 0) {
             alert("Debes seleccionar al menos un responsable o usar 'Todos'.");
             return;
         }
-        if (selectedRecipients.length === 0) {
+        if (!isEditMode && selectedRecipients.length === 0) {
             alert("No hay participantes seleccionados para esta reunión.");
             return;
         }
@@ -131,105 +162,158 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
 
             // 2. Insert into tasks
             let insertedTaskIds: string[] = [];
-            const tasksToInsert = selectedRecipients.map((seller) => ({
-                title: formData.title,
-                description: formData.notes,
-                user_id: seller.id,
-                assigned_to: seller.id,
-                assigned_by: session.user.id,
-                status: 'pending',
-                priority: 'medium',
-                due_date: isoDue,
-                end_date: isoEnd
-            }));
-
-            const { data, error } = await supabase
-                .from('tasks')
-                .insert(tasksToInsert)
-                .select('id');
-
-            if (error) throw error;
-            insertedTaskIds = (data || []).map((task: any) => task.id);
-
-            // 3. Sync to Google Calendar (Organizer Mode + Attendee Injection)
             let googleSyncNote = '';
             let pushSyncNote = '';
-            try {
-                const sessionEmail = (session.user.email || '').trim().toLowerCase();
-                if (!sessionEmail) {
-                    googleSyncNote = ' (Sincronización Google omitida)';
-                } else {
-                    const attendeeEmails = Array.from(new Set(
-                        selectedRecipients
-                            .map((seller) => (seller.email || '').trim().toLowerCase())
-                            .filter((email) => !!email && email !== sessionEmail)
-                    ));
 
-                    const attendees = attendeeEmails.map((email) => ({ email }));
-                    const gCalEvent: any = {
-                        summary: formData.title,
-                        description: `${formData.notes}\n\nAsignado por: ${session.user.email}`,
-                        location: 'Reunión / Actividad Interna',
-                        start: { dateTime: isoDue },
-                        end: { dateTime: isoEnd },
-                    };
+            if (isEditMode && editingEvent?.linkedEntityId) {
+                const { data: currentTask, error: currentTaskError } = await supabase
+                    .from('tasks')
+                    .select('id, google_event_id')
+                    .eq('id', editingEvent.linkedEntityId)
+                    .maybeSingle();
 
-                    if (attendees.length > 0) {
-                        gCalEvent.attendees = attendees;
-                    }
+                if (currentTaskError) throw currentTaskError;
+                if (!currentTask?.id) throw new Error('No se encontró la reunión a editar.');
 
-                    const gData = await googleService.fetchGoogleJson<any>('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(gCalEvent)
+                const googleEventId = editingEvent.googleEventId || currentTask.google_event_id || null;
+                let updateQuery = supabase
+                    .from('tasks')
+                    .update({
+                        title: formData.title,
+                        description: formData.notes,
+                        due_date: isoDue,
+                        end_date: isoEnd
                     });
 
-                    if (gData?.id && insertedTaskIds.length > 0) {
-                        await supabase
-                            .from('tasks')
-                            .update({
-                                google_event_id: gData.id,
-                                google_calendar_id: sessionEmail,
-                                google_html_link: gData.htmlLink || null,
-                            })
-                            .in('id', insertedTaskIds);
+                if (googleEventId) {
+                    updateQuery = updateQuery.eq('google_event_id', googleEventId);
+                } else {
+                    updateQuery = updateQuery.eq('id', currentTask.id);
+                }
+
+                const { error: updateError } = await updateQuery;
+                if (updateError) throw updateError;
+
+                if (googleEventId && editingEvent.calendarId) {
+                    try {
+                        await googleService.fetchGoogleJson<any>(
+                            `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(editingEvent.calendarId)}/events/${encodeURIComponent(googleEventId)}?sendUpdates=all`,
+                            {
+                                method: 'PATCH',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    summary: formData.title,
+                                    description: formData.notes,
+                                    start: { dateTime: isoDue },
+                                    end: { dateTime: isoEnd },
+                                })
+                            }
+                        );
+                    } catch (gError) {
+                        console.error("Google Calendar Update Error:", gError);
+                        googleSyncNote = ' (Se actualizó en CRM, pero Google Calendar no aceptó el cambio)';
                     }
                 }
-            } catch (gError) {
-                console.error("Google Calendar Error:", gError);
-                googleSyncNote = ' (Actividad creada, pero Google falló)';
-            }
+            } else {
+                const tasksToInsert = selectedRecipients.map((seller) => ({
+                    title: formData.title,
+                    description: formData.notes,
+                    user_id: seller.id,
+                    assigned_to: seller.id,
+                    assigned_by: session.user.id,
+                    status: 'pending',
+                    priority: 'medium',
+                    due_date: isoDue,
+                    end_date: isoEnd
+                }));
 
-            try {
-                const assignedBy = session.user.user_metadata?.full_name || session.user.email || 'Tu jefatura';
-                const formattedDate = dueDateTime.toLocaleDateString('es-CL', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric'
-                });
-                const formattedTime = dueDateTime.toLocaleTimeString('es-CL', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
+                const { data, error } = await supabase
+                    .from('tasks')
+                    .insert(tasksToInsert)
+                    .select('id');
 
-                const { error: pushError } = await supabase.functions.invoke('send-meeting-push', {
-                    body: {
-                        title: 'Nueva reunión agendada',
-                        body: `${assignedBy} agendó "${formData.title}" para el ${formattedDate} a las ${formattedTime}.`,
-                        url: '/schedule',
-                        icon: import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png',
+                if (error) throw error;
+                insertedTaskIds = (data || []).map((task: any) => task.id);
+
+                try {
+                    const sessionEmail = (session.user.email || '').trim().toLowerCase();
+                    if (!sessionEmail) {
+                        googleSyncNote = ' (Sincronización Google omitida)';
+                    } else {
+                        const attendeeEmails = Array.from(new Set(
+                            selectedRecipients
+                                .map((seller) => (seller.email || '').trim().toLowerCase())
+                                .filter((email) => !!email && email !== sessionEmail)
+                        ));
+
+                        const attendees = attendeeEmails.map((email) => ({ email }));
+                        const gCalEvent: any = {
+                            summary: formData.title,
+                            description: `${formData.notes}\n\nAsignado por: ${session.user.email}`,
+                            location: 'Reunión / Actividad Interna',
+                            start: { dateTime: isoDue },
+                            end: { dateTime: isoEnd },
+                        };
+
+                        if (attendees.length > 0) {
+                            gCalEvent.attendees = attendees;
+                        }
+
+                        const gData = await googleService.fetchGoogleJson<any>('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(gCalEvent)
+                        });
+
+                        if (gData?.id && insertedTaskIds.length > 0) {
+                            await supabase
+                                .from('tasks')
+                                .update({
+                                    google_event_id: gData.id,
+                                    google_calendar_id: sessionEmail,
+                                    google_html_link: gData.htmlLink || null,
+                                })
+                                .in('id', insertedTaskIds);
+                        }
                     }
-                });
+                } catch (gError) {
+                    console.error("Google Calendar Error:", gError);
+                    googleSyncNote = ' (Actividad creada, pero Google falló)';
+                }
 
-                if (pushError) {
-                    console.warn('No se pudo disparar push de reunión:', pushError.message);
+                try {
+                    const assignedBy = session.user.user_metadata?.full_name || session.user.email || 'Tu jefatura';
+                    const formattedDate = dueDateTime.toLocaleDateString('es-CL', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric'
+                    });
+                    const formattedTime = dueDateTime.toLocaleTimeString('es-CL', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+
+                    const { error: pushError } = await supabase.functions.invoke('send-meeting-push', {
+                        body: {
+                            title: 'Nueva reunión agendada',
+                            body: `${assignedBy} agendó "${formData.title}" para el ${formattedDate} a las ${formattedTime}.`,
+                            url: '/schedule',
+                            icon: import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png',
+                        }
+                    });
+
+                    if (pushError) {
+                        console.warn('No se pudo disparar push de reunión:', pushError.message);
+                        pushSyncNote = ' (Actividad creada, pero push falló)';
+                    }
+                } catch (pushError: any) {
+                    console.warn('Error inesperado enviando push de reunión:', pushError?.message || pushError);
                     pushSyncNote = ' (Actividad creada, pero push falló)';
                 }
-            } catch (pushError: any) {
-                console.warn('Error inesperado enviando push de reunión:', pushError?.message || pushError);
-                pushSyncNote = ' (Actividad creada, pero push falló)';
             }
 
             onSaved();
@@ -237,11 +321,13 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
             // Reset crucial fields
             setInviteAll(false);
             setFormData(p => ({ ...p, assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [], time: '09:00', endTime: '10:00', title: '', notes: '' }));
-            alert(`Actividad asignada correctamente.${googleSyncNote}${pushSyncNote}`);
+            alert(isEditMode
+                ? `Reunión actualizada correctamente.${googleSyncNote}`
+                : `Actividad asignada correctamente.${googleSyncNote}${pushSyncNote}`);
 
         } catch (error: any) {
-            console.error("Error creating activity:", error);
-            alert(`Error al crear actividad: ${error.message}`);
+            console.error("Error saving activity:", error);
+            alert(`Error al ${isEditMode ? 'actualizar' : 'crear'} actividad: ${error.message}`);
         } finally {
             setLoading(false);
         }
@@ -254,64 +340,66 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                 onClick={(event) => event.stopPropagation()}
             >
                 <div className="flex justify-between items-center px-8 py-6 border-b border-gray-100 bg-white">
-                    <h3 className="text-2xl font-black text-gray-900">Asignar Reunión</h3>
+                    <h3 className="text-2xl font-black text-gray-900">{isEditMode ? 'Editar Reunión' : 'Asignar Reunión'}</h3>
                     <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X size={24} /></button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-8 py-6 space-y-5">
 
                     {/* Assignee Selector */}
-                    <div className="space-y-2">
-                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Asignar a</label>
-                        <div className="rounded-2xl bg-gray-50 border border-transparent focus-within:bg-white focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all overflow-hidden">
-                            <button
-                                type="button"
-                                onClick={() => setInviteAll((current) => !current)}
-                                className={`w-full flex items-center justify-between px-4 py-4 border-b border-gray-100 transition-colors ${inviteAll ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-white/70'}`}
-                            >
-                                <span className="flex items-center gap-3 font-bold">
-                                    <User size={18} className={inviteAll ? 'text-indigo-600' : 'text-gray-400'} />
-                                    📢 Invitar a TODOS (Equipo Completo)
-                                </span>
-                                <span className={`w-5 h-5 rounded-md border flex items-center justify-center text-[10px] font-black ${inviteAll ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 text-transparent'}`}>
-                                    ✓
-                                </span>
-                            </button>
-                            <div className="max-h-52 overflow-y-auto divide-y divide-gray-100">
-                                {sellers.map((seller) => {
-                                    const isSelected = inviteAll || formData.assigneeIds.includes(seller.id);
-                                    return (
-                                        <button
-                                            key={seller.id}
-                                            type="button"
-                                            onClick={() => toggleAssignee(seller.id)}
-                                            className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors ${isSelected && !inviteAll ? 'bg-white text-indigo-700' : 'text-gray-700 hover:bg-white/70'} ${inviteAll ? 'opacity-60' : ''}`}
-                                        >
-                                            <span>
-                                                <span className="block font-bold">{seller.full_name || seller.email}</span>
-                                                <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                                                    {roleLabel(seller.role)}
-                                                </span>
-                                            </span>
-                                            <span className={`w-5 h-5 rounded-md border flex items-center justify-center text-[10px] font-black ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 text-transparent'}`}>
-                                                ✓
-                                            </span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                        <p className="text-[11px] text-gray-500 font-bold ml-1">{selectionLabel}</p>
-                        {!inviteAll && selectedRecipients.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                                {selectedRecipients.map((seller) => (
-                                    <span key={seller.id} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-black">
-                                        {seller.full_name || seller.email}
+                    {!isEditMode && (
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Asignar a</label>
+                            <div className="rounded-2xl bg-gray-50 border border-transparent focus-within:bg-white focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all overflow-hidden">
+                                <button
+                                    type="button"
+                                    onClick={() => setInviteAll((current) => !current)}
+                                    className={`w-full flex items-center justify-between px-4 py-4 border-b border-gray-100 transition-colors ${inviteAll ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-white/70'}`}
+                                >
+                                    <span className="flex items-center gap-3 font-bold">
+                                        <User size={18} className={inviteAll ? 'text-indigo-600' : 'text-gray-400'} />
+                                        📢 Invitar a TODOS (Equipo Completo)
                                     </span>
-                                ))}
+                                    <span className={`w-5 h-5 rounded-md border flex items-center justify-center text-[10px] font-black ${inviteAll ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 text-transparent'}`}>
+                                        ✓
+                                    </span>
+                                </button>
+                                <div className="max-h-52 overflow-y-auto divide-y divide-gray-100">
+                                    {sellers.map((seller) => {
+                                        const isSelected = inviteAll || formData.assigneeIds.includes(seller.id);
+                                        return (
+                                            <button
+                                                key={seller.id}
+                                                type="button"
+                                                onClick={() => toggleAssignee(seller.id)}
+                                                className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors ${isSelected && !inviteAll ? 'bg-white text-indigo-700' : 'text-gray-700 hover:bg-white/70'} ${inviteAll ? 'opacity-60' : ''}`}
+                                            >
+                                                <span>
+                                                    <span className="block font-bold">{seller.full_name || seller.email}</span>
+                                                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                                                        {roleLabel(seller.role)}
+                                                    </span>
+                                                </span>
+                                                <span className={`w-5 h-5 rounded-md border flex items-center justify-center text-[10px] font-black ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-300 text-transparent'}`}>
+                                                    ✓
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        )}
-                    </div>
+                            <p className="text-[11px] text-gray-500 font-bold ml-1">{selectionLabel}</p>
+                            {!inviteAll && selectedRecipients.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                    {selectedRecipients.map((seller) => (
+                                        <span key={seller.id} className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-black">
+                                            {seller.full_name || seller.email}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div className="space-y-2">
                         <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Motivo / Título</label>
@@ -400,7 +488,7 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
                         disabled={loading}
                         className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center"
                     >
-                        {loading ? 'Guardando...' : <><CheckCircle2 className="mr-2" size={20} /> Asignar</>}
+                        {loading ? 'Guardando...' : <><CheckCircle2 className="mr-2" size={20} /> {isEditMode ? 'Guardar cambios' : 'Asignar'}</>}
                     </button>
                 </div>
             </div>

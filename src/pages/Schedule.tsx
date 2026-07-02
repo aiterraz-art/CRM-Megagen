@@ -54,6 +54,7 @@ const Schedule = () => {
     const [selectedSellerId, setSelectedSellerId] = useState<string>('');
     const [showAddModal, setShowAddModal] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+    const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
     const isViewingOwnCalendar = selectedSellerId === profile?.id;
 
     const canViewSharedGoogleCalendars = hasPermission('VIEW_TEAM_CALENDARS');
@@ -342,6 +343,13 @@ const Schedule = () => {
         [events]
     );
 
+    const canEditSelectedEvent = Boolean(
+        selectedEvent
+        && selectedEvent.linkedEntityType === 'task'
+        && selectedEvent.linkedEntityId
+        && (isViewingOwnCalendar || isSupervisor)
+    );
+
     return (
         <div className="flex h-full gap-8">
             <div className="flex-1 space-y-6 flex flex-col">
@@ -520,11 +528,25 @@ const Schedule = () => {
 
             <ScheduleActivityModal
                 preSelectedAssigneeId={selectedSellerId}
-                isOpen={showAddModal}
-                onClose={() => setShowAddModal(false)}
+                editingEvent={editingEvent ? {
+                    linkedEntityId: editingEvent.linkedEntityId,
+                    googleEventId: editingEvent.googleEventId,
+                    calendarId: editingEvent.calendarId,
+                    summary: editingEvent.summary,
+                    description: editingEvent.description,
+                    start: editingEvent.start,
+                    end: editingEvent.end,
+                } : null}
+                isOpen={showAddModal || Boolean(editingEvent)}
+                onClose={() => {
+                    setShowAddModal(false);
+                    setEditingEvent(null);
+                }}
                 onSaved={() => {
                     void fetchAllEvents();
                     void fetchTasks();
+                    setEditingEvent(null);
+                    setSelectedEvent(null);
                 }}
             />
 
@@ -533,10 +555,15 @@ const Schedule = () => {
                 isOpen={Boolean(selectedEvent)}
                 isOwnCalendar={selectedSellerId === profile?.id}
                 canDeleteVisit={Boolean(selectedEvent?.linkedEntityType === 'visit' && (isSupervisor || selectedSellerId === profile?.id))}
+                canEditEvent={canEditSelectedEvent}
                 onClose={() => setSelectedEvent(null)}
                 onRefresh={() => {
                     void fetchAllEvents();
                     void fetchTasks();
+                }}
+                onEditEvent={(event) => {
+                    setSelectedEvent(null);
+                    setEditingEvent(event);
                 }}
                 onDeleteVisit={deleteVisit}
             />
