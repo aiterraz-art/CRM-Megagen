@@ -530,14 +530,14 @@ const Quotations: React.FC = () => {
         }
     }, [canViewAll, isSellerRole, profile?.id]);
 
-    const fetchProducts = async () => {
+    const fetchProducts = useCallback(async () => {
         // Explicit columns: never fetch potential cost/margin fields to seller UI.
         const { data } = await supabase
             .from('inventory')
             .select('id, sku, name, price, stock_qty, category')
             .order('name');
         if (data) setProducts(data);
-    };
+    }, []);
 
     const fetchAvailableSellers = useCallback(async () => {
         if (!canAssignQuotationSeller(effectiveRole)) {
@@ -575,6 +575,31 @@ const Quotations: React.FC = () => {
         fetchProducts();
         void fetchAvailableSellers();
     }, [fetchAvailableSellers, fetchQuotations, fetchClientsForModal, permissions]);
+
+    useEffect(() => {
+        const refreshProductsOnResume = () => {
+            if (document.visibilityState === 'visible') {
+                void fetchProducts();
+            }
+        };
+
+        const refreshProductsOnFocus = () => {
+            void fetchProducts();
+        };
+
+        document.addEventListener('visibilitychange', refreshProductsOnResume);
+        window.addEventListener('focus', refreshProductsOnFocus);
+
+        return () => {
+            document.removeEventListener('visibilitychange', refreshProductsOnResume);
+            window.removeEventListener('focus', refreshProductsOnFocus);
+        };
+    }, [fetchProducts]);
+
+    useEffect(() => {
+        if (!isItemModalOpen) return;
+        void fetchProducts();
+    }, [fetchProducts, isItemModalOpen]);
 
     // Persist Draft Logic
     useEffect(() => {
