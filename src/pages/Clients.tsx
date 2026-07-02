@@ -2033,14 +2033,14 @@ const ClientsContent = () => {
                                                     <label className="flex items-start gap-3 cursor-pointer">
                                                         <input
                                                             type="checkbox"
-                                                            checked={clientForm.requiresDiscountApproval}
-                                                            onChange={(e) => setClientForm({ ...clientForm, requiresDiscountApproval: e.target.checked })}
+                                                            checked={!clientForm.requiresDiscountApproval}
+                                                            onChange={(e) => setClientForm({ ...clientForm, requiresDiscountApproval: !e.target.checked })}
                                                             className="mt-1 h-5 w-5 rounded border-amber-300 text-amber-600 focus:ring-amber-400"
                                                         />
                                                         <div>
-                                                            <p className="text-sm font-black text-amber-900">Requiere aprobación para descuentos</p>
+                                                            <p className="text-sm font-black text-amber-900">Exento de aprobación de descuentos</p>
                                                             <p className="mt-1 text-xs font-medium text-amber-800">
-                                                                Viene activo por defecto para todos los clientes. Desmárcalo solo si este cliente puede operar sin solicitar aprobación adicional por descuentos.
+                                                                Por defecto todos los clientes requieren aprobación. Marca esta casilla solo cuando quieras que este cliente pueda operar sin pedir aprobación adicional por descuentos.
                                                             </p>
                                                         </div>
                                                     </label>
