@@ -105,9 +105,10 @@ const QuotationOrderProof = () => {
         maxDiscountPct: number;
         limitPct: number;
     }) => {
+        const approvalReasonText = `Esta cotización supera el descuento permitido para vendedor (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%).`;
         const message = status === 'rejected'
-            ? `La última autorización fue rechazada. Escribe el motivo para reenviar la solicitud de descuento (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%).`
-            : `Esta cotización supera el descuento permitido para vendedor (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%). Escribe el motivo para solicitar autorización antes de generar el pedido.`;
+            ? `La última autorización fue rechazada. ${approvalReasonText} Escribe el motivo para reenviar la solicitud de descuento.`
+            : `${approvalReasonText} Escribe el motivo para solicitar autorización antes de generar el pedido.`;
         const reason = window.prompt(message, '');
         const trimmed = String(reason || '').trim();
         return trimmed || null;
@@ -257,7 +258,7 @@ const QuotationOrderProof = () => {
                     .from('quotations')
                     .select(`
                         *,
-                        clients (id, name, rut, address, zone, purchase_contact, status, phone, email, giro, comuna, office, credit_days)
+                        clients (id, name, rut, address, zone, purchase_contact, status, phone, email, giro, comuna, office, credit_days, requires_discount_approval)
                     `)
                     .eq('id', quotationId)
                     .single();
@@ -269,7 +270,7 @@ const QuotationOrderProof = () => {
                 if (sellerId) {
                     const { data: sellerRow } = await supabase
                         .from('profiles')
-                        .select('id, email, full_name')
+                        .select('id, email, full_name, role')
                         .eq('id', sellerId)
                         .maybeSingle();
                     sellerProfile = sellerRow;
@@ -284,6 +285,7 @@ const QuotationOrderProof = () => {
                     client_contact: client?.purchase_contact || '',
                     seller_email: sellerProfile?.email || '',
                     seller_name: sellerProfile?.full_name || sellerProfile?.email?.split('@')[0]?.toUpperCase() || 'Vendedor',
+                    seller_role: sellerProfile?.role || null,
                     items: typeof quoteRow.items === 'string' ? (() => { try { return JSON.parse(quoteRow.items); } catch { return []; } })() : (quoteRow.items || []),
                 });
             } catch (error: any) {

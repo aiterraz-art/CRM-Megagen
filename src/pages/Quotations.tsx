@@ -418,7 +418,7 @@ const Quotations: React.FC = () => {
                     promises.push(
                         supabase
                             .from('profiles')
-                            .select('id, email, full_name')
+                            .select('id, email, full_name, role')
                             .in('id', sellerIds)
                             .then(({ data }) => {
                                 if (data) data.forEach(p => profilesMap[p.id] = p);
@@ -516,6 +516,7 @@ const Quotations: React.FC = () => {
                         client_comuna: client?.comuna || '',
                         seller_email: sellerProfile?.email || 'N/A',
                         seller_name: getSellerDisplayName(sellerProfile),
+                        seller_role: sellerProfile?.role || null,
                         linked_order_id: linkedOrder?.id || null,
                         linked_order_folio: linkedOrder?.folio || null,
                         linked_order_status: linkedOrder?.status || null,
