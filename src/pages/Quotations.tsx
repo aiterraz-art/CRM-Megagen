@@ -737,6 +737,7 @@ const Quotations: React.FC = () => {
                 return prev.credit_days === freshClient.credit_days
                     && prev.name === freshClient.name
                     && prev.office === freshClient.office
+                    && prev.requires_discount_approval === freshClient.requires_discount_approval
                     ? prev
                     : freshClient;
             });

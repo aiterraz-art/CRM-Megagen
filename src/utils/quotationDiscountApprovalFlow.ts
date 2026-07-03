@@ -75,7 +75,12 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
     limitPct = SELLER_MAX_DISCOUNT_PCT,
 }: EnsureDiscountApprovalParams): Promise<EnsureDiscountApprovalResult> => {
     const maxDiscountPct = getQuotationMaxDiscountPct(quotation?.items || []);
-    const effectiveLimitPct = quotationRequiresDiscountApproval(quotation) ? 0 : limitPct;
+    const requiresDiscountApproval = quotationRequiresDiscountApproval(quotation);
+    if (!requiresDiscountApproval) {
+        return { allowed: true, action: 'not_required' };
+    }
+
+    const effectiveLimitPct = 0;
     if (maxDiscountPct <= effectiveLimitPct) {
         return { allowed: true, action: 'not_required' };
     }
