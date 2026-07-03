@@ -556,16 +556,17 @@ const ClientsContent = () => {
         setSubmitting(true);
         const normalizedRut = normalizeRut(clientForm.rut);
         const sanitizedCreditDays = Math.max(0, Math.trunc(Number(clientForm.creditDays || 0)));
+        const isCreditOnlyEdit = Boolean(isEditing && editScope === 'credit');
 
         // Always try to read from the input DOM value to capture latest typing.
         let finalAddress = (inputRef.current?.value || clientForm.address || '').trim();
 
-        if (!clientForm.name || !normalizedRut || !clientForm.email || !clientForm.phone || !finalAddress || !clientForm.giro) {
+        if (!isCreditOnlyEdit && (!clientForm.name || !normalizedRut || !clientForm.email || !clientForm.phone || !finalAddress || !clientForm.giro)) {
             alert("⚠️ Todos los campos son obligatorios (Nombre, RUT, Email, Teléfono, Dirección, Giro), excepto las Notas.");
             setSubmitting(false);
             return;
         }
-        if (canAssignClientOwner && !clientForm.assignedSellerId) {
+        if (!isCreditOnlyEdit && canAssignClientOwner && !clientForm.assignedSellerId) {
             alert('Selecciona el vendedor asignado para este cliente.');
             setSubmitting(false);
             return;
@@ -611,10 +612,17 @@ const ClientsContent = () => {
         // -----------------------------------------------
 
         try {
-            if (isEditing) {
-                const updatePayload = editScope === 'credit'
-                    ? { ...(canManageClientCredit ? { credit_days: sanitizedCreditDays } : {}) }
-                    : {
+            if (isCreditOnlyEdit && isEditing) {
+                const { error } = await supabase
+                    .from('clients')
+                    .update({ ...(canManageClientCredit ? { credit_days: sanitizedCreditDays } : {}) })
+                    .eq('id', isEditing);
+
+                if (error) throw error;
+                alert('¡Días de crédito actualizados exitosamente!');
+            } else if (isEditing) {
+                const updatePayload =
+                    {
                         name: clientForm.name,
                         rut: normalizedRut,
                         phone: clientForm.phone,
@@ -637,8 +645,7 @@ const ClientsContent = () => {
                     .eq('id', isEditing);
 
                 if (error) throw error;
-                alert(editScope === 'credit' ? '¡Días de crédito actualizados exitosamente!' : '¡Cliente actualizado exitosamente!');
-
+                alert('¡Cliente actualizado exitosamente!');
             } else {
                 // VERIFICACIÓN DE SEGURIDAD (RUT ÚNICO GLOBAL)
                 const { data: rutCheck, error: rpcError } = await supabase.rpc('check_rut_exists', { queried_rut: normalizedRut });
