@@ -203,18 +203,29 @@ const Settings: React.FC = () => {
     const handleSave = async (id: string) => {
         try {
             const statusToPersist = tempStatus === 'disabled' ? 'disabled' : tempStatus;
-            let { error } = await supabase.from('profiles').update({
+            const noRowsUpdatedMessage = 'No se pudo actualizar el usuario. Revisa permisos de edición o políticas de seguridad.';
+            let { data: updatedRows, error } = await supabase.from('profiles').update({
                 role: tempRole,
                 status: statusToPersist,
                 supervisor_id: tempSupervisor || null
-            }).eq('id', id);
+            }).eq('id', id).select('id');
+
+            if (!error && (!updatedRows || updatedRows.length === 0)) {
+                alert(noRowsUpdatedMessage);
+                return;
+            }
 
             if (error) {
                 const retry = await supabase.from('profiles').update({
                     role: tempRole,
                     status: statusToPersist
-                }).eq('id', id);
+                }).eq('id', id).select('id');
+                updatedRows = retry.data as any;
                 error = retry.error;
+                if (!error && (!updatedRows || updatedRows.length === 0)) {
+                    alert(noRowsUpdatedMessage);
+                    return;
+                }
             }
 
             // Backward compatibility for instances that still enforce "suspended" instead of "disabled".
@@ -222,8 +233,13 @@ const Settings: React.FC = () => {
                 const legacyRetry = await supabase.from('profiles').update({
                     role: tempRole,
                     status: 'suspended'
-                } as any).eq('id', id);
+                } as any).eq('id', id).select('id');
+                updatedRows = legacyRetry.data as any;
                 error = legacyRetry.error;
+                if (!error && (!updatedRows || updatedRows.length === 0)) {
+                    alert(noRowsUpdatedMessage);
+                    return;
+                }
             }
 
             if (error) {
