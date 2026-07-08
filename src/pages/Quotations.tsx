@@ -93,6 +93,52 @@ const getSellerDisplayName = (sellerProfile: SellerOption | null | undefined) =>
     return 'Vendedor';
 };
 
+const normalizeSuggestionValue = (value: unknown) => String(value || '').trim().toLowerCase();
+
+const getSuggestionMatchPriority = (
+    product: { sku?: string | null; name?: string | null },
+    searchValue: string,
+    field: 'code' | 'detail'
+) => {
+    const query = normalizeSuggestionValue(searchValue);
+    const primaryValue = normalizeSuggestionValue(field === 'code' ? product?.sku : product?.name);
+
+    if (!query || !primaryValue) return 99;
+    if (primaryValue === query) return 0;
+    if (primaryValue.startsWith(query)) return 1;
+    if (primaryValue.includes(query)) return 2;
+    return 99;
+};
+
+const getSuggestionMatchLabel = (
+    product: { sku?: string | null; name?: string | null },
+    searchValue: string,
+    field: 'code' | 'detail'
+) => {
+    const priority = getSuggestionMatchPriority(product, searchValue, field);
+    if (priority === 0) return 'Exacto';
+    if (priority === 1) return 'Prefijo';
+    return 'Parcial';
+};
+
+const sortSuggestionResults = (
+    products: any[],
+    searchValue: string,
+    field: 'code' | 'detail'
+) => {
+    return [...products].sort((left, right) => {
+        const leftPriority = getSuggestionMatchPriority(left, searchValue, field);
+        const rightPriority = getSuggestionMatchPriority(right, searchValue, field);
+        if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+
+        const leftPrimary = normalizeSuggestionValue(field === 'code' ? left?.sku : left?.name);
+        const rightPrimary = normalizeSuggestionValue(field === 'code' ? right?.sku : right?.name);
+        if (leftPrimary.length !== rightPrimary.length) return leftPrimary.length - rightPrimary.length;
+
+        return leftPrimary.localeCompare(rightPrimary, 'es');
+    });
+};
+
 type PaymentProofModalDraft = {
     quotationId: string;
     actorId: string;
@@ -593,7 +639,7 @@ const Quotations: React.FC = () => {
                     .from('inventory')
                     .select('id, sku, name, price, stock_qty, category')
                     .order(field === 'code' ? 'sku' : 'name')
-                    .limit(8);
+                    .limit(20);
 
                 const { data, error } = await (field === 'code'
                     ? query.ilike('sku', `%${trimmedValue}%`)
@@ -602,7 +648,7 @@ const Quotations: React.FC = () => {
                 if (requestId !== suggestionRequestIdRef.current) return;
                 if (error) throw error;
 
-                const liveSuggestions = data || [];
+                const liveSuggestions = sortSuggestionResults(data || [], trimmedValue, field).slice(0, 8);
                 upsertProductsCache(liveSuggestions);
                 setSuggestions(liveSuggestions);
                 setActiveSuggestion({ index: itemIndex, field });
@@ -2598,8 +2644,13 @@ const Quotations: React.FC = () => {
                                                                 }}
                                                             >
                                                                 <span className="text-xs font-bold text-gray-900">{p.sku}</span>
-                                                                <span className="text-[10px] text-gray-500 truncate">{p.name}</span>
-                                                                <span className="text-[9px] font-black text-indigo-500">Stock: {p.stock_qty}</span>
+                                                                <div className="mt-1 flex items-center justify-between gap-2">
+                                                                    <span className="text-[10px] text-gray-500 truncate">{p.name}</span>
+                                                                    <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-700">
+                                                                        {getSuggestionMatchLabel(p, item.code, 'code')}
+                                                                    </span>
+                                                                </div>
+                                                                <span className="mt-1 text-[9px] font-black text-indigo-500">Stock: {p.stock_qty}</span>
                                                             </button>
                                                         ))}
                                                     </div>
@@ -2654,7 +2705,12 @@ const Quotations: React.FC = () => {
                                                             >
                                                                 <div className="flex justify-between items-center">
                                                                     <span className="text-xs font-bold text-gray-900">{p.name}</span>
-                                                                    <span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded font-mono">{p.sku}</span>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded font-mono">{p.sku}</span>
+                                                                        <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-700">
+                                                                            {getSuggestionMatchLabel(p, item.detail, 'detail')}
+                                                                        </span>
+                                                                    </div>
                                                                 </div>
                                                                 <div className="flex justify-between mt-1">
                                                                     <span className="text-[10px] text-gray-400">Precio: {formatMoney(p.price || 0)}</span>
@@ -2742,6 +2798,16 @@ const Quotations: React.FC = () => {
                                                 </p>
                                                 <p className="font-black text-lg text-gray-700">{formatMoney((item.qty || 0) * (item.netPrice || item.price || 0))}</p>
                                             </div>
+                                            {resolvedProduct && (
+                                                <div className="col-span-1 md:col-span-12 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Producto seleccionado</p>
+                                                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                                                        <span className="font-black text-indigo-900">{resolvedProduct.sku || 'SIN-SKU'}</span>
+                                                        <span className="font-medium text-indigo-800">{resolvedProduct.name || 'Sin nombre'}</span>
+                                                        <span className="font-black text-indigo-600">Stock actual: {resolvedProduct.stock_qty ?? 0}</span>
+                                                    </div>
+                                                </div>
+                                            )}
                                                     </>
                                                 );
                                             })()}
