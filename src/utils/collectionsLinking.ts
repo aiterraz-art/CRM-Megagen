@@ -258,10 +258,11 @@ export const fetchCollectionsCrmCommercialSnapshotByRut = async (rut: string | n
     if (quotationIds.length > 0) {
         const { data: linkedOrders, error: linkedOrdersError } = await supabase
             .from('orders')
-            .select('quotation_id')
+            .select('quotation_id, status')
             .in('quotation_id', quotationIds);
         if (linkedOrdersError) throw linkedOrdersError;
         (linkedOrders || []).forEach((row: any) => {
+            if (String(row.status || '').toLowerCase() === 'cancelled') return;
             if (row.quotation_id) convertedQuotationIds.add(row.quotation_id);
         });
     }

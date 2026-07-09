@@ -455,7 +455,6 @@ const Quotations: React.FC = () => {
                 let profilesMap: Record<string, any> = {};
                 let locationsMap: Record<string, any> = {};
                 let ordersByQuotationId: Record<string, any> = {};
-                const convertedQuotationIds = new Set<string>();
 
                 // Parallel fetches
                 const promises = [];
@@ -502,35 +501,13 @@ const Quotations: React.FC = () => {
                     );
                     promises.push(
                         supabase
-                            .from('quotation_order_conversion_logs')
-                            .select('quotation_id, order_id, stage, status, metadata')
-                            .in('quotation_id', quotationIds)
-                            .then(({ data }) => {
-                                if (data) {
-                                    data.forEach((log: any) => {
-                                        const wasConverted = Boolean(
-                                            log?.quotation_id && (
-                                                log?.order_id
-                                                || (log?.stage === 'completed' && log?.status === 'success')
-                                                || (log?.stage === 'order_creation' && log?.status === 'success')
-                                                || Boolean(log?.metadata?.alreadyExists)
-                                            )
-                                        );
-                                        if (wasConverted) {
-                                            convertedQuotationIds.add(log.quotation_id);
-                                        }
-                                    });
-                                }
-                            })
-                    );
-                    promises.push(
-                        supabase
                             .from('orders')
                             .select('id, folio, quotation_id, status')
                             .in('quotation_id', quotationIds)
                             .then(({ data }) => {
                                 if (data) {
                                     data.forEach((order) => {
+                                        if (String(order.status || '').toLowerCase() === 'cancelled') return;
                                         if (!order.quotation_id || ordersByQuotationId[order.quotation_id]) return;
                                         ordersByQuotationId[order.quotation_id] = order;
                                     });
@@ -545,7 +522,7 @@ const Quotations: React.FC = () => {
                     const sellerProfile = profilesMap[q.seller_id];
                     const loc = locationsMap[q.id];
                     const linkedOrder = ordersByQuotationId[q.id] || null;
-                    const isConverted = Boolean(linkedOrder?.id || convertedQuotationIds.has(q.id) || q.status === 'approved');
+                    const isConverted = Boolean(linkedOrder?.id || q.status === 'approved');
                     // Handle both object and array join formats
                     const client = Array.isArray(q.clients) ? q.clients[0] : q.clients;
 

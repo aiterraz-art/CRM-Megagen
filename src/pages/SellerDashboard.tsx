@@ -330,12 +330,15 @@ const SellerDashboard = () => {
             if (quotationIds.length > 0) {
                 const { data: orderRows, error: orderRowsError } = await supabase
                     .from('orders')
-                    .select('quotation_id')
+                    .select('quotation_id, status')
                     .in('quotation_id', quotationIds);
 
                 if (orderRowsError) throw orderRowsError;
                 convertedQuotationIds = new Set(
-                    (orderRows || []).map((order: any) => order.quotation_id).filter(Boolean)
+                    (orderRows || [])
+                        .filter((order: any) => String(order.status || '').toLowerCase() !== 'cancelled')
+                        .map((order: any) => order.quotation_id)
+                        .filter(Boolean)
                 );
             }
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Eye, FileText, History, RefreshCw, Search, ShoppingCart, Send } from 'lucide-react';
+import { Eye, FileText, History, RefreshCw, RotateCcw, Search, ShoppingCart, Send } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
@@ -60,8 +60,21 @@ const canResendOrderEmail = (
     order: EnrichedOrder
 ) => {
     if (!profileId) return false;
+    if (String(order.status || '').toLowerCase() === 'cancelled') return false;
     return effectiveRole === 'admin'
         || effectiveRole === 'seller'
+        || isBillingBackofficeRole(effectiveRole)
+        || order.user_id === profileId;
+};
+
+const canCancelOrder = (
+    effectiveRole: string | null | undefined,
+    profileId: string | null | undefined,
+    order: EnrichedOrder
+) => {
+    if (!profileId) return false;
+    return effectiveRole === 'admin'
+        || effectiveRole === 'jefe'
         || isBillingBackofficeRole(effectiveRole)
         || order.user_id === profileId;
 };
@@ -157,6 +170,7 @@ const Orders = () => {
     const [orderPdfFile, setOrderPdfFile] = useState<File | null>(null);
     const [orderPdfBlobUrl, setOrderPdfBlobUrl] = useState<string | null>(null);
     const [orderPdfError, setOrderPdfError] = useState<string | null>(null);
+    const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewAll = useMemo(
@@ -699,6 +713,69 @@ const Orders = () => {
         }
     }, [buildOrderPdfPayload, effectiveRole, fetchOrders, profile?.id]);
 
+    const handleCancelOrder = useCallback(async (order: EnrichedOrder) => {
+        if (!profile?.id) {
+            alert('No se pudo identificar al usuario actual.');
+            return;
+        }
+
+        const canCancel = canCancelOrder(effectiveRole, profile.id, order);
+        if (!canCancel) {
+            alert('No tienes permisos para cancelar este pedido.');
+            return;
+        }
+
+        if (String(order.status || '').toLowerCase() === 'cancelled') {
+            alert('Este pedido ya está cancelado.');
+            return;
+        }
+
+        if (['assigned', 'out_for_delivery', 'delivered'].includes(String(order.delivery_status || '').toLowerCase())) {
+            alert('Este pedido ya está en despacho o entregado y no puede reabrirse desde aquí.');
+            return;
+        }
+
+        const reason = window.prompt(
+            `Motivo de cancelación del pedido #${order.folio ?? order.id.slice(0, 8)}:`,
+            'Comprobante adjunto por error'
+        );
+
+        if (reason === null) return;
+
+        if (!window.confirm(`¿Cancelar el pedido #${order.folio ?? '-'} y reabrir la cotización #${order.quotation_folio ?? '-'}?`)) {
+            return;
+        }
+
+        setCancellingOrderId(order.id);
+        try {
+            const { data, error } = await supabase.rpc('cancel_order_and_reopen_quotation', {
+                p_order_id: order.id,
+                p_reason: String(reason || '').trim() || null,
+            });
+
+            if (error) throw error;
+
+            await fetchOrders();
+
+            const response = (data || {}) as {
+                quotation_folio?: number | null;
+                quotation_status?: string | null;
+                quotation_reopened?: boolean;
+            };
+
+            const reopenedLabel = response.quotation_reopened
+                ? ` La cotización quedó nuevamente disponible con estado ${response.quotation_status || 'draft'}.`
+                : '';
+
+            alert(`Pedido #${order.folio ?? '-'} cancelado correctamente.${reopenedLabel}`);
+        } catch (error: any) {
+            console.error('Error cancelling order:', error);
+            alert(error?.message || 'No se pudo cancelar el pedido.');
+        } finally {
+            setCancellingOrderId(null);
+        }
+    }, [effectiveRole, fetchOrders, profile?.id]);
+
     const filteredOrders = useMemo(() => {
         const term = search.trim().toLowerCase();
         return orders.filter((order) => {
@@ -887,6 +964,9 @@ const Orders = () => {
                                         {(() => {
                                             const canResend = canResendOrderEmail(effectiveRole, profile?.id, order);
                                             const canRetryEmail = canResend && ['failed', 'pending'].includes(String(order.payment_email_status || '').toLowerCase());
+                                            const canCancel = canCancelOrder(effectiveRole, profile?.id, order);
+                                            const isCancelled = String(order.status || '').toLowerCase() === 'cancelled';
+                                            const isDispatchLocked = ['assigned', 'out_for_delivery', 'delivered'].includes(String(order.delivery_status || '').toLowerCase());
                                             return (
                                                 <>
                                         <td className="px-4 py-3">
@@ -994,6 +1074,30 @@ const Orders = () => {
                                                             <>
                                                                 <Send size={14} className="mr-2" />
                                                                 Reenviar
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                ) : null}
+
+                                                {canCancel ? (
+                                                    <button
+                                                        onClick={() => handleCancelOrder(order)}
+                                                        disabled={isCancelled || isDispatchLocked || cancellingOrderId === order.id}
+                                                        title={
+                                                            isCancelled
+                                                                ? 'Este pedido ya fue cancelado.'
+                                                                : isDispatchLocked
+                                                                    ? 'No se puede cancelar un pedido ya asignado a despacho o entregado.'
+                                                                    : 'Cancelar pedido y reabrir cotización'
+                                                        }
+                                                        className="inline-flex items-center px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-[11px] font-black uppercase tracking-wider hover:bg-amber-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {cancellingOrderId === order.id ? (
+                                                            <div className="w-4 h-4 border-2 border-amber-700 border-t-transparent animate-spin rounded-full" />
+                                                        ) : (
+                                                            <>
+                                                                <RotateCcw size={14} className="mr-2" />
+                                                                Cancelar
                                                             </>
                                                         )}
                                                     </button>

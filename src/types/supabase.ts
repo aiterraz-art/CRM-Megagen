@@ -1059,6 +1059,9 @@ export interface Database {
             }
             orders: {
                 Row: {
+                    cancelled_at: string | null
+                    cancelled_by: string | null
+                    cancellation_reason: string | null
                     client_id: string | null
                     created_at: string | null
                     delivery_photo_url: string | null
@@ -1085,6 +1088,9 @@ export interface Database {
                     visit_id: string | null
                 }
                 Insert: {
+                    cancelled_at?: string | null
+                    cancelled_by?: string | null
+                    cancellation_reason?: string | null
                     client_id?: string | null
                     created_at?: string | null
                     delivery_photo_url?: string | null
@@ -1111,6 +1117,9 @@ export interface Database {
                     visit_id?: string | null
                 }
                 Update: {
+                    cancelled_at?: string | null
+                    cancelled_by?: string | null
+                    cancellation_reason?: string | null
                     client_id?: string | null
                     created_at?: string | null
                     delivery_photo_url?: string | null
@@ -1523,6 +1532,13 @@ export interface Database {
             create_purchase_order: {
                 Args: {
                     p_payload: Json
+                }
+                Returns: Json
+            }
+            cancel_order_and_reopen_quotation: {
+                Args: {
+                    p_order_id: string
+                    p_reason?: string | null
                 }
                 Returns: Json
             }
