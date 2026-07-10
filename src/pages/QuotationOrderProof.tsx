@@ -244,6 +244,21 @@ const QuotationOrderProof = () => {
         if (error) throw error;
     }, []);
 
+    const syncQuotationAsApproved = useCallback(async (targetQuotationId: string | null | undefined) => {
+        if (!targetQuotationId) return;
+
+        const { error } = await supabase
+            .from('quotations')
+            .update({ status: 'approved' })
+            .eq('id', targetQuotationId);
+
+        if (error) {
+            console.warn('No se pudo marcar la cotizacion como aprobada tras generar pedido:', error.message);
+        }
+
+        setQuotation((current: any) => current ? { ...current, status: 'approved' } : current);
+    }, []);
+
     useEffect(() => {
         const fetchQuotation = async () => {
             if (!quotationId) {
@@ -580,11 +595,14 @@ const QuotationOrderProof = () => {
             });
 
             if (response?.already_exists) {
+                await syncQuotationAsApproved(quotation.id);
                 clearDraft();
                 alert('Esta cotizacion ya tenia un pedido asociado. Revisa el modulo de Pedidos para su estado de correo.');
                 navigate('/orders', { replace: true });
                 return;
             }
+
+            await syncQuotationAsApproved(quotation.id);
 
             try {
                 setOrderConversionStage('Enviando correo a facturacion...');
@@ -662,6 +680,7 @@ const QuotationOrderProof = () => {
         paymentProofFile,
         profile?.id,
         quotation,
+        syncQuotationAsApproved,
         syncOrderNotesFromQuotation,
         uploadPaymentProof,
         validatePaymentProofFile,

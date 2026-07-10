@@ -359,6 +359,28 @@ const Quotations: React.FC = () => {
         ));
     }, []);
 
+    const syncQuotationAsApproved = useCallback(async (
+        quotationId: string,
+        linkedOrder?: {
+            id?: string | null;
+            folio?: number | string | null;
+            status?: string | null;
+        }
+    ) => {
+        if (!quotationId) return;
+
+        const { error } = await supabase
+            .from('quotations')
+            .update({ status: 'approved' })
+            .eq('id', quotationId);
+
+        if (error) {
+            console.warn('No se pudo marcar la cotización como aprobada tras generar pedido:', error.message);
+        }
+
+        markQuotationAsConvertedLocally(quotationId, linkedOrder);
+    }, [markQuotationAsConvertedLocally]);
+
     const normalizePhoneForWhatsapp = useCallback((raw: string | null | undefined): string | null => {
         const digits = String(raw || '').replace(/\D/g, '');
         if (!digits) return null;
@@ -1656,7 +1678,7 @@ const Quotations: React.FC = () => {
                 },
             });
             if (response?.already_exists) {
-                markQuotationAsConvertedLocally(quotation.id, {
+                await syncQuotationAsApproved(quotation.id, {
                     id: response?.order_id || null,
                     folio: response?.order_folio || null,
                     status: 'pending',
@@ -1680,7 +1702,7 @@ const Quotations: React.FC = () => {
             }
 
             createdOrderId = response?.order_id || null;
-            markQuotationAsConvertedLocally(quotation.id, {
+            await syncQuotationAsApproved(quotation.id, {
                 id: createdOrderId,
                 folio: response?.order_folio || null,
                 status: 'pending',
@@ -1815,10 +1837,10 @@ const Quotations: React.FC = () => {
         closePaymentProofModal,
         fetchQuotations,
         getQuotationCreditDays,
-        markQuotationAsConvertedLocally,
         requestDiscountApprovalReason,
         effectiveRole,
         profile?.id,
+        syncQuotationAsApproved,
         syncOrderNotesFromQuotation,
         uploadPaymentProof,
         validatePaymentProofFile
