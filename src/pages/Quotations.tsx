@@ -239,6 +239,7 @@ const Quotations: React.FC = () => {
     const [products, setProducts] = useState<any[]>([]);
     const [suggestions, setSuggestions] = useState<any[]>([]);
     const [activeSuggestion, setActiveSuggestion] = useState<{ index: number, field: 'code' | 'detail' } | null>(null);
+    const [suggestionContext, setSuggestionContext] = useState<{ index: number; field: 'code' | 'detail'; query: string } | null>(null);
     const [suggestionsLoading, setSuggestionsLoading] = useState(false);
     const suggestionSearchTimeoutRef = useRef<number | null>(null);
     const suggestionRequestIdRef = useRef(0);
@@ -616,11 +617,14 @@ const Quotations: React.FC = () => {
         if (trimmedValue.length < minimumLength) {
             suggestionRequestIdRef.current += 1;
             setSuggestions([]);
+            setSuggestionContext(null);
             setSuggestionsLoading(false);
             setActiveSuggestion(null);
             return;
         }
 
+        setSuggestions([]);
+        setSuggestionContext({ index: itemIndex, field, query: trimmedValue });
         setActiveSuggestion({ index: itemIndex, field });
         setSuggestionsLoading(true);
         const requestId = ++suggestionRequestIdRef.current;
@@ -643,11 +647,13 @@ const Quotations: React.FC = () => {
                 const liveSuggestions = getFilteredSuggestionResults(data || [], trimmedValue, field).slice(0, 8);
                 upsertProductsCache(liveSuggestions);
                 setSuggestions(liveSuggestions);
+                setSuggestionContext({ index: itemIndex, field, query: trimmedValue });
                 setActiveSuggestion({ index: itemIndex, field });
             } catch (error) {
                 if (requestId !== suggestionRequestIdRef.current) return;
                 console.error('Error fetching live quotation suggestions:', error);
                 setSuggestions([]);
+                setSuggestionContext(null);
             } finally {
                 if (requestId === suggestionRequestIdRef.current) {
                     setSuggestionsLoading(false);
@@ -2584,8 +2590,23 @@ const Quotations: React.FC = () => {
                                         <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100 relative group">
                                             {(() => {
                                                 const resolvedProduct = resolveInventoryProduct(item);
+                                                const selectedProduct = item?.productId ? resolvedProduct : null;
                                                 const allowManualUnitPrice = !isSellerRole || isDispatchServiceProduct(resolvedProduct);
                                                 const allowManualNetPrice = !isSellerRole || Boolean(resolvedProduct);
+                                                const codeSuggestionVisible =
+                                                    activeSuggestion?.index === index &&
+                                                    activeSuggestion.field === 'code' &&
+                                                    suggestionContext?.index === index &&
+                                                    suggestionContext.field === 'code' &&
+                                                    normalizeSuggestionValue(item.code) === normalizeSuggestionValue(suggestionContext.query) &&
+                                                    (suggestionsLoading || suggestions.length > 0);
+                                                const detailSuggestionVisible =
+                                                    activeSuggestion?.index === index &&
+                                                    activeSuggestion.field === 'detail' &&
+                                                    suggestionContext?.index === index &&
+                                                    suggestionContext.field === 'detail' &&
+                                                    normalizeSuggestionValue(item.detail) === normalizeSuggestionValue(suggestionContext.query) &&
+                                                    (suggestionsLoading || suggestions.length > 0);
                                                 return (
                                                     <>
                                             <div className="col-span-1 md:col-span-3 relative">
@@ -2603,9 +2624,12 @@ const Quotations: React.FC = () => {
                                                         setFormItems(newItems);
                                                         void fetchLiveProductSuggestions(val, 'code', index);
                                                     }}
-                                                    onBlur={() => setTimeout(() => setActiveSuggestion(null), 200)}
+                                                    onBlur={() => setTimeout(() => {
+                                                        setActiveSuggestion(null);
+                                                        setSuggestionContext(null);
+                                                    }, 200)}
                                                 />
-                                                {activeSuggestion?.index === index && activeSuggestion.field === 'code' && (suggestionsLoading || suggestions.length > 0) && (
+                                                {codeSuggestionVisible && (
                                                     <div
                                                         className="absolute z-50 w-64 max-h-72 overflow-y-auto overscroll-contain bg-white border border-gray-100 rounded-xl shadow-2xl mt-1"
                                                         onMouseDown={(e) => e.preventDefault()}
@@ -2632,6 +2656,7 @@ const Quotations: React.FC = () => {
                                                                     };
                                                                     setFormItems(newItems);
                                                                     setSuggestions([]);
+                                                                    setSuggestionContext(null);
                                                                     setActiveSuggestion(null);
                                                                 }}
                                                             >
@@ -2663,9 +2688,12 @@ const Quotations: React.FC = () => {
                                                         setFormItems(newItems);
                                                         void fetchLiveProductSuggestions(val, 'detail', index);
                                                     }}
-                                                    onBlur={() => setTimeout(() => setActiveSuggestion(null), 200)}
+                                                    onBlur={() => setTimeout(() => {
+                                                        setActiveSuggestion(null);
+                                                        setSuggestionContext(null);
+                                                    }, 200)}
                                                 />
-                                                {activeSuggestion?.index === index && activeSuggestion.field === 'detail' && (suggestionsLoading || suggestions.length > 0) && (
+                                                {detailSuggestionVisible && (
                                                     <div
                                                         className="absolute z-50 w-full max-h-72 overflow-y-auto overscroll-contain bg-white border border-gray-100 rounded-xl shadow-2xl mt-1"
                                                         onMouseDown={(e) => e.preventDefault()}
@@ -2692,6 +2720,7 @@ const Quotations: React.FC = () => {
                                                                     };
                                                                     setFormItems(newItems);
                                                                     setSuggestions([]);
+                                                                    setSuggestionContext(null);
                                                                     setActiveSuggestion(null);
                                                                 }}
                                                             >
@@ -2790,13 +2819,13 @@ const Quotations: React.FC = () => {
                                                 </p>
                                                 <p className="font-black text-lg text-gray-700">{formatMoney((item.qty || 0) * (item.netPrice || item.price || 0))}</p>
                                             </div>
-                                            {resolvedProduct && (
+                                            {selectedProduct && (
                                                 <div className="col-span-1 md:col-span-12 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2">
                                                     <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Producto seleccionado</p>
                                                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                                                        <span className="font-black text-indigo-900">{resolvedProduct.sku || 'SIN-SKU'}</span>
-                                                        <span className="font-medium text-indigo-800">{resolvedProduct.name || 'Sin nombre'}</span>
-                                                        <span className="font-black text-indigo-600">Stock actual: {resolvedProduct.stock_qty ?? 0}</span>
+                                                        <span className="font-black text-indigo-900">{selectedProduct.sku || 'SIN-SKU'}</span>
+                                                        <span className="font-medium text-indigo-800">{selectedProduct.name || 'Sin nombre'}</span>
+                                                        <span className="font-black text-indigo-600">Stock actual: {selectedProduct.stock_qty ?? 0}</span>
                                                     </div>
                                                 </div>
                                             )}
