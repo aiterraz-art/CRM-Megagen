@@ -257,6 +257,9 @@ const Quotations: React.FC = () => {
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
     );
+    const canEditQuotationRecord = useCallback((quotation: any) => {
+        return isSupervisor || canCloseQuotationSale(effectiveRole, profile?.id, quotation?.seller_id);
+    }, [effectiveRole, isSupervisor, profile?.id]);
 
     const requestDiscountApprovalReason = useCallback(async ({
         status,
@@ -845,6 +848,10 @@ const Quotations: React.FC = () => {
     };
 
     const handleEditQuotation = (q: any) => {
+        if (!canEditQuotationRecord(q)) {
+            alert('Solo el vendedor dueño, jefatura, admin o facturación pueden editar esta cotización.');
+            return;
+        }
         if (q?.has_order || q?.linked_order_id || q?.status === 'approved') {
             const orderRef = q?.linked_order_folio ? `#${q.linked_order_folio}` : 'existente';
             alert(`Esta cotización ya fue convertida a pedido ${orderRef} y ya no se puede editar.`);
@@ -2205,7 +2212,7 @@ const Quotations: React.FC = () => {
                                                     <History size={14} />
                                                 </button>
                                             )}
-                                            {(isSupervisor || q.seller_id === profile?.id) && (
+                                            {canEditQuotationRecord(q) && (
                                                 <>
                                                 <button
                                                     onClick={() => handleEditQuotation(q)}
