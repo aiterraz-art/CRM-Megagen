@@ -139,6 +139,21 @@ const sortSuggestionResults = (
     });
 };
 
+const getFilteredSuggestionResults = (
+    products: any[],
+    searchValue: string,
+    field: 'code' | 'detail'
+) => {
+    const sorted = sortSuggestionResults(products, searchValue, field);
+    const exactMatches = sorted.filter((product) => getSuggestionMatchPriority(product, searchValue, field) === 0);
+
+    if (exactMatches.length > 0) {
+        return exactMatches;
+    }
+
+    return sorted;
+};
+
 type PaymentProofModalDraft = {
     quotationId: string;
     actorId: string;
@@ -625,7 +640,7 @@ const Quotations: React.FC = () => {
                 if (requestId !== suggestionRequestIdRef.current) return;
                 if (error) throw error;
 
-                const liveSuggestions = sortSuggestionResults(data || [], trimmedValue, field).slice(0, 8);
+                const liveSuggestions = getFilteredSuggestionResults(data || [], trimmedValue, field).slice(0, 8);
                 upsertProductsCache(liveSuggestions);
                 setSuggestions(liveSuggestions);
                 setActiveSuggestion({ index: itemIndex, field });
