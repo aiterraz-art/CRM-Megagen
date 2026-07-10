@@ -272,7 +272,7 @@ const Quotations: React.FC = () => {
     }) => {
         const approvalReasonText = limitPct <= 0
             ? `Este cliente requiere aprobación para cualquier descuento (${maxDiscountPct.toFixed(2)}% aplicado).`
-            : `Esta cotización supera el descuento permitido para vendedor (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%).`;
+            : `Esta cotización supera el descuento permitido (${maxDiscountPct.toFixed(2)}% > ${limitPct.toFixed(2)}%).`;
         const message = status === 'rejected'
             ? `La última autorización fue rechazada. ${approvalReasonText} Escribe el motivo para reenviar la solicitud de descuento.`
             : `${approvalReasonText} Escribe el motivo para solicitar autorización antes de generar el pedido.`;

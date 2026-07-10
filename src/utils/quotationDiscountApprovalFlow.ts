@@ -24,17 +24,6 @@ const quotationRequiresDiscountApproval = (quotation: any) => Boolean(
     ?? quotation?.requires_discount_approval
 );
 
-const quotationSellerNeedsDiscountApproval = (quotation: any) => {
-    const sellerRole = String(
-        quotation?.seller_role
-        ?? quotation?.seller?.role
-        ?? ''
-    ).trim().toLowerCase();
-
-    if (!sellerRole) return true;
-    return sellerRole === 'seller';
-};
-
 export const fetchLatestDiscountApproval = async (quotationId: string) => {
     const { data, error } = await supabase
         .from('approval_requests')
@@ -87,7 +76,7 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
 }: EnsureDiscountApprovalParams): Promise<EnsureDiscountApprovalResult> => {
     const maxDiscountPct = getQuotationMaxDiscountPct(quotation?.items || []);
     const requiresDiscountApproval = quotationRequiresDiscountApproval(quotation);
-    if (!requiresDiscountApproval || !quotationSellerNeedsDiscountApproval(quotation)) {
+    if (!requiresDiscountApproval) {
         return { allowed: true, action: 'not_required' };
     }
 
