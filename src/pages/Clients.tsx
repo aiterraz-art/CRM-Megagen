@@ -229,6 +229,7 @@ const ClientsContent = () => {
     const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canAssignClientOwner = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'tesorero';
     const canManageClientCredit = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'facturador';
+    const canEditAnyClient = hasPermission('MANAGE_CLIENTS') || effectiveRole === 'jefe';
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
@@ -1558,6 +1559,7 @@ const ClientsContent = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredClients.map((client) => {
                         const isOwner = client.created_by === profile?.id;
+                        const canEditClient = canEditAnyClient || isOwner;
                         const followupSeverity = getClientFollowupSeverity(client);
                         const showNeglectBadge = followupSeverity !== 'normal';
 
@@ -1576,15 +1578,17 @@ const ClientsContent = () => {
                                             )}
                                         </div>
                                         <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                                            {canEditClient && (
+                                                <button
+                                                    onClick={() => handleOpenModal(client)}
+                                                    className="p-3 text-gray-300 hover:text-indigo-500 hover:bg-indigo-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                                                    title="Editar Cliente"
+                                                >
+                                                    <Pencil size={18} />
+                                                </button>
+                                            )}
                                             {(hasPermission('MANAGE_CLIENTS') || isOwner) && (
                                                 <>
-                                                    <button
-                                                        onClick={() => handleOpenModal(client)}
-                                                        className="p-3 text-gray-300 hover:text-indigo-500 hover:bg-indigo-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
-                                                        title="Editar Cliente"
-                                                    >
-                                                        <Pencil size={18} />
-                                                    </button>
                                                     <button
                                                         onClick={() => handleDelete(client.id, client.name)}
                                                         className="p-3 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
@@ -1735,7 +1739,7 @@ const ClientsContent = () => {
                         onClose={() => setSelectedClient(null)}
                         onEdit={() => {
                             setSelectedClient(null);
-                            handleOpenModal(selectedClient, (hasPermission('MANAGE_CLIENTS') || selectedClient.created_by === profile?.id) ? 'full' : 'credit');
+                            handleOpenModal(selectedClient, (canEditAnyClient || selectedClient.created_by === profile?.id) ? 'full' : 'credit');
                         }}
                         onEmail={() => {
                             const clientToEmail = selectedClient;
