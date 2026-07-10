@@ -1,0 +1,37 @@
+insert into public.role_permissions (role, permission)
+values
+    ('admin', 'UPLOAD_EXCEL'),
+    ('admin', 'MANAGE_INVENTORY'),
+    ('admin', 'MANAGE_PRICING'),
+    ('admin', 'VIEW_METAS'),
+    ('admin', 'MANAGE_METAS'),
+    ('admin', 'MANAGE_DISPATCH'),
+    ('admin', 'EXECUTE_DELIVERY'),
+    ('admin', 'MANAGE_USERS'),
+    ('admin', 'MANAGE_PERMISSIONS'),
+    ('admin', 'VIEW_ALL_CLIENTS'),
+    ('admin', 'MANAGE_CLIENTS'),
+    ('admin', 'IMPORT_CLIENTS'),
+    ('admin', 'VIEW_TEAM_STATS'),
+    ('admin', 'VIEW_ALL_TEAM_STATS'),
+    ('admin', 'VIEW_OPERATIONS'),
+    ('admin', 'MANAGE_AUTOMATIONS'),
+    ('admin', 'MANAGE_SLA'),
+    ('admin', 'MANAGE_APPROVALS'),
+    ('admin', 'MANAGE_POSTSALE'),
+    ('admin', 'MANAGE_COLLECTIONS'),
+    ('admin', 'VIEW_TEAM_CALENDARS'),
+    ('admin', 'VIEW_PROCUREMENT'),
+    ('admin', 'REQUEST_PRODUCTS'),
+    ('admin', 'MANAGE_PROCUREMENT'),
+    ('admin', 'VIEW_KIT_LOANS'),
+    ('admin', 'REQUEST_KIT_LOANS'),
+    ('admin', 'MANAGE_KIT_LOANS'),
+    ('admin', 'VIEW_SIZE_CHANGES'),
+    ('admin', 'CREATE_SIZE_CHANGES'),
+    ('admin', 'MANAGE_SIZE_CHANGES'),
+    ('admin', 'VIEW_PURCHASE_ORDERS'),
+    ('admin', 'MANAGE_PURCHASE_ORDERS')
+on conflict (role, permission) do nothing;
+
+notify pgrst, 'reload schema';
