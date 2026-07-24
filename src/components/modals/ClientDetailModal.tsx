@@ -568,22 +568,22 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     })();
 
     return (
-        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-5xl h-[90vh] rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in duration-300 flex flex-col">
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4">
+            <div className="bg-white w-full max-w-5xl h-[100dvh] sm:h-[90vh] rounded-none sm:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in duration-300 flex flex-col">
                 {/* Header */}
-                <div className="bg-gray-900 text-white p-8 shrink-0 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-8 flex gap-2 z-10">
-                        <button onClick={onEdit} className="p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-all backdrop-blur-md" title="Editar"><Pencil size={20} /></button>
-                        <button onClick={onClose} className="p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-all backdrop-blur-md"><X size={20} /></button>
+                <div className="bg-gray-900 text-white px-4 pb-4 pt-5 sm:p-8 shrink-0 relative overflow-hidden">
+                    <div className="absolute right-4 top-4 sm:right-8 sm:top-8 flex gap-2 z-10">
+                        <button onClick={onEdit} className="p-2.5 sm:p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-all backdrop-blur-md" title="Editar"><Pencil size={18} className="sm:w-5 sm:h-5" /></button>
+                        <button onClick={onClose} className="p-2.5 sm:p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-all backdrop-blur-md"><X size={18} className="sm:w-5 sm:h-5" /></button>
                     </div>
-                    <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 relative z-0">
-                        <div className="flex items-center gap-6">
-                            <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl flex items-center justify-center shadow-2xl border-4 border-gray-800">
-                                <Building2 size={40} className="text-white" />
+                    <div className="flex flex-col gap-5 sm:gap-6 relative z-0">
+                        <div className="flex items-start gap-4 sm:gap-6 pr-24 sm:pr-28">
+                            <div className="w-16 h-16 sm:w-24 sm:h-24 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[1.5rem] sm:rounded-3xl flex items-center justify-center shadow-2xl border-4 border-gray-800 shrink-0">
+                                <Building2 size={30} className="text-white sm:w-10 sm:h-10" />
                             </div>
-                            <div>
-                                <h2 className="text-3xl font-black tracking-tight">{client.name}</h2>
-                                <div className="flex flex-wrap items-center gap-4 mt-3 text-gray-400 font-medium text-sm">
+                            <div className="min-w-0">
+                                <h2 className="text-2xl sm:text-3xl font-black tracking-tight leading-tight break-words">{client.name}</h2>
+                                <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-3 text-gray-400 font-medium text-xs sm:text-sm">
                                     <span className="flex items-center gap-1.5 bg-gray-800 px-3 py-1 rounded-lg border border-gray-700">
                                         <FileSpreadsheet size={14} className="text-indigo-400" /> {client.rut || 'Sin RUT'}
                                     </span>
@@ -593,23 +593,23 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                 </div>
                             </div>
                         </div>
-                        <div className="flex gap-3 w-full md:w-auto mt-4 md:mt-0">
-                            <button onClick={() => setShowScheduleModal(true)} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-purple-900/50 active:scale-95">
+                        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3 w-full">
+                            <button onClick={() => setShowScheduleModal(true)} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold text-sm sm:text-base transition-all shadow-lg shadow-purple-900/50 active:scale-95">
                                 <CalendarRange size={18} /> Agendar
                             </button>
-                            <button onClick={handleVisit} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-900/50 active:scale-95">
+                            <button onClick={handleVisit} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-sm sm:text-base transition-all shadow-lg shadow-indigo-900/50 active:scale-95">
                                 <MapPin size={18} /> Visita
                             </button>
-                            <button onClick={() => setShowManagementModal(true)} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30 active:scale-95">
+                            <button onClick={() => setShowManagementModal(true)} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm sm:text-base transition-all shadow-lg shadow-emerald-900/30 active:scale-95">
                                 <MessageCircle size={18} /> Gestión
                             </button>
-                            <button onClick={handleQuote} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold transition-all border border-gray-700 active:scale-95">
+                            <button onClick={handleQuote} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold text-sm sm:text-base transition-all border border-gray-700 active:scale-95">
                                 <FileText size={18} /> Cotizar
                             </button>
-                            <button onClick={handleCall} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold transition-all border border-gray-700 active:scale-95">
+                            <button onClick={handleCall} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold text-sm sm:text-base transition-all border border-gray-700 active:scale-95">
                                 <Phone size={18} /> Llamar
                             </button>
-                            <button onClick={onEmail} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold transition-all border border-gray-700 active:scale-95">
+                            <button onClick={onEmail} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold text-sm sm:text-base transition-all border border-gray-700 active:scale-95">
                                 <Mail size={18} /> Email
                             </button>
                         </div>
@@ -617,7 +617,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 </div>
 
                 {/* Tabs */}
-                <div className="flex border-b border-gray-100 px-8 shrink-0 overflow-x-auto">
+                <div className="flex border-b border-gray-100 px-2 sm:px-8 shrink-0 overflow-x-auto bg-white sticky top-0 z-10">
                     {[
                         { id: 'overview', label: 'Resumen', icon: FileText },
                         { id: 'history', label: 'Historial', icon: Clock },
@@ -630,14 +630,14 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                         { id: 'messages', label: 'WhatsApp', icon: MessageCircle },
                         { id: 'emails', label: 'Correos', icon: Mail },
                     ].map(tab => (
-                        <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex items-center gap-2 px-6 py-5 text-sm font-bold border-b-4 transition-all whitespace-nowrap ${activeTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-400 hover:text-gray-600 hover:border-gray-200'}`}>
+                        <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex items-center gap-2 px-3 sm:px-6 py-4 sm:py-5 text-xs sm:text-sm font-bold border-b-4 transition-all whitespace-nowrap min-w-max ${activeTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-400 hover:text-gray-600 hover:border-gray-200'}`}>
                             <tab.icon size={16} /> {tab.label}
                         </button>
                     ))}
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto bg-gray-50/50 p-8">
+                <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4 sm:p-8">
                     {loadError && (
                         <div className="mb-4 p-3 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm font-medium">
                             {loadError}
@@ -648,44 +648,44 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                     ) : (
                         <>
                             {activeTab === 'overview' && (
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
                                     <div className="lg:col-span-2 space-y-8">
-                                        <div className="grid grid-cols-3 gap-4">
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                                            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Ventas Totales</p>
-                                                <p className="text-2xl font-black text-gray-900 mt-1">{formatCurrency(stats.totalSales)}</p>
+                                                <p className="text-xl sm:text-2xl font-black text-gray-900 mt-1 break-words">{formatCurrency(stats.totalSales)}</p>
                                             </div>
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Visitas</p>
-                                                <p className="text-2xl font-black text-gray-900 mt-1">{stats.totalVisits}</p>
+                                                <p className="text-xl sm:text-2xl font-black text-gray-900 mt-1">{stats.totalVisits}</p>
                                             </div>
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Última Visita</p>
-                                                <p className="text-xl font-black text-gray-900 mt-1">{formatDate(stats.lastVisit || '')}</p>
+                                                <p className="text-lg sm:text-xl font-black text-gray-900 mt-1">{formatDate(stats.lastVisit || '')}</p>
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                                            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Cotizaciones</p>
-                                                <p className="text-2xl font-black text-gray-900 mt-1">{stats.totalQuotations}</p>
+                                                <p className="text-xl sm:text-2xl font-black text-gray-900 mt-1">{stats.totalQuotations}</p>
                                             </div>
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Aprobadas</p>
-                                                <p className="text-2xl font-black text-emerald-600 mt-1">{stats.approvedQuotations}</p>
+                                                <p className="text-xl sm:text-2xl font-black text-emerald-600 mt-1">{stats.approvedQuotations}</p>
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+                                            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Docs en Cobranza</p>
-                                                <p className="text-2xl font-black text-gray-900 mt-1">{stats.totalCollectionsDocuments}</p>
+                                                <p className="text-xl sm:text-2xl font-black text-gray-900 mt-1">{stats.totalCollectionsDocuments}</p>
                                             </div>
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Saldo Pendiente</p>
-                                                <p className="text-2xl font-black text-amber-600 mt-1">{formatCurrency(stats.totalCollectionsOutstanding)}</p>
+                                                <p className="text-xl sm:text-2xl font-black text-amber-600 mt-1 break-words">{formatCurrency(stats.totalCollectionsOutstanding)}</p>
                                             </div>
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
                                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Saldo Vencido</p>
-                                                <p className="text-2xl font-black text-red-600 mt-1">{formatCurrency(stats.overdueCollectionsOutstanding)}</p>
+                                                <p className="text-xl sm:text-2xl font-black text-red-600 mt-1 break-words">{formatCurrency(stats.overdueCollectionsOutstanding)}</p>
                                             </div>
                                         </div>
                                         {collectionsSnapshot.documents > 0 && (
@@ -733,9 +733,9 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                 </div>
                                             </div>
                                         )}
-                                        <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                                            <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><FileText size={20} className="text-indigo-600" /> Información de Contacto</h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
+                                        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-gray-100 shadow-sm">
+                                            <h3 className="font-bold text-gray-900 mb-4 sm:mb-6 flex items-center gap-2"><FileText size={20} className="text-indigo-600" /> Información de Contacto</h3>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-8">
                                                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Dirección</label><p className="font-medium text-gray-700">{client.address}{client.office ? `, Oficina ${client.office}` : ''}</p></div>
                                                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Teléfono</label><a href={`tel:${client.phone}`} className="font-bold text-indigo-600 hover:underline">{client.phone}</a></div>
                                                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Email</label><a href={`mailto:${client.email}`} className="font-bold text-indigo-600 hover:underline">{client.email}</a></div>
@@ -744,7 +744,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                 <div className="col-span-1 md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Notas</label><p className="font-medium text-gray-600 bg-gray-50 p-4 rounded-xl border border-gray-200/50 italic">{client.notes || 'Sin notas registradas.'}</p></div>
                                             </div>
                                         </div>
-                                        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                                        <div className="bg-white p-5 sm:p-6 rounded-3xl border border-gray-100 shadow-sm">
                                             <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
                                                 <CheckCircle2 size={18} className="text-indigo-600" /> Próxima Acción Recomendada
                                             </h3>
@@ -759,8 +759,8 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                 </button>
                                             </div>
                                         </div>
-                                        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
-                                            <div className="mb-4 flex items-center justify-between gap-3">
+                                        <div className="bg-white p-5 sm:p-6 rounded-3xl border border-gray-100 shadow-sm">
+                                            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                                 <h3 className="font-bold text-gray-900 flex items-center gap-2">
                                                     <Clock size={18} className="text-indigo-600" /> Actividad Reciente
                                                 </h3>
@@ -795,7 +795,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="h-full min-h-[300px] rounded-3xl overflow-hidden shadow-lg border-2 border-white">
+                                    <div className="h-[240px] sm:h-full min-h-[240px] sm:min-h-[300px] rounded-3xl overflow-hidden shadow-lg border-2 border-white">
                                         {client.lat && client.lng && GOOGLE_MAPS_API_KEY ? (
                                             <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
                                                 <Map defaultCenter={{ lat: client.lat, lng: client.lng }} defaultZoom={15} mapId="CLIENT_DETAIL_MAP" className="w-full h-full">
@@ -813,20 +813,20 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                             )}
 
                             {activeTab !== 'overview' && (
-                                <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden">
+                                <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden">
                                     {activeTab === 'history' && historyItems.map((item) => {
                                         const meta = getHistoryKindMeta(item.kind);
                                         const Icon = meta.icon;
                                         return (
-                                            <div key={item.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                                <div className="flex items-start justify-between gap-4">
-                                                    <div className="flex items-start gap-4">
+                                            <div key={item.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                                                    <div className="flex items-start gap-4 min-w-0">
                                                         <div className={`mt-1 flex h-12 w-12 items-center justify-center rounded-2xl ${meta.iconClassName}`}>
                                                             <Icon size={20} />
                                                         </div>
-                                                        <div>
+                                                        <div className="min-w-0">
                                                             <div className="flex flex-wrap items-center gap-2">
-                                                                <p className="font-bold text-gray-900">{item.title}</p>
+                                                                <p className="font-bold text-gray-900 break-words">{item.title}</p>
                                                                 <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${meta.badgeClassName}`}>
                                                                     {meta.label}
                                                                 </span>
@@ -844,15 +844,15 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                         </div>
                                                     </div>
                                                     {item.amount !== null && item.amount !== undefined && (
-                                                        <p className="text-right font-black text-gray-900">{formatCurrency(item.amount)}</p>
+                                                        <p className="text-left sm:text-right font-black text-gray-900">{formatCurrency(item.amount)}</p>
                                                     )}
                                                 </div>
                                             </div>
                                         );
                                     })}
                                     {activeTab === 'visits' && visits.map((visit) => (
-                                        <div key={visit.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex justify-between items-center group">
-                                            <div className="flex items-center gap-4">
+                                        <div key={visit.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 group">
+                                            <div className="flex items-center gap-4 min-w-0">
                                                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold ${visit.status === 'scheduled' ? 'bg-purple-50 text-purple-600' : 'bg-emerald-50 text-emerald-600'}`}>
                                                     {visit.status === 'scheduled' ? <CalendarRange size={20} /> : <MapPin size={20} />}
                                                 </div>
@@ -867,7 +867,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                     )}
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 self-start sm:self-auto">
                                                 <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${visit.status === 'scheduled' ? 'bg-purple-100 text-purple-700' : visit.status === 'cancelled' ? 'bg-red-100 text-red-700' : visit.check_out_time ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700 animate-pulse'}`}>
                                                     {visit.status === 'scheduled' ? 'Agendada' : visit.status === 'cancelled' ? 'Cancelada' : visit.check_out_time ? 'Completada' : 'En Curso'}
                                                 </span>
@@ -905,8 +905,8 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                         </div>
                                     ))}
                                     {activeTab === 'quotations' && quotations.map((q) => (
-                                        <div key={q.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex justify-between items-center">
-                                            <div className="flex items-center gap-4">
+                                        <div key={q.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                                            <div className="flex items-center gap-4 min-w-0">
                                                 <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-bold"><FileSpreadsheet size={20} /></div>
                                                 <div><p className="font-bold text-gray-900">Folio #{q.folio || '---'}</p><p className="text-xs text-gray-500 font-medium">{formatDate(q.created_at)} • {formatCurrency(q.total_amount || 0)}</p></div>
                                             </div>
@@ -914,8 +914,8 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                         </div>
                                     ))}
                                     {activeTab === 'orders' && orders.map((o) => (
-                                        <div key={o.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex justify-between items-center">
-                                            <div className="flex items-center gap-4">
+                                        <div key={o.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                                            <div className="flex items-center gap-4 min-w-0">
                                                 <div className="w-12 h-12 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center font-bold"><ShoppingBag size={20} /></div>
                                                 <div><p className="font-bold text-gray-900">Venta Confirmada</p><p className="text-xs text-gray-500 font-medium">{formatDateTime(o.created_at)}</p>{o.order_items && o.order_items.length > 0 && (<div className="mt-1 text-xs text-gray-400">{o.order_items.map((item: any) => `${item.inventory?.name || 'Producto'} (x${item.quantity})`).join(', ')}</div>)}</div>
                                             </div>
@@ -923,9 +923,9 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                         </div>
                                     ))}
                                     {activeTab === 'collections' && collections.map((item) => (
-                                        <div key={item.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                            <div className="flex items-start justify-between gap-4">
-                                                <div>
+                                        <div key={item.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                                                <div className="min-w-0">
                                                     <div className="flex flex-wrap items-center gap-2">
                                                         <p className="font-bold text-gray-900">Documento #{item.document_number}</p>
                                                         <span className="px-2 py-1 rounded-lg text-[10px] font-black uppercase bg-amber-100 text-amber-700">
@@ -947,7 +947,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="text-right">
+                                                <div className="text-left sm:text-right">
                                                     <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Saldo pendiente</p>
                                                     <p className="font-black text-xl text-amber-700">{formatCurrency(Number(item.outstanding_amount || item.amount || 0))}</p>
                                                     <p className="text-xs text-gray-500 mt-1">Monto documento: {formatCurrency(Number(item.amount || 0))}</p>
@@ -956,14 +956,14 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                         </div>
                                     ))}
                                     {activeTab === 'sent_quotations' && sentQuotations.map((quote) => (
-                                        <div key={quote.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div>
+                                        <div key={quote.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                                                <div className="min-w-0">
                                                     <p className="font-bold text-gray-900">Folio #{quote.folio || '---'}</p>
                                                     <p className="text-xs text-gray-500 font-medium">{formatDateTime(quote.created_at)}</p>
                                                     {quote.comments && <p className="text-xs text-gray-600 mt-2 italic">"{quote.comments}"</p>}
                                                 </div>
-                                                <div className="text-right">
+                                                <div className="text-left sm:text-right">
                                                     <span className="px-2 py-1 rounded-lg text-[10px] font-black uppercase bg-blue-100 text-blue-700">Enviada</span>
                                                     <p className="font-black text-gray-900 mt-2">{formatCurrency(Number(quote.total_amount || 0))}</p>
                                                 </div>
@@ -971,15 +971,15 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                         </div>
                                     ))}
                                     {activeTab === 'emails' && emails.map((email) => (
-                                        <div key={email.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                            <div className="flex justify-between items-start mb-1"><h4 className="font-bold text-gray-900 text-sm">{email.subject}</h4><span className="text-[10px] text-gray-400 font-bold uppercase">{formatDateTime(email.created_at)}</span></div>
+                                        <div key={email.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1 mb-1"><h4 className="font-bold text-gray-900 text-sm break-words">{email.subject}</h4><span className="text-[10px] text-gray-400 font-bold uppercase">{formatDateTime(email.created_at)}</span></div>
                                             <p className="text-xs text-gray-500 line-clamp-2">{email.snippet || 'Sin vista previa'}</p>
                                             <div className="mt-2 flex items-center gap-2"><span className="text-[10px] font-medium bg-gray-100 px-2 py-0.5 rounded text-gray-500">Por: {email.profiles?.full_name || 'Usuario'}</span></div>
                                         </div>
                                     ))}
                                     {activeTab === 'messages' && messageLogs.map((message) => (
-                                        <div key={message.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                            <div className="flex justify-between items-start mb-1">
+                                        <div key={message.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1 mb-1">
                                                 <h4 className="font-bold text-gray-900 text-sm">WhatsApp {message.status === 'failed' ? 'fallido' : 'registrado'}</h4>
                                                 <span className="text-[10px] text-gray-400 font-bold uppercase">{formatDateTime(message.created_at)}</span>
                                             </div>
@@ -994,8 +994,8 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                         </div>
                                     ))}
                                     {activeTab === 'calls' && callLogs.map((log) => (
-                                        <div key={log.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex justify-between items-start">
-                                            <div className="flex items-center gap-4">
+                                        <div key={log.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex justify-between items-start">
+                                            <div className="flex items-center gap-4 min-w-0">
                                                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold ${log.status === 'contestada' ? 'bg-green-50 text-green-600' : log.status === 'no_contesto' ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'}`}><Phone size={20} /></div>
                                                 <div>
                                                     <p className="font-bold text-gray-900 capitalize">{log.status.replace('_', ' ')}</p>
