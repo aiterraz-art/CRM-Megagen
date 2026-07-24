@@ -8,6 +8,7 @@ import ScheduleVisitModal from './modals/ScheduleVisitModal';
 import { supabase } from '../services/supabase';
 import { isProspectStatus } from '../utils/prospect';
 import { clearVisitCheckoutDraft, loadVisitCheckoutDraft, saveVisitCheckoutDraft } from '../utils/visitCheckoutDraft';
+import { cleanupTransientColdVisitClient } from '../utils/coldVisitClientLifecycle';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -184,6 +185,22 @@ const GlobalVisitTimer = () => {
 
             const closed = await endVisit({ notes: visitNotes });
             if (closed) {
+                if (isColdVisitFlow && activeClient) {
+                    const cleanupResult = await cleanupTransientColdVisitClient({
+                        visitId: activeVisit.id,
+                        client: activeClient,
+                        clientEmail: checkoutClientEmail,
+                        doctorName: checkoutDoctorName,
+                        doctorSpecialty: checkoutDoctorSpecialty
+                    });
+
+                    if (cleanupResult.removed) {
+                        alert('La visita en frío quedó registrada, pero la ficha no se guardó como cliente porque sigue sin RUT.');
+                    } else if (cleanupResult.reason === 'linked_records') {
+                        alert('La visita quedó registrada, pero la ficha temporal se mantuvo porque ya tiene cotizaciones o ventas asociadas.');
+                    }
+                }
+
                 clearVisitCheckoutDraft(activeVisit.id);
                 setShowNotesModal(false);
                 navigate('/');

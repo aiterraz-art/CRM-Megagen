@@ -43,6 +43,7 @@ interface VisitHistoryItem {
     client_address: string | null;
     client_comuna: string | null;
     client_zone: string | null;
+    cold_visit_doctor_specialty: string | null;
 }
 
 interface SellerOption {
@@ -410,6 +411,12 @@ const VisitHistory = () => {
                         check_out_lng,
                         sales_rep_id,
                         type,
+                        cold_visit_clinic_name,
+                        cold_visit_address,
+                        cold_visit_doctor_name,
+                        cold_visit_doctor_specialty,
+                        cold_visit_client_email,
+                        cold_visit_client_rut,
                         clients (name, status, purchase_contact, address, comuna, zone),
                         profiles:sales_rep_id (id, full_name, email)
                     `)
@@ -452,16 +459,17 @@ const VisitHistory = () => {
                         lng: visit.lng,
                         check_out_lat: visit.check_out_lat,
                         check_out_lng: visit.check_out_lng,
-                        client_name: client?.name || 'Cliente Desconocido',
-                        client_status: client?.status || 'active',
-                        doctor_name: client?.purchase_contact || null,
+                        client_name: client?.name || visit.cold_visit_clinic_name || 'Visita en frío sin ficha',
+                        client_status: client?.status || (visit.cold_visit_clinic_name ? 'cold_visit_transient' : 'active'),
+                        doctor_name: client?.purchase_contact || visit.cold_visit_doctor_name || null,
                         sales_rep_name: getSellerDisplayName(salesRep),
                         sales_rep_id: visit.sales_rep_id || salesRep?.id || null,
                         sales_rep_email: salesRep?.email || null,
                         visit_type: visit.type || null,
-                        client_address: client?.address || null,
+                        client_address: client?.address || visit.cold_visit_address || null,
                         client_comuna: client?.comuna || null,
-                        client_zone: client?.zone || null
+                        client_zone: client?.zone || null,
+                        cold_visit_doctor_specialty: visit.cold_visit_doctor_specialty || null
                     };
                 });
 
