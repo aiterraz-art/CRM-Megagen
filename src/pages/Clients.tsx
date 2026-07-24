@@ -91,6 +91,27 @@ const formatDuplicateReasonLabel = (reason: DuplicateReason): string => {
     }
 };
 
+const getErrorMessage = (error: unknown): string => {
+    if (!error) return 'desconocido';
+    if (typeof error === 'string') return error;
+    if (error instanceof Error) return error.message || 'desconocido';
+
+    const candidate = error as {
+        message?: string;
+        details?: string;
+        hint?: string;
+        code?: string;
+        error_description?: string;
+    };
+
+    return candidate.message
+        || candidate.details
+        || candidate.hint
+        || candidate.error_description
+        || candidate.code
+        || 'desconocido';
+};
+
 const normalizeSheetHeader = (value: string): string => value
     .toLowerCase()
     .normalize('NFD')
@@ -257,6 +278,7 @@ const ClientsContent = () => {
     const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
     const canAssignClientOwner = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'tesorero';
     const canManageClientCredit = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'facturador';
+    const canMergeDuplicateGroups = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'facturador' || effectiveRole === 'tesorero';
     const canEditAnyClient = hasPermission('MANAGE_CLIENTS') || effectiveRole === 'jefe';
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
@@ -1468,8 +1490,9 @@ const ClientsContent = () => {
             await mergeClientDuplicates(targetGroup.primary, targetGroup.duplicates);
             alert(`Grupo fusionado correctamente. Principal conservado: ${targetGroup.primary.name}.`);
             await fetchClients();
-        } catch (error: any) {
-            alert(`No se pudo fusionar el grupo: ${error?.message || 'desconocido'}`);
+        } catch (error) {
+            console.error('Error merging duplicate client group:', error);
+            alert(`No se pudo fusionar el grupo: ${getErrorMessage(error)}`);
         } finally {
             setMergingDuplicateGroupId(null);
         }
@@ -1647,13 +1670,19 @@ const ClientsContent = () => {
                                         ))}
                                     </div>
                                 </div>
-                                <button
-                                    onClick={() => handleMergeDuplicateGroup(group.id)}
-                                    disabled={mergingDuplicateGroupId === group.id}
-                                    className="bg-amber-500 text-white px-4 py-3 rounded-2xl font-bold hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {mergingDuplicateGroupId === group.id ? 'Fusionando...' : 'Fusionar Grupo'}
-                                </button>
+                                {canMergeDuplicateGroups ? (
+                                    <button
+                                        onClick={() => handleMergeDuplicateGroup(group.id)}
+                                        disabled={mergingDuplicateGroupId === group.id}
+                                        className="bg-amber-500 text-white px-4 py-3 rounded-2xl font-bold hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {mergingDuplicateGroupId === group.id ? 'Fusionando...' : 'Fusionar Grupo'}
+                                    </button>
+                                ) : (
+                                    <div className="rounded-2xl bg-amber-100 px-4 py-3 text-sm font-bold text-amber-900">
+                                        Solo admin, jefe, facturador o tesorero pueden fusionar
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>
