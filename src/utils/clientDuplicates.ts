@@ -541,15 +541,23 @@ export const mergeClientDuplicates = async (primary: ClientRow, duplicates: Clie
         if (error) {
             if (!isRpcMissingError(error)) throw toMergeError('Error al ejecutar merge_client_duplicates', error);
 
-            try {
-                return await fallbackMergeClientDuplicates(primary, duplicates);
-            } catch (fallbackError) {
-                throw toMergeError('Error en fallback de fusión de clientes', fallbackError);
+            if (import.meta.env.DEV) {
+                try {
+                    return await fallbackMergeClientDuplicates(primary, duplicates);
+                } catch (fallbackError) {
+                    throw toMergeError('Error en fallback de fusión de clientes', fallbackError);
+                }
             }
+
+            throw new Error(
+                'La base de datos no tiene habilitada la función de fusión de clientes. Falta aplicar en Supabase las migraciones 20260724000136 y 20260724000138.'
+            );
         }
 
         if (!data) {
-            throw new Error('La fusión no devolvió resultado desde Supabase. Revisa la migración merge_client_duplicates.');
+            throw new Error(
+                'La fusión no devolvió resultado desde Supabase. Revisa que la función merge_client_duplicates exista y esté actualizada en la base.'
+            );
         }
 
         return data;
