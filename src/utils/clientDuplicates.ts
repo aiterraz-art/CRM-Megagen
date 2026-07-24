@@ -12,8 +12,7 @@ type ClientUpdatePayload = ClientUpdate & {
 };
 
 export type DuplicateReason =
-    | 'rut'
-    | 'email'
+    | 'name'
     | 'phone_name'
     | 'name_address'
     | 'name_contact'
@@ -167,12 +166,8 @@ export const compareClientsForDuplicate = (
 ): DuplicateReason[] => {
     const reasons: DuplicateReason[] = [];
 
-    const rutA = normalizeRut(a.rut);
-    const rutB = normalizeRut(b.rut);
     const nameA = normalizeText(a.name);
     const nameB = normalizeText(b.name);
-    const emailA = normalizeEmail(a.email);
-    const emailB = normalizeEmail(b.email);
     const phoneA = normalizePhone(a.phone);
     const phoneB = normalizePhone(b.phone);
     const addressA = normalizeAddress(a.address);
@@ -188,6 +183,8 @@ export const compareClientsForDuplicate = (
     const sameOffice = Boolean(officeA && officeA === officeB);
     const sameAddress = Boolean(addressA && addressA === addressB);
     const sameContact = Boolean(contactA && contactA === contactB);
+    if (!sameName) return reasons;
+
     let nearby = false;
     const latA = a.lat;
     const lngA = a.lng;
@@ -197,22 +194,19 @@ export const compareClientsForDuplicate = (
         nearby = getDistanceKm(latA as number, lngA as number, latB as number, lngB as number) <= 0.25;
     }
 
-    if (rutA && rutA === rutB) reasons.push('rut');
-    if (emailA && emailA === emailB) reasons.push('email');
-    if (sameName && phoneA && phoneA === phoneB) reasons.push('phone_name');
-    if (sameName && sameAddress) reasons.push('name_address');
-    if (sameName && sameContact) reasons.push('name_contact');
-    if (sameName && sameComuna && (sameOffice || sameAddress)) reasons.push('name_location');
-    if (sameName && sameComuna && nearby) reasons.push('name_geo');
+    reasons.push('name');
+    if (phoneA && phoneA === phoneB) reasons.push('phone_name');
+    if (sameAddress) reasons.push('name_address');
+    if (sameContact) reasons.push('name_contact');
+    if (sameComuna && (sameOffice || sameAddress)) reasons.push('name_location');
+    if (sameComuna && nearby) reasons.push('name_geo');
 
     return Array.from(new Set(reasons));
 };
 
 const getDuplicateScore = (reasons: DuplicateReason[]) => reasons.reduce((score, reason) => {
     switch (reason) {
-        case 'rut':
-            return score + 10;
-        case 'email':
+        case 'name':
             return score + 8;
         case 'phone_name':
             return score + 7;
@@ -303,22 +297,10 @@ export const findPotentialDuplicateClient = async (
     excludeIds: string[] = []
 ): Promise<DuplicateMatch | null> => {
     const queries: Array<Promise<{ data: ClientRow[] | null; error: any }>> = [];
-    const normalizedRut = normalizeRut(incoming.rut);
-    const normalizedEmail = normalizeEmail(incoming.email);
     const nameTokens = getSearchTokens(incoming.name);
-    const addressTokens = getSearchTokens(incoming.address);
 
-    if (normalizedRut) {
-        queries.push(supabase.from('clients').select('*').eq('rut', normalizedRut).limit(5) as any);
-    }
-    if (normalizedEmail) {
-        queries.push(supabase.from('clients').select('*').ilike('email', normalizedEmail).limit(10) as any);
-    }
     nameTokens.forEach((token) => {
         queries.push(supabase.from('clients').select('*').ilike('name', `%${escapeLikePattern(token)}%`).limit(40) as any);
-    });
-    addressTokens.slice(0, 1).forEach((token) => {
-        queries.push(supabase.from('clients').select('*').ilike('address', `%${escapeLikePattern(token)}%`).limit(40) as any);
     });
 
     if (queries.length === 0) return null;

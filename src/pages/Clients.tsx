@@ -13,6 +13,7 @@ import { sendGmailMessage } from '../utils/gmail';
 import { isProspectStatus } from '../utils/prospect';
 import {
     computeDuplicateClientGroups,
+    DuplicateReason,
     findDuplicateClientInList,
     findPotentialDuplicateClient,
     mergeClientDuplicates,
@@ -70,6 +71,25 @@ const normalizeSellerToken = (value: string): string => value
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+const formatDuplicateReasonLabel = (reason: DuplicateReason): string => {
+    switch (reason) {
+        case 'name':
+            return 'nombre';
+        case 'phone_name':
+            return 'nombre y teléfono';
+        case 'name_address':
+            return 'nombre y dirección';
+        case 'name_contact':
+            return 'nombre y contacto';
+        case 'name_location':
+            return 'nombre y ubicación';
+        case 'name_geo':
+            return 'nombre y GPS';
+        default:
+            return reason;
+    }
+};
 
 const normalizeSheetHeader = (value: string): string => value
     .toLowerCase()
@@ -1434,7 +1454,7 @@ const ClientsContent = () => {
         const duplicateSummary = targetGroup.duplicates
             .map((client) => {
                 const reasons = targetGroup.reasonsByClientId[client.id] || [];
-                return `- ${client.name} (${client.email || client.phone || client.address || 'sin referencia'}) [${reasons.join(', ')}]`;
+                return `- ${client.name} (${client.email || client.phone || client.address || 'sin referencia'}) [${reasons.map(formatDuplicateReasonLabel).join(', ')}]`;
             })
             .join('\n');
 
@@ -1603,7 +1623,7 @@ const ClientsContent = () => {
                         <div>
                             <h3 className="text-lg font-black text-amber-900">Duplicados detectados</h3>
                             <p className="text-sm text-amber-800">
-                                Se detectaron {duplicateGroups.length} grupo(s) con coincidencias fuertes. La fusión conserva una ficha principal y mueve el historial.
+                                Se detectaron {duplicateGroups.length} grupo(s) por coincidencia de nombre. La fusión conserva una ficha principal y mueve el historial.
                             </p>
                         </div>
                     </div>
@@ -1622,7 +1642,7 @@ const ClientsContent = () => {
                                             <p key={duplicate.id} className="text-xs text-gray-600">
                                                 Duplicado: {duplicate.name} · {duplicate.email || duplicate.phone || duplicate.address || 'sin referencia'}
                                                 {' · '}
-                                                Coincide por: {(group.reasonsByClientId[duplicate.id] || []).join(', ')}
+                                                Coincide por: {(group.reasonsByClientId[duplicate.id] || []).map(formatDuplicateReasonLabel).join(', ')}
                                             </p>
                                         ))}
                                     </div>
