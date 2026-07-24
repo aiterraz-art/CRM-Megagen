@@ -11,6 +11,13 @@ import ClientDetailModal from '../components/modals/ClientDetailModal';
 import { checkGPSConnection } from '../utils/gps';
 import { sendGmailMessage } from '../utils/gmail';
 import { isProspectStatus } from '../utils/prospect';
+import {
+    computeDuplicateClientGroups,
+    findDuplicateClientInList,
+    findPotentialDuplicateClient,
+    mergeClientDuplicates,
+    saveClientWithDeduplication
+} from '../utils/clientDuplicates';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_settings']['Row'];
@@ -220,6 +227,7 @@ const ClientsContent = () => {
     const creditDaysInputRef = useRef<HTMLInputElement>(null);
     const [importing, setImporting] = useState(false);
     const [creditDaysImporting, setCreditDaysImporting] = useState(false);
+    const [mergingDuplicateGroupId, setMergingDuplicateGroupId] = useState<string | null>(null);
 
     const [viewMode, setViewMode] = useState<'all' | 'mine'>('all'); // For Admins
     const [portfolioTab, setPortfolioTab] = useState<'portfolio' | 'pool'>('portfolio');
@@ -666,30 +674,46 @@ const ClientsContent = () => {
                     return;
                 }
 
-                const { error: insertError } = await supabase
-                    .from('clients')
-                    .insert({
-                        id: crypto.randomUUID(),
-                        name: clientForm.name,
-                        rut: normalizedRut,
-                        phone: clientForm.phone,
-                        email: clientForm.email,
-                        address: finalAddress,
-                        lat: finalLat,
-                        lng: finalLng,
-                        notes: clientForm.notes,
-                        created_by: canAssignClientOwner ? clientForm.assignedSellerId : profile?.id,
-                        pending_seller_email: null,
-                        status: 'active',
-                        zone: 'Santiago',
-                        giro: clientForm.giro,
-                        comuna: finalComuna,
-                        office: clientForm.office,
-                        credit_days: 0,
-                        ...(effectiveRole === 'admin' ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {})
-                    });
+                const duplicateMatch = await findPotentialDuplicateClient({
+                    rut: normalizedRut,
+                    name: clientForm.name,
+                    phone: clientForm.phone,
+                    email: clientForm.email,
+                    address: finalAddress,
+                    purchase_contact: null,
+                    comuna: finalComuna,
+                    office: clientForm.office,
+                    lat: finalLat,
+                    lng: finalLng
+                });
 
-                if (insertError) throw insertError;
+                if (duplicateMatch) {
+                    alert(`⚠️ DETENIDO: Ya existe una ficha muy similar para este cliente.\n\nCliente detectado: ${duplicateMatch.client.name}\nCoincidencia por: ${duplicateMatch.reasons.join(', ')}\n\nAbre la ficha existente y complétala en vez de crear una nueva.`);
+                    setSubmitting(false);
+                    return;
+                }
+
+                await saveClientWithDeduplication({
+                    id: crypto.randomUUID(),
+                    name: clientForm.name,
+                    rut: normalizedRut,
+                    phone: clientForm.phone,
+                    email: clientForm.email,
+                    address: finalAddress,
+                    lat: finalLat,
+                    lng: finalLng,
+                    notes: clientForm.notes,
+                    created_by: canAssignClientOwner ? clientForm.assignedSellerId : profile?.id,
+                    pending_seller_email: null,
+                    status: 'active',
+                    zone: 'Santiago',
+                    giro: clientForm.giro,
+                    comuna: finalComuna,
+                    office: clientForm.office,
+                    credit_days: 0,
+                    ...(effectiveRole === 'admin' ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {})
+                }, { onDuplicate: 'error' });
+
                 alert('¡Cliente creado exitosamente!');
             }
 
@@ -794,6 +818,12 @@ const ClientsContent = () => {
                     payload: any;
                     meta: { fila: number; vendedor: string; nombre: string; rut: string };
                 }> = [];
+                const { data: existingClients, error: existingClientsError } = await supabase
+                    .from('clients')
+                    .select('*')
+                    .order('created_at', { ascending: true });
+                if (existingClientsError) throw existingClientsError;
+                const mutableExistingClients = [...(existingClients || [])];
                 const seenRuts = new Set<string>();
                 const normalizedSellerMap = new globalThis.Map<string, any>();
                 profiles.forEach((p) => {
@@ -947,8 +977,32 @@ const ClientsContent = () => {
                                     }
                                 }
                             } else {
-                                const { error } = await supabase.from('clients').insert(client);
-                                if (error) throw error;
+                                const duplicateMatch = findDuplicateClientInList(client, mutableExistingClients);
+                                if (duplicateMatch) {
+                                    const { data: updatedClient, error: updateError } = await (supabase.from('clients') as any)
+                                        .update({
+                                            ...client,
+                                            notes: `${duplicateMatch.client.notes || ''}`.trim()
+                                                ? `${duplicateMatch.client.notes || ''} | ${client.notes || ''}`.replace(/^\s*\|\s*|\s*\|\s*$/g, '')
+                                                : client.notes || null
+                                        })
+                                        .eq('id', duplicateMatch.client.id)
+                                        .select()
+                                        .single();
+                                    if (updateError) throw updateError;
+
+                                    const existingIndex = mutableExistingClients.findIndex((row) => row.id === duplicateMatch.client.id);
+                                    if (existingIndex >= 0) {
+                                        mutableExistingClients[existingIndex] = updatedClient as Client;
+                                    }
+                                } else {
+                                    const { data: insertedClient, error } = await (supabase.from('clients') as any)
+                                        .insert(client)
+                                        .select()
+                                        .single();
+                                    if (error) throw error;
+                                    mutableExistingClients.push(insertedClient as Client);
+                                }
                             }
                             successCount++;
                         } catch (err: any) {
@@ -1059,14 +1113,40 @@ const ClientsContent = () => {
         });
     }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode, clientTypeFilter, portfolioTab, clientFollowupSettings]);
 
+    const duplicateGroups = useMemo(
+        () => computeDuplicateClientGroups(clients),
+        [clients]
+    );
+
+    const hiddenDuplicateClientIds = useMemo(() => {
+        const ids = new Set<string>();
+        duplicateGroups.forEach((group) => {
+            group.duplicates.forEach((duplicate) => ids.add(duplicate.id));
+        });
+        return ids;
+    }, [duplicateGroups]);
+
+    const duplicateCountByPrimaryId = useMemo(() => {
+        const map: Record<string, number> = {};
+        duplicateGroups.forEach((group) => {
+            map[group.primary.id] = group.duplicates.length;
+        });
+        return map;
+    }, [duplicateGroups]);
+
+    const displayedClients = useMemo(
+        () => filteredClients.filter((client) => !hiddenDuplicateClientIds.has(client.id)),
+        [filteredClients, hiddenDuplicateClientIds]
+    );
+
     const downloadCreditDaysList = () => {
-        if (filteredClients.length === 0) {
+        if (displayedClients.length === 0) {
             alert('No hay clientes cargados en esta vista para exportar.');
             return;
         }
 
         const headers = ['ID', 'RUT', 'Nombre', 'Días de Crédito'];
-        const data = filteredClients.map((client) => [
+        const data = displayedClients.map((client) => [
             client.id,
             client.rut || '',
             client.name,
@@ -1080,12 +1160,12 @@ const ClientsContent = () => {
     };
 
     const exportClientsList = () => {
-        if (filteredClients.length === 0) {
+        if (displayedClients.length === 0) {
             alert('No hay clientes visibles para exportar.');
             return;
         }
 
-        const exportRows = filteredClients.map((client) => ({
+        const exportRows = displayedClients.map((client) => ({
             ID: client.id,
             RUT: normalizeRut(client.rut || ''),
             'Razón Social': client.name,
@@ -1289,16 +1369,44 @@ const ClientsContent = () => {
     };
 
     const clientStats = useMemo(() => {
-        const inRisk = filteredClients.filter((client) => getClientFollowupSeverity(client) !== 'normal').length;
-        const withCoordinates = filteredClients.filter((client) => !!client.lat && !!client.lng).length;
-        const mine = filteredClients.filter((client) => client.created_by === profile?.id).length;
+        const inRisk = displayedClients.filter((client) => getClientFollowupSeverity(client) !== 'normal').length;
+        const withCoordinates = displayedClients.filter((client) => !!client.lat && !!client.lng).length;
+        const mine = displayedClients.filter((client) => client.created_by === profile?.id).length;
         return {
-            total: filteredClients.length,
+            total: displayedClients.length,
             inRisk,
             withCoordinates,
             mine
         };
-    }, [filteredClients, neglectedData, profile?.id, clientFollowupSettings]);
+    }, [displayedClients, neglectedData, profile?.id, clientFollowupSettings]);
+
+    const handleMergeDuplicateGroup = async (groupId: string) => {
+        const targetGroup = duplicateGroups.find((group) => group.id === groupId);
+        if (!targetGroup) return;
+
+        const duplicateSummary = targetGroup.duplicates
+            .map((client) => {
+                const reasons = targetGroup.reasonsByClientId[client.id] || [];
+                return `- ${client.name} (${client.email || client.phone || client.address || 'sin referencia'}) [${reasons.join(', ')}]`;
+            })
+            .join('\n');
+
+        const confirmed = window.confirm(
+            `Se fusionará este grupo en la ficha principal:\n\nPrincipal: ${targetGroup.primary.name}\n\nDuplicados:\n${duplicateSummary}\n\nEsta acción moverá historial y eliminará las fichas sobrantes.`
+        );
+        if (!confirmed) return;
+
+        setMergingDuplicateGroupId(groupId);
+        try {
+            await mergeClientDuplicates(targetGroup.primary, targetGroup.duplicates);
+            alert(`Grupo fusionado correctamente. Principal conservado: ${targetGroup.primary.name}.`);
+            await fetchClients();
+        } catch (error: any) {
+            alert(`No se pudo fusionar el grupo: ${error?.message || 'desconocido'}`);
+        } finally {
+            setMergingDuplicateGroupId(null);
+        }
+    };
 
     return (
         <div className="space-y-8 w-full mx-auto px-4 sm:px-6 lg:px-8">
@@ -1442,6 +1550,49 @@ const ClientsContent = () => {
                 </div>
             </div>
 
+            {canViewAll && duplicateGroups.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                        <div>
+                            <h3 className="text-lg font-black text-amber-900">Duplicados detectados</h3>
+                            <p className="text-sm text-amber-800">
+                                Se detectaron {duplicateGroups.length} grupo(s) con coincidencias fuertes. La fusión conserva una ficha principal y mueve el historial.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="space-y-3">
+                        {duplicateGroups.slice(0, 8).map((group) => (
+                            <div key={group.id} className="bg-white border border-amber-100 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                                <div className="space-y-2">
+                                    <p className="text-sm font-black text-gray-900">
+                                        Principal: {group.primary.name}
+                                        <span className="ml-2 text-xs font-bold text-gray-500">
+                                            {group.primary.email || group.primary.phone || group.primary.address || 'sin datos extra'}
+                                        </span>
+                                    </p>
+                                    <div className="space-y-1">
+                                        {group.duplicates.map((duplicate) => (
+                                            <p key={duplicate.id} className="text-xs text-gray-600">
+                                                Duplicado: {duplicate.name} · {duplicate.email || duplicate.phone || duplicate.address || 'sin referencia'}
+                                                {' · '}
+                                                Coincide por: {(group.reasonsByClientId[duplicate.id] || []).join(', ')}
+                                            </p>
+                                        ))}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => handleMergeDuplicateGroup(group.id)}
+                                    disabled={mergingDuplicateGroupId === group.id}
+                                    className="bg-amber-500 text-white px-4 py-3 rounded-2xl font-bold hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {mergingDuplicateGroupId === group.id ? 'Fusionando...' : 'Fusionar Grupo'}
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             <div className="flex flex-col gap-4">
                 <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -1540,7 +1691,7 @@ const ClientsContent = () => {
                         <div key={i} className="bg-white h-64 rounded-[2.5rem] animate-pulse"></div>
                     ))}
                 </div>
-            ) : filteredClients.length === 0 ? (
+            ) : displayedClients.length === 0 ? (
                 <div className="flex flex-col items-center justify-center p-20 bg-gray-50 rounded-[3rem] border-2 border-dashed border-gray-200">
                     <div className="bg-white p-6 rounded-full shadow-sm mb-4">
                         <Users size={48} className="text-gray-300" />
@@ -1549,7 +1700,7 @@ const ClientsContent = () => {
                     <p className="text-gray-500 mt-2 text-center max-w-sm">
                         {search ? `No hay resultados para "${search}"` : 'Parece que aún no tienes clientes registrados o no tienes permisos para verlos.'}
                     </p>
-                    {clients.length > 0 && filteredClients.length === 0 && (
+                    {clients.length > 0 && displayedClients.length === 0 && (
                         <p className="text-indigo-600 font-bold mt-4 text-sm bg-indigo-50 px-4 py-2 rounded-full">
                             Hay {clients.length} clientes totales, pero ninguno coincide con tus filtros.
                         </p>
@@ -1557,11 +1708,12 @@ const ClientsContent = () => {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredClients.map((client) => {
+                    {displayedClients.map((client) => {
                         const isOwner = client.created_by === profile?.id;
                         const canEditClient = canEditAnyClient || isOwner;
                         const followupSeverity = getClientFollowupSeverity(client);
                         const showNeglectBadge = followupSeverity !== 'normal';
+                        const collapsedDuplicates = duplicateCountByPrimaryId[client.id] || 0;
 
                         return (
                             <div key={client.id} className="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col justify-between min-h-[340px]">
@@ -1619,6 +1771,12 @@ const ClientsContent = () => {
                                             <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
                                                 <UserCircle2 size={12} />
                                                 {ownersById[client.created_by || ''] || client.pending_seller_email || 'Sin asignar'}
+                                            </div>
+                                        )}
+                                        {collapsedDuplicates > 0 && (
+                                            <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 px-2 py-1 rounded-lg border border-amber-100">
+                                                <Users size={12} />
+                                                {collapsedDuplicates + 1} fichas detectadas, mostrando solo 1
                                             </div>
                                         )}
                                     </div>

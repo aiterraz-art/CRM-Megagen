@@ -6,6 +6,7 @@ import { useUser } from '../contexts/UserContext';
 import { useVisit } from '../contexts/VisitContext';
 import { queueVisitCheckinLocation } from '../services/locationQueue';
 import { MapPin, Building2, ChevronRight, Stethoscope } from 'lucide-react';
+import { saveClientWithDeduplication } from '../utils/clientDuplicates';
 
 const formatGpsAddress = (lat: number, lng: number) => `Ubicación GPS (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
 const COLD_VISIT_DRAFT_KEY = 'cold_visit_draft';
@@ -156,14 +157,9 @@ const ColdVisit = () => {
                 notes: `Visita en Frío iniciada el ${new Date().toLocaleDateString()} (con GPS ±${Math.round(currentLocation.accuracy)}m)`
             };
 
-            const { data: createdClient, error: clientError } = await supabase
-                .from('clients')
-                .insert(newClient)
-                .select('id')
-                .single();
-
-            if (clientError) throw clientError;
-            if (!createdClient?.id) throw new Error('No se pudo crear el prospecto.');
+            const dedupeResult = await saveClientWithDeduplication(newClient, { onDuplicate: 'merge' });
+            const createdClient = dedupeResult.client;
+            if (!createdClient?.id) throw new Error('No se pudo crear o recuperar el prospecto.');
 
             // 2. Start Visit immediately
             const visit = await startVisit(createdClient.id, { type: 'cold_visit' });

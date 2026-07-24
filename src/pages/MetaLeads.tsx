@@ -3,6 +3,7 @@ import { Megaphone, CheckCircle2, Upload, FileSpreadsheet } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import Papa from 'papaparse';
+import { saveClientWithDeduplication } from '../utils/clientDuplicates';
 
 type MetaLead = {
     id: string;
@@ -286,17 +287,18 @@ const MetaLeads = () => {
                     }
 
                     let inserted = 0;
-                    const chunkSize = 100;
-                    for (let i = 0; i < payload.length; i += chunkSize) {
-                        const chunk = payload.slice(i, i + chunkSize);
-                        const { error } = await supabase.from('clients').insert(chunk);
-                        if (error) throw error;
-                        inserted += chunk.length;
+                    let merged = 0;
+
+                    for (const rowPayload of payload) {
+                        const result = await saveClientWithDeduplication(rowPayload, { onDuplicate: 'merge' });
+
+                        if (result.action === 'created') inserted += 1;
+                        if (result.action === 'merged' || result.action === 'reused') merged += 1;
                     }
 
                     await fetchMetaLeads();
-                    const rejected = rows.length - inserted;
-                    alert(`Importación Meta completada.\n\n✅ Importados: ${inserted}\n❌ Omitidos: ${rejected}\n${errors.length ? `\nDetalle (primeros):\n${errors.slice(0, 8).join('\n')}` : ''}`);
+                    const rejected = rows.length - inserted - merged;
+                    alert(`Importación Meta completada.\n\n✅ Importados: ${inserted}\n🔁 Unificados con existentes: ${merged}\n❌ Omitidos: ${rejected}\n${errors.length ? `\nDetalle (primeros):\n${errors.slice(0, 8).join('\n')}` : ''}`);
                 } catch (error: any) {
                     alert(`Error importando Meta Leads: ${error.message || 'desconocido'}`);
                 } finally {

@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { Database } from '../types/supabase';
+import { saveClientWithDeduplication } from '../utils/clientDuplicates';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 type ClientInsert = Database['public']['Tables']['clients']['Insert'];
@@ -21,12 +22,8 @@ export const clientService = {
     },
 
     async createClient(client: ClientInsert) {
-        const { data, error } = await (supabase.from('clients') as any)
-            .insert(client)
-            .select() // Return the inserted data so we can update state immediately
-            .single();
-        if (error) throw error;
-        return data as Client;
+        const result = await saveClientWithDeduplication(client, { onDuplicate: 'merge' });
+        return result.client as Client;
     },
 
 
