@@ -104,12 +104,22 @@ const getErrorMessage = (error: unknown): string => {
         error_description?: string;
     };
 
-    return candidate.message
+    const directMessage = candidate.message
         || candidate.details
         || candidate.hint
         || candidate.error_description
-        || candidate.code
-        || 'desconocido';
+        || candidate.code;
+
+    if (directMessage) return directMessage;
+
+    try {
+        const serialized = JSON.stringify(error, Object.getOwnPropertyNames(error as object));
+        if (serialized && serialized !== '{}') return serialized;
+    } catch {
+        // noop
+    }
+
+    return 'desconocido';
 };
 
 const normalizeSheetHeader = (value: string): string => value

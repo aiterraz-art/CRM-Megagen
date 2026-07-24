@@ -461,6 +461,39 @@ const isMissingRelationError = (error: any) => {
     return code === '42P01' || message.includes('relation') || message.includes('schema cache');
 };
 
+const describeError = (error: unknown): string => {
+    if (!error) return 'desconocido';
+    if (typeof error === 'string') return error;
+    if (error instanceof Error) return error.message || error.name || 'desconocido';
+
+    const candidate = error as {
+        message?: string;
+        details?: string;
+        hint?: string;
+        code?: string;
+        error_description?: string;
+    };
+
+    const directMessage = candidate.message
+        || candidate.details
+        || candidate.hint
+        || candidate.error_description
+        || candidate.code;
+
+    if (directMessage) return directMessage;
+
+    try {
+        const serialized = JSON.stringify(error, Object.getOwnPropertyNames(error as object));
+        if (serialized && serialized !== '{}') return serialized;
+    } catch {
+        // noop
+    }
+
+    return 'desconocido';
+};
+
+const toMergeError = (context: string, error: unknown): Error => new Error(`${context}: ${describeError(error)}`);
+
 const fallbackMergeClientDuplicates = async (primary: ClientRow, duplicates: ClientRow[]) => {
     const duplicateIds = duplicates.map((client) => client.id);
     const finalMergedPayload = duplicates.reduce((accumulator, client) => {
@@ -499,15 +532,28 @@ export const mergeClientDuplicates = async (primary: ClientRow, duplicates: Clie
         throw new Error('No hay clientes duplicados para fusionar.');
     }
 
-    const { data, error } = await supabase.rpc('merge_client_duplicates', {
-        p_primary_client_id: primary.id,
-        p_duplicate_client_ids: duplicateIds
-    } as any);
+    try {
+        const { data, error } = await supabase.rpc('merge_client_duplicates', {
+            p_primary_client_id: primary.id,
+            p_duplicate_client_ids: duplicateIds
+        } as any);
 
-    if (error) {
-        if (!isRpcMissingError(error)) throw error;
-        return fallbackMergeClientDuplicates(primary, duplicates);
+        if (error) {
+            if (!isRpcMissingError(error)) throw toMergeError('Error al ejecutar merge_client_duplicates', error);
+
+            try {
+                return await fallbackMergeClientDuplicates(primary, duplicates);
+            } catch (fallbackError) {
+                throw toMergeError('Error en fallback de fusión de clientes', fallbackError);
+            }
+        }
+
+        if (!data) {
+            throw new Error('La fusión no devolvió resultado desde Supabase. Revisa la migración merge_client_duplicates.');
+        }
+
+        return data;
+    } catch (error) {
+        throw error instanceof Error ? error : toMergeError('Error inesperado al fusionar clientes', error);
     }
-
-    return data;
 };
