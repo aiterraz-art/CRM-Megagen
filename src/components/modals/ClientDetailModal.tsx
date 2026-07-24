@@ -40,6 +40,13 @@ type ClientHistoryItem = {
     amount?: number | null;
 };
 
+type HistoryFetchResult = {
+    items: ClientHistoryItem[];
+    warnings: string[];
+};
+
+type ActorNameMap = Record<string, string>;
+
 const formatCallStatusLabel = (status: string | null | undefined) => {
     switch (status) {
         case 'contestada':
@@ -117,6 +124,16 @@ const getHistoryKindMeta = (kind: ClientHistoryKind) => {
     }
 };
 
+const extractErrorMessage = (error: unknown) => {
+    if (!error) return 'desconocido';
+    if (typeof error === 'string') return error;
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string') {
+        return (error as { message: string }).message;
+    }
+    return 'desconocido';
+};
+
 const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailModalProps) => {
     const navigate = useNavigate();
     const { profile, effectiveRole } = useUser();
@@ -163,10 +180,29 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
         fetchData();
     }, [client.id, activeTab]);
 
-    const fetchHistoryItems = async (limit?: number) => {
+    const fetchActorNameMap = async (userIds: Array<string | null | undefined>) => {
+        const uniqueUserIds = Array.from(new Set(userIds.filter((value): value is string => Boolean(value))));
+        if (uniqueUserIds.length === 0) {
+            return {} as ActorNameMap;
+        }
+
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', uniqueUserIds);
+
+        if (error) throw error;
+
+        return (data || []).reduce<ActorNameMap>((acc, profile) => {
+            acc[profile.id] = profile.full_name || 'Usuario';
+            return acc;
+        }, {});
+    };
+
+    const fetchHistoryItems = async (limit?: number): Promise<HistoryFetchResult> => {
         let visitsQuery = supabase
             .from('visits')
-            .select('id, title, purpose, notes, status, check_in_time, profiles(full_name)')
+            .select('id, title, purpose, notes, status, check_in_time, sales_rep_id')
             .eq('client_id', client.id)
             .order('check_in_time', { ascending: false });
         let quotationsQuery = supabase
@@ -181,17 +217,17 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
             .order('created_at', { ascending: false });
         let callsQuery = supabase
             .from('call_logs')
-            .select('id, created_at, status, notes, profiles(full_name)')
+            .select('id, created_at, status, notes, user_id')
             .eq('client_id', client.id)
             .order('created_at', { ascending: false });
         let emailsQuery = supabase
             .from('email_logs')
-            .select('id, created_at, subject, snippet, profiles(full_name)')
+            .select('id, created_at, subject, snippet, user_id')
             .eq('client_id', client.id)
             .order('created_at', { ascending: false });
         let messagesQuery = supabase
             .from('lead_message_logs')
-            .select('id, created_at, destination, status, error_message, profiles(full_name)')
+            .select('id, created_at, destination, status, error_message, user_id')
             .eq('client_id', client.id)
             .eq('channel', 'whatsapp')
             .order('created_at', { ascending: false });
@@ -206,12 +242,12 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
         }
 
         const [
-            { data: visitsData, error: visitsError },
-            { data: quotationsData, error: quotationsError },
-            { data: ordersData, error: ordersError },
-            { data: callsData, error: callsError },
-            { data: emailsData, error: emailsError },
-            { data: messagesData, error: messagesError }
+            visitsResult,
+            quotationsResult,
+            ordersResult,
+            callsResult,
+            emailsResult,
+            messagesResult
         ] = await Promise.all([
             visitsQuery,
             quotationsQuery,
@@ -221,20 +257,40 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
             messagesQuery
         ]);
 
-        const firstError = visitsError || quotationsError || ordersError || callsError || emailsError || messagesError;
-        if (firstError) throw firstError;
+        const warnings = [
+            visitsResult.error ? `Visitas: ${extractErrorMessage(visitsResult.error)}` : null,
+            quotationsResult.error ? `Cotizaciones: ${extractErrorMessage(quotationsResult.error)}` : null,
+            ordersResult.error ? `Ventas: ${extractErrorMessage(ordersResult.error)}` : null,
+            callsResult.error ? `Llamadas: ${extractErrorMessage(callsResult.error)}` : null,
+            emailsResult.error ? `Correos: ${extractErrorMessage(emailsResult.error)}` : null,
+            messagesResult.error ? `WhatsApp: ${extractErrorMessage(messagesResult.error)}` : null
+        ].filter((warning): warning is string => Boolean(warning));
 
-        return [
-            ...((visitsData || []).map((item: any) => ({
+        const visitsData = visitsResult.data || [];
+        const quotationsData = quotationsResult.data || [];
+        const ordersData = ordersResult.data || [];
+        const callsData = callsResult.data || [];
+        const emailsData = emailsResult.data || [];
+        const messagesData = messagesResult.data || [];
+
+        const actorNameMap = await fetchActorNameMap([
+            ...visitsData.map((item: any) => item.sales_rep_id),
+            ...callsData.map((item: any) => item.user_id),
+            ...emailsData.map((item: any) => item.user_id),
+            ...messagesData.map((item: any) => item.user_id)
+        ]);
+
+        const items = [
+            ...(visitsData.map((item: any) => ({
                 id: `visit-${item.id}`,
                 kind: 'visit' as const,
                 date: item.check_in_time,
                 title: item.status === 'scheduled' ? 'Visita agendada' : item.status === 'cancelled' ? 'Visita cancelada' : 'Visita registrada',
                 subtitle: item.title || item.purpose || item.notes || 'Sin detalle',
-                actor: item.profiles?.full_name || null,
+                actor: item.sales_rep_id ? actorNameMap[item.sales_rep_id] || 'Usuario' : null,
                 status: item.status === 'scheduled' ? 'Agendada' : item.status === 'cancelled' ? 'Cancelada' : 'Completada'
             }))),
-            ...((quotationsData || []).map((item: any) => ({
+            ...(quotationsData.map((item: any) => ({
                 id: `quotation-${item.id}`,
                 kind: 'quotation' as const,
                 date: item.created_at,
@@ -243,7 +299,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 status: formatQuotationStatusLabel(item.status),
                 amount: Number(item.total_amount || 0)
             }))),
-            ...((ordersData || []).map((item: any) => ({
+            ...(ordersData.map((item: any) => ({
                 id: `order-${item.id}`,
                 kind: 'order' as const,
                 date: item.created_at,
@@ -252,37 +308,39 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 status: item.status ? String(item.status).replaceAll('_', ' ') : 'Registrada',
                 amount: Number(item.total_amount || 0)
             }))),
-            ...((callsData || []).map((item: any) => ({
+            ...(callsData.map((item: any) => ({
                 id: `call-${item.id}`,
                 kind: 'call' as const,
                 date: item.created_at,
                 title: 'Llamada registrada',
                 subtitle: item.notes || formatCallStatusLabel(item.status),
-                actor: item.profiles?.full_name || null,
+                actor: item.user_id ? actorNameMap[item.user_id] || 'Usuario' : null,
                 status: formatCallStatusLabel(item.status)
             }))),
-            ...((emailsData || []).map((item: any) => ({
+            ...(emailsData.map((item: any) => ({
                 id: `email-${item.id}`,
                 kind: 'email' as const,
                 date: item.created_at,
                 title: item.subject || 'Correo registrado',
                 subtitle: item.snippet || 'Sin detalle',
-                actor: item.profiles?.full_name || null,
+                actor: item.user_id ? actorNameMap[item.user_id] || 'Usuario' : null,
                 status: 'Enviado'
             }))),
-            ...((messagesData || []).map((item: any) => ({
+            ...(messagesData.map((item: any) => ({
                 id: `whatsapp-${item.id}`,
                 kind: 'whatsapp' as const,
                 date: item.created_at,
                 title: 'WhatsApp registrado',
                 subtitle: item.error_message || item.destination || 'Sin detalle',
-                actor: item.profiles?.full_name || null,
+                actor: item.user_id ? actorNameMap[item.user_id] || 'Usuario' : null,
                 status: String(item.status || 'sent').replaceAll('_', ' ')
             })))
         ]
             .filter((item) => !!item.date)
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
             .slice(0, limit || Number.MAX_SAFE_INTEGER);
+
+        return { items, warnings };
     };
 
     const fetchData = async () => {
@@ -294,7 +352,14 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                     ? supabase.from('vw_collections_pending_current').select('*').in('client_rut', clientRutVariants).order('due_date', { ascending: true })
                     : Promise.resolve({ data: [], error: null } as any);
 
-                const [{ count: visitsCount }, { data: lastVisit }, { data: salesData }, { data: quotesData }, { data: collectionData, error: collectionsError }, activityTimeline] = await Promise.all([
+                const [
+                    { count: visitsCount, error: visitsCountError },
+                    { data: lastVisit, error: lastVisitError },
+                    { data: salesData, error: salesError },
+                    { data: quotesData, error: quotesError },
+                    { data: collectionData, error: collectionsError },
+                    historyResult
+                ] = await Promise.all([
                     supabase.from('visits').select('*', { count: 'exact', head: true }).eq('client_id', client.id),
                     supabase.from('visits').select('check_in_time').eq('client_id', client.id).eq('status', 'completed').order('check_in_time', { ascending: false }).limit(1).maybeSingle(),
                     supabase.from('orders').select('total_amount').eq('client_id', client.id),
@@ -303,7 +368,14 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                     fetchHistoryItems(8)
                 ]);
 
-                if (collectionsError) throw collectionsError;
+                const overviewWarnings = [
+                    visitsCountError ? `Conteo de visitas: ${extractErrorMessage(visitsCountError)}` : null,
+                    lastVisitError ? `Última visita: ${extractErrorMessage(lastVisitError)}` : null,
+                    salesError ? `Ventas: ${extractErrorMessage(salesError)}` : null,
+                    quotesError ? `Cotizaciones: ${extractErrorMessage(quotesError)}` : null,
+                    collectionsError ? `Cobranzas: ${extractErrorMessage(collectionsError)}` : null,
+                    ...historyResult.warnings
+                ].filter((warning): warning is string => Boolean(warning));
 
                 const totalSales = salesData?.reduce((acc, curr) => acc + (Number(curr.total_amount) || 0), 0) || 0;
                 const totalQuotations = quotesData?.length || 0;
@@ -329,26 +401,47 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 });
                 setSentQuotations(sent.slice(0, 6));
                 setCollections(matchedCollections);
-                setRecentActivity(activityTimeline);
+                setRecentActivity(historyResult.items);
+                if (overviewWarnings.length > 0) {
+                    setLoadError(`Parte de la ficha no se pudo cargar: ${overviewWarnings[0]}`);
+                }
             } else if (activeTab === 'history') {
-                const data = await fetchHistoryItems();
-                setHistoryItems(data);
+                const result = await fetchHistoryItems();
+                setHistoryItems(result.items);
+                if (result.warnings.length > 0) {
+                    setLoadError(`Parte del historial no se pudo cargar: ${result.warnings[0]}`);
+                }
             } else if (activeTab === 'visits') {
-                const { data } = await supabase.from('visits').select('*, profiles(full_name)').eq('client_id', client.id).order('check_in_time', { ascending: false });
-                setVisits(data || []);
+                const { data, error } = await supabase
+                    .from('visits')
+                    .select('*')
+                    .eq('client_id', client.id)
+                    .order('check_in_time', { ascending: false });
+                if (error) throw error;
+
+                const actorNameMap = await fetchActorNameMap((data || []).map((visit: any) => visit.sales_rep_id));
+                setVisits((data || []).map((visit: any) => ({
+                    ...visit,
+                    profiles: {
+                        full_name: visit.sales_rep_id ? actorNameMap[visit.sales_rep_id] || 'Usuario' : 'Usuario'
+                    }
+                })));
             } else if (activeTab === 'quotations') {
-                const { data } = await supabase.from('quotations').select('*').eq('client_id', client.id).order('created_at', { ascending: false });
+                const { data, error } = await supabase.from('quotations').select('*').eq('client_id', client.id).order('created_at', { ascending: false });
+                if (error) throw error;
                 setQuotations(data || []);
             } else if (activeTab === 'sent_quotations') {
-                const { data } = await supabase
+                const { data, error } = await supabase
                     .from('quotations')
                     .select('id, status, folio, total_amount, created_at, comments')
                     .eq('client_id', client.id)
                     .eq('status', 'sent')
                     .order('created_at', { ascending: false });
+                if (error) throw error;
                 setSentQuotations(data || []);
             } else if (activeTab === 'orders') {
-                const { data } = await supabase.from('orders').select('*, order_items(quantity, total_price, inventory(name))').eq('client_id', client.id).order('created_at', { ascending: false });
+                const { data, error } = await supabase.from('orders').select('*, order_items(quantity, total_price, inventory(name))').eq('client_id', client.id).order('created_at', { ascending: false });
+                if (error) throw error;
                 setOrders(data || []);
             } else if (activeTab === 'collections') {
                 if (clientRutVariants.length === 0) {
@@ -365,23 +458,55 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                     ));
                 }
             } else if (activeTab === 'emails') {
-                const { data } = await supabase.from('email_logs').select('*, profiles(full_name)').eq('client_id', client.id).order('created_at', { ascending: false });
-                setEmails(data || []);
+                const { data, error } = await supabase
+                    .from('email_logs')
+                    .select('*')
+                    .eq('client_id', client.id)
+                    .order('created_at', { ascending: false });
+                if (error) throw error;
+
+                const actorNameMap = await fetchActorNameMap((data || []).map((email: any) => email.user_id));
+                setEmails((data || []).map((email: any) => ({
+                    ...email,
+                    profiles: {
+                        full_name: email.user_id ? actorNameMap[email.user_id] || 'Usuario' : 'Usuario'
+                    }
+                })));
             } else if (activeTab === 'calls') {
-                const { data } = await supabase.from('call_logs').select('*, profiles(full_name)').eq('client_id', client.id).order('created_at', { ascending: false });
-                setCallLogs(data || []);
+                const { data, error } = await supabase
+                    .from('call_logs')
+                    .select('*')
+                    .eq('client_id', client.id)
+                    .order('created_at', { ascending: false });
+                if (error) throw error;
+
+                const actorNameMap = await fetchActorNameMap((data || []).map((log: any) => log.user_id));
+                setCallLogs((data || []).map((log: any) => ({
+                    ...log,
+                    profiles: {
+                        full_name: log.user_id ? actorNameMap[log.user_id] || 'Usuario' : 'Usuario'
+                    }
+                })));
             } else if (activeTab === 'messages') {
-                const { data } = await supabase
+                const { data, error } = await supabase
                     .from('lead_message_logs')
-                    .select('*, profiles(full_name)')
+                    .select('*')
                     .eq('client_id', client.id)
                     .eq('channel', 'whatsapp')
                     .order('created_at', { ascending: false });
-                setMessageLogs(data || []);
+                if (error) throw error;
+
+                const actorNameMap = await fetchActorNameMap((data || []).map((message: any) => message.user_id));
+                setMessageLogs((data || []).map((message: any) => ({
+                    ...message,
+                    profiles: {
+                        full_name: message.user_id ? actorNameMap[message.user_id] || 'Usuario' : 'Usuario'
+                    }
+                })));
             }
         } catch (error) {
             console.error("Error fetching client details:", error);
-            setLoadError('No se pudo cargar la información de esta ficha.');
+            setLoadError(`No se pudo cargar la información de esta ficha. Detalle: ${extractErrorMessage(error)}`);
         } finally {
             setLoading(false);
         }

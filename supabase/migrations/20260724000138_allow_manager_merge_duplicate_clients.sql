@@ -245,7 +245,10 @@ BEGIN
     created_by = coalesce(v_created_by, created_by),
     pending_seller_email = coalesce(v_pending_seller_email, pending_seller_email),
     credit_days = greatest(coalesce(v_credit_days, 0), coalesce(credit_days, 0)),
-    lead_score = greatest(coalesce(v_lead_score, 0), coalesce(lead_score, 0)),
+    lead_score = CASE
+      WHEN v_lead_score IS NULL AND lead_score IS NULL THEN NULL
+      ELSE least(3, greatest(1, greatest(coalesce(v_lead_score, 1), coalesce(lead_score, 1))))
+    END,
     requires_discount_approval = coalesce(v_requires_discount_approval, requires_discount_approval),
     last_visit_date = coalesce(v_last_visit_date, last_visit_date),
     lat = coalesce(v_lat, lat),
