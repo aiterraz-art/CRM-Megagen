@@ -913,7 +913,7 @@ const Settings: React.FC = () => {
                         <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><AlertTriangle className="text-indigo-600" /> Seguimiento Comercial</h3>
                         <p className="mt-2 text-sm font-medium text-gray-500">
                             Define cuándo un prospecto o cliente activo pasa a riesgo o crítico por falta de gestión comercial.
-                            La actividad considera visitas, cotizaciones y pedidos.
+                            La actividad considera visitas, cotizaciones, pedidos, llamadas, WhatsApp y correos.
                         </p>
                     </div>
 
@@ -979,10 +979,10 @@ const Settings: React.FC = () => {
                                     disabled={loadingClientFollowupSettings}
                                     className="w-full rounded-2xl border border-indigo-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-indigo-400"
                                 />
-                                <p className="mt-2 text-xs font-medium text-indigo-800">Si un cliente activo no recibe visita, cotización ni pedido dentro de este plazo, se marcará como crítico.</p>
+                                <p className="mt-2 text-xs font-medium text-indigo-800">Si un cliente activo no recibe gestión comercial dentro de este plazo, se marcará como crítico.</p>
                             </div>
                             <div className="rounded-2xl border border-indigo-100 bg-white/80 p-4 text-xs font-medium text-slate-600">
-                                Actividad comercial considerada: última visita, última cotización o último pedido, lo que sea más reciente.
+                                Actividad comercial considerada: última visita, última cotización, último pedido, última llamada, último WhatsApp o último correo, lo que sea más reciente.
                             </div>
                         </div>
                     </div>

@@ -401,9 +401,18 @@ const ClientsContent = () => {
                 const clientIds = visibleClients.map((client) => client.id).filter(Boolean);
                 const latestQuotationByClient: Record<string, string> = {};
                 const latestOrderByClient: Record<string, string> = {};
+                const latestCallByClient: Record<string, string> = {};
+                const latestEmailByClient: Record<string, string> = {};
+                const latestWhatsappByClient: Record<string, string> = {};
 
                 for (const chunk of chunkArray(clientIds, 200)) {
-                    const [{ data: quotationsData, error: quotationsError }, { data: ordersData, error: ordersError }] = await Promise.all([
+                    const [
+                        { data: quotationsData, error: quotationsError },
+                        { data: ordersData, error: ordersError },
+                        { data: callsData, error: callsError },
+                        { data: emailsData, error: emailsError },
+                        { data: whatsappData, error: whatsappError }
+                    ] = await Promise.all([
                         supabase
                             .from('quotations')
                             .select('client_id, created_at')
@@ -411,11 +420,28 @@ const ClientsContent = () => {
                         supabase
                             .from('orders')
                             .select('client_id, created_at')
+                            .in('client_id', chunk),
+                        supabase
+                            .from('call_logs')
+                            .select('client_id, created_at')
+                            .in('client_id', chunk),
+                        supabase
+                            .from('email_logs')
+                            .select('client_id, created_at')
+                            .in('client_id', chunk),
+                        supabase
+                            .from('lead_message_logs')
+                            .select('client_id, created_at, channel, status')
                             .in('client_id', chunk)
+                            .eq('channel', 'whatsapp')
+                            .in('status', ['sent', 'opened_external'])
                     ]);
 
                     if (quotationsError) throw quotationsError;
                     if (ordersError) throw ordersError;
+                    if (callsError) throw callsError;
+                    if (emailsError) throw emailsError;
+                    if (whatsappError) throw whatsappError;
 
                     (quotationsData || []).forEach((quotation) => {
                         if (!quotation.client_id) return;
@@ -428,6 +454,24 @@ const ClientsContent = () => {
                         const current = latestOrderByClient[order.client_id];
                         latestOrderByClient[order.client_id] = getLatestIsoDate(current, order.created_at) || order.created_at;
                     });
+
+                    (callsData || []).forEach((call) => {
+                        if (!call.client_id) return;
+                        const current = latestCallByClient[call.client_id];
+                        latestCallByClient[call.client_id] = getLatestIsoDate(current, call.created_at) || call.created_at;
+                    });
+
+                    (emailsData || []).forEach((email) => {
+                        if (!email.client_id) return;
+                        const current = latestEmailByClient[email.client_id];
+                        latestEmailByClient[email.client_id] = getLatestIsoDate(current, email.created_at) || email.created_at;
+                    });
+
+                    (whatsappData || []).forEach((message) => {
+                        if (!message.client_id) return;
+                        const current = latestWhatsappByClient[message.client_id];
+                        latestWhatsappByClient[message.client_id] = getLatestIsoDate(current, message.created_at) || message.created_at;
+                    });
                 }
 
                 visibleClients.forEach(client => {
@@ -435,6 +479,9 @@ const ClientsContent = () => {
                         client.last_visit_date,
                         latestQuotationByClient[client.id] || null,
                         latestOrderByClient[client.id] || null,
+                        latestCallByClient[client.id] || null,
+                        latestEmailByClient[client.id] || null,
+                        latestWhatsappByClient[client.id] || null,
                         client.created_at
                     );
                     const days = lastActivityAt

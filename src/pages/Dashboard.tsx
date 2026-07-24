@@ -30,6 +30,14 @@ const hasMeaningfulZone = (value: unknown) => {
     return true;
 };
 
+const getLatestIsoDate = (...values: Array<string | null | undefined>) => values
+    .filter(Boolean)
+    .reduce<string | null>((latest, current) => {
+        if (!current) return latest;
+        if (!latest) return current;
+        return new Date(current).getTime() > new Date(latest).getTime() ? current : latest;
+    }, null);
+
 const resolveComunaFromGps = async (lat: number, lng: number): Promise<string | null> => {
     const roundedLat = lat.toFixed(5);
     const roundedLng = lng.toFixed(5);
@@ -350,20 +358,103 @@ const Dashboard = () => {
                 const { data: allClients } = await clientsQuery;
 
                 if (allClients) {
-                    const { data: lastVisits } = await supabase
-                        .from('visits')
-                        .select('client_id, check_in_time')
-                        .in('client_id', allClients.map(c => c.id))
-                        .eq('status', 'completed')
-                        .order('check_in_time', { ascending: false });
+                    const clientIds = allClients.map(c => c.id);
+                    const [
+                        { data: followupSettingsRow },
+                        { data: lastVisits },
+                        { data: lastOrders },
+                        { data: lastQuotes },
+                        { data: lastCalls },
+                        { data: lastEmails },
+                        { data: lastWhatsapp }
+                    ] = await Promise.all([
+                        supabase
+                            .from('client_followup_settings')
+                            .select('active_warning_days')
+                            .eq('id', 'default')
+                            .maybeSingle(),
+                        supabase
+                            .from('visits')
+                            .select('client_id, check_in_time')
+                            .in('client_id', clientIds)
+                            .eq('status', 'completed')
+                            .order('check_in_time', { ascending: false }),
+                        supabase
+                            .from('orders')
+                            .select('client_id, created_at')
+                            .in('client_id', clientIds)
+                            .order('created_at', { ascending: false }),
+                        supabase
+                            .from('quotations')
+                            .select('client_id, created_at')
+                            .in('client_id', clientIds)
+                            .order('created_at', { ascending: false }),
+                        supabase
+                            .from('call_logs')
+                            .select('client_id, created_at')
+                            .in('client_id', clientIds)
+                            .order('created_at', { ascending: false }),
+                        supabase
+                            .from('email_logs')
+                            .select('client_id, created_at')
+                            .in('client_id', clientIds)
+                            .order('created_at', { ascending: false }),
+                        supabase
+                            .from('lead_message_logs')
+                            .select('client_id, created_at, channel, status')
+                            .in('client_id', clientIds)
+                            .eq('channel', 'whatsapp')
+                            .in('status', ['sent', 'opened_external'])
+                            .order('created_at', { ascending: false })
+                    ]);
 
+                    const warningDays = Number(followupSettingsRow?.active_warning_days || 15);
                     const now = new Date();
+                    const latestVisitByClient = new Map<string, string>();
+                    const latestOrderByClient = new Map<string, string>();
+                    const latestQuoteByClient = new Map<string, string>();
+                    const latestCallByClient = new Map<string, string>();
+                    const latestEmailByClient = new Map<string, string>();
+                    const latestWhatsappByClient = new Map<string, string>();
+
+                    (lastVisits || []).forEach((visit: any) => {
+                        if (!visit.client_id) return;
+                        latestVisitByClient.set(visit.client_id, getLatestIsoDate(latestVisitByClient.get(visit.client_id) || null, visit.check_in_time) || visit.check_in_time);
+                    });
+                    (lastOrders || []).forEach((order: any) => {
+                        if (!order.client_id) return;
+                        latestOrderByClient.set(order.client_id, getLatestIsoDate(latestOrderByClient.get(order.client_id) || null, order.created_at) || order.created_at);
+                    });
+                    (lastQuotes || []).forEach((quote: any) => {
+                        if (!quote.client_id) return;
+                        latestQuoteByClient.set(quote.client_id, getLatestIsoDate(latestQuoteByClient.get(quote.client_id) || null, quote.created_at) || quote.created_at);
+                    });
+                    (lastCalls || []).forEach((call: any) => {
+                        if (!call.client_id) return;
+                        latestCallByClient.set(call.client_id, getLatestIsoDate(latestCallByClient.get(call.client_id) || null, call.created_at) || call.created_at);
+                    });
+                    (lastEmails || []).forEach((email: any) => {
+                        if (!email.client_id) return;
+                        latestEmailByClient.set(email.client_id, getLatestIsoDate(latestEmailByClient.get(email.client_id) || null, email.created_at) || email.created_at);
+                    });
+                    (lastWhatsapp || []).forEach((message: any) => {
+                        if (!message.client_id) return;
+                        latestWhatsappByClient.set(message.client_id, getLatestIsoDate(latestWhatsappByClient.get(message.client_id) || null, message.created_at) || message.created_at);
+                    });
+
                     const neglected = allClients.map(client => {
-                        const lastVisit = lastVisits?.find(v => v.client_id === client.id);
-                        const lastDate = lastVisit ? new Date(lastVisit.check_in_time) : null;
+                        const lastActivityAt = getLatestIsoDate(
+                            latestVisitByClient.get(client.id) || null,
+                            latestOrderByClient.get(client.id) || null,
+                            latestQuoteByClient.get(client.id) || null,
+                            latestCallByClient.get(client.id) || null,
+                            latestEmailByClient.get(client.id) || null,
+                            latestWhatsappByClient.get(client.id) || null
+                        );
+                        const lastDate = lastActivityAt ? new Date(lastActivityAt) : null;
                         const days = lastDate ? Math.floor((now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)) : 999;
                         return { ...client, daysSinceLastVisit: days, lastVisitDate: lastDate };
-                    }).filter(c => c.daysSinceLastVisit >= 15)
+                    }).filter(c => c.daysSinceLastVisit >= warningDays)
                         .sort((a, b) => b.daysSinceLastVisit - a.daysSinceLastVisit);
 
                     setNeglectedClients(neglected);

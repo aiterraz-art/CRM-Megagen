@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, MapPin, Phone, Mail, Building2, FileText, ShoppingBag, Clock, FileSpreadsheet, Pencil, CalendarRange, CheckCircle2, AlertTriangle, Send } from 'lucide-react';
+import { X, MapPin, Phone, Mail, Building2, FileText, ShoppingBag, Clock, FileSpreadsheet, Pencil, CalendarRange, CheckCircle2, AlertTriangle, Send, MessageCircle } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { Database } from '../../types/supabase';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { useNavigate } from 'react-router-dom';
 import CallOutcomeModal from './CallOutcomeModal';
 import ScheduleVisitModal from './ScheduleVisitModal';
+import ClientManagementModal from './ClientManagementModal';
 import { useUser } from '../../contexts/UserContext';
 import { googleService } from '../../services/googleService';
 import {
@@ -29,7 +30,7 @@ interface ClientDetailModalProps {
 const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailModalProps) => {
     const navigate = useNavigate();
     const { profile, effectiveRole } = useUser();
-    const [activeTab, setActiveTab] = useState<'overview' | 'visits' | 'quotations' | 'sent_quotations' | 'orders' | 'collections' | 'emails' | 'calls'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'visits' | 'quotations' | 'sent_quotations' | 'orders' | 'collections' | 'emails' | 'calls' | 'messages'>('overview');
     const [stats, setStats] = useState({
         totalVisits: 0,
         totalSales: 0,
@@ -46,12 +47,14 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const [collections, setCollections] = useState<any[]>([]);
     const [emails, setEmails] = useState<any[]>([]);
     const [callLogs, setCallLogs] = useState<any[]>([]);
+    const [messageLogs, setMessageLogs] = useState<any[]>([]);
     const [recentActivity, setRecentActivity] = useState<Array<{ id: string; type: string; date: string; title: string; subtitle: string }>>([]);
     const [sentQuotations, setSentQuotations] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [showCallOutcome, setShowCallOutcome] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
+    const [showManagementModal, setShowManagementModal] = useState(false);
 
     const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
     const clientRutVariants = buildCollectionsRutVariants(client.rut);
@@ -78,7 +81,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                     ? supabase.from('vw_collections_pending_current').select('*').in('client_rut', clientRutVariants).order('due_date', { ascending: true })
                     : Promise.resolve({ data: [], error: null } as any);
 
-                const [{ count: visitsCount }, { data: lastVisit }, { data: salesData }, { data: quotesData }, { data: recentVisits }, { data: recentCalls }, { data: recentEmails }, { data: recentOrders }, { data: collectionData, error: collectionsError }] = await Promise.all([
+                const [{ count: visitsCount }, { data: lastVisit }, { data: salesData }, { data: quotesData }, { data: recentVisits }, { data: recentCalls }, { data: recentEmails }, { data: recentMessages }, { data: recentOrders }, { data: collectionData, error: collectionsError }] = await Promise.all([
                     supabase.from('visits').select('*', { count: 'exact', head: true }).eq('client_id', client.id),
                     supabase.from('visits').select('check_in_time').eq('client_id', client.id).eq('status', 'completed').order('check_in_time', { ascending: false }).limit(1).maybeSingle(),
                     supabase.from('orders').select('total_amount').eq('client_id', client.id),
@@ -86,6 +89,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                     supabase.from('visits').select('id, check_in_time, status, purpose').eq('client_id', client.id).order('check_in_time', { ascending: false }).limit(4),
                     supabase.from('call_logs').select('id, created_at, status').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4),
                     supabase.from('email_logs').select('id, created_at, subject').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4),
+                    supabase.from('lead_message_logs').select('id, created_at, channel, status, destination').eq('client_id', client.id).eq('channel', 'whatsapp').order('created_at', { ascending: false }).limit(4),
                     supabase.from('orders').select('id, created_at, total_amount').eq('client_id', client.id).order('created_at', { ascending: false }).limit(4),
                     collectionsPromise
                 ]);
@@ -139,6 +143,13 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                         title: 'Correo enviado',
                         subtitle: item.subject || 'Sin asunto'
                     })),
+                    ...(recentMessages || []).map((item: any) => ({
+                        id: `wa-${item.id}`,
+                        type: 'WhatsApp',
+                        date: item.created_at,
+                        title: 'WhatsApp registrado',
+                        subtitle: item.destination || String(item.status || 'sin estado')
+                    })),
                     ...(recentOrders || []).map((item: any) => ({
                         id: `order-${item.id}`,
                         type: 'Venta',
@@ -189,6 +200,14 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
             } else if (activeTab === 'calls') {
                 const { data } = await supabase.from('call_logs').select('*, profiles(full_name)').eq('client_id', client.id).order('created_at', { ascending: false });
                 setCallLogs(data || []);
+            } else if (activeTab === 'messages') {
+                const { data } = await supabase
+                    .from('lead_message_logs')
+                    .select('*, profiles(full_name)')
+                    .eq('client_id', client.id)
+                    .eq('channel', 'whatsapp')
+                    .order('created_at', { ascending: false });
+                setMessageLogs(data || []);
             }
         } catch (error) {
             console.error("Error fetching client details:", error);
@@ -208,17 +227,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const handleQuote = () => navigate('/quotations', { state: { client: client } });
 
     const handleCall = async () => {
-        // Register call automatically
-        if (profile?.id) {
-            await supabase.from('call_logs').insert({
-                user_id: profile.id,
-                client_id: client.id,
-                status: 'iniciada', // Preliminary status
-                interaction_type: 'Llamada'
-            });
-        }
         window.location.href = `tel:${client.phone}`;
-        // Show modal to capture outcome
         setTimeout(() => setShowCallOutcome(true), 1500);
     };
 
@@ -296,6 +305,9 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                             <button onClick={handleVisit} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-900/50 active:scale-95">
                                 <MapPin size={18} /> Visita
                             </button>
+                            <button onClick={() => setShowManagementModal(true)} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30 active:scale-95">
+                                <MessageCircle size={18} /> Gestión
+                            </button>
                             <button onClick={handleQuote} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold transition-all border border-gray-700 active:scale-95">
                                 <FileText size={18} /> Cotizar
                             </button>
@@ -319,6 +331,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                         { id: 'orders', label: 'Ventas', icon: ShoppingBag },
                         { id: 'collections', label: 'Cobranzas', icon: AlertTriangle },
                         { id: 'calls', label: 'Llamadas', icon: Phone },
+                        { id: 'messages', label: 'WhatsApp', icon: MessageCircle },
                         { id: 'emails', label: 'Correos', icon: Mail },
                     ].map(tab => (
                         <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex items-center gap-2 px-6 py-5 text-sm font-bold border-b-4 transition-all whitespace-nowrap ${activeTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-400 hover:text-gray-600 hover:border-gray-200'}`}>
@@ -619,6 +632,22 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                             <div className="mt-2 flex items-center gap-2"><span className="text-[10px] font-medium bg-gray-100 px-2 py-0.5 rounded text-gray-500">Por: {email.profiles?.full_name || 'Usuario'}</span></div>
                                         </div>
                                     ))}
+                                    {activeTab === 'messages' && messageLogs.map((message) => (
+                                        <div key={message.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <h4 className="font-bold text-gray-900 text-sm">WhatsApp {message.status === 'failed' ? 'fallido' : 'registrado'}</h4>
+                                                <span className="text-[10px] text-gray-400 font-bold uppercase">{formatDateTime(message.created_at)}</span>
+                                            </div>
+                                            <p className="text-xs text-gray-500">{message.destination || 'Sin destino registrado'}</p>
+                                            {message.error_message && (
+                                                <p className="text-xs text-gray-600 mt-2 italic">"{message.error_message}"</p>
+                                            )}
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <span className="text-[10px] font-medium bg-gray-100 px-2 py-0.5 rounded text-gray-500">Por: {message.profiles?.full_name || 'Usuario'}</span>
+                                                <span className="text-[10px] font-medium bg-emerald-50 px-2 py-0.5 rounded text-emerald-700 uppercase">{String(message.status || 'sent').replace('_', ' ')}</span>
+                                            </div>
+                                        </div>
+                                    ))}
                                     {activeTab === 'calls' && callLogs.map((log) => (
                                         <div key={log.id} className="p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex justify-between items-start">
                                             <div className="flex items-center gap-4">
@@ -639,6 +668,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                     {activeTab === 'orders' && orders.length === 0 && <EmptyState message="No hay ventas registradas" />}
                                     {activeTab === 'collections' && collections.length === 0 && <EmptyState message={client.rut ? "No hay cobranzas pendientes para este cliente" : "El cliente no tiene RUT para vincular cobranzas"} />}
                                     {activeTab === 'emails' && emails.length === 0 && <EmptyState message="No hay correos registrados" />}
+                                    {activeTab === 'messages' && messageLogs.length === 0 && <EmptyState message="No hay WhatsApp registrados" />}
                                     {activeTab === 'calls' && callLogs.length === 0 && <EmptyState message="No hay llamadas registradas" />}
                                 </div>
                             )}
@@ -662,6 +692,15 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 onClose={() => setShowScheduleModal(false)}
                 onSaved={() => {
                     if (activeTab === 'visits') fetchData();
+                }}
+            />
+
+            <ClientManagementModal
+                client={client}
+                isOpen={showManagementModal}
+                onClose={() => setShowManagementModal(false)}
+                onSaved={() => {
+                    fetchData();
                 }}
             />
         </div>
