@@ -24,10 +24,10 @@ type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_s
 
 const DEFAULT_CLIENT_FOLLOWUP_SETTINGS: ClientFollowupSettingsRow = {
     id: 'default',
-    active_warning_days: 15,
-    active_critical_days: 30,
-    prospect_warning_days: 15,
-    prospect_critical_days: 30,
+    active_warning_days: 30,
+    active_critical_days: 45,
+    prospect_warning_days: 30,
+    prospect_critical_days: 45,
     pool_reassignment_days: 30,
     updated_at: new Date().toISOString(),
     updated_by: null

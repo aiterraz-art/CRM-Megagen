@@ -64,10 +64,10 @@ const Settings: React.FC = () => {
     const [savingOrderNotificationSettings, setSavingOrderNotificationSettings] = useState(false);
     const [clientFollowupSettings, setClientFollowupSettings] = useState<ClientFollowupSettingsRow>({
         id: 'default',
-        active_warning_days: 15,
-        active_critical_days: 30,
-        prospect_warning_days: 15,
-        prospect_critical_days: 30,
+        active_warning_days: 30,
+        active_critical_days: 45,
+        prospect_warning_days: 30,
+        prospect_critical_days: 45,
         pool_reassignment_days: 30,
         updated_at: new Date().toISOString(),
         updated_by: null
@@ -511,10 +511,10 @@ const Settings: React.FC = () => {
 
             setClientFollowupSettings(data || {
                 id: 'default',
-                active_warning_days: 15,
-                active_critical_days: 30,
-                prospect_warning_days: 15,
-                prospect_critical_days: 30,
+                active_warning_days: 30,
+                active_critical_days: 45,
+                prospect_warning_days: 30,
+                prospect_critical_days: 45,
                 pool_reassignment_days: 30,
                 updated_at: new Date().toISOString(),
                 updated_by: null
