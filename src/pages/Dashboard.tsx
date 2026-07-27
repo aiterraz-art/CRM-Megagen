@@ -553,7 +553,7 @@ const Dashboard = () => {
                     const { data, error } = await supabase
                         .from('profiles')
                         .select('id, email, full_name, role, status')
-                        .eq('role', 'seller');
+                        .in('role', ['seller', 'jefe', 'admin']);
                     sellerLookupError = error;
                     if (error) {
                         console.warn('Dashboard: no se pudo leer el roster de vendedores desde profiles.', error.message);
@@ -1213,7 +1213,7 @@ const Dashboard = () => {
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="text-lg font-bold text-gray-900 flex items-center">
                                 <TrendingUp size={20} className="mr-2 text-indigo-600" />
-                                Tendencia de Ventas Netas (Este Mes)
+                                Tendencia de Facturación (Este Mes)
                             </h3>
                         </div>
                         <SalesTrendChart data={salesTrend} />
