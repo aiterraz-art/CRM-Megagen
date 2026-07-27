@@ -23,11 +23,11 @@ type DailySeries = { date: string; label: string; visits: number };
 type TodayMetrics = {
     visits: number;
     completedVisits: number;
-    salesNet: number;
+    billedSales: number;
 };
 
 type MonthMetrics = {
-    salesNet: number;
+    billedSales: number;
     averageDailySales: number;
     goal: number;
     dailyVisitsGoal: number;
@@ -76,6 +76,8 @@ const getDateKeyFromIso = (value: string | null | undefined) => {
 };
 
 const formatCurrency = (value: number) => `$${Math.round(value || 0).toLocaleString('es-CL')}`;
+const isBillableOrderStatus = (status: string | null | undefined) =>
+    String(status || '').toLowerCase() !== 'cancelled';
 
 const SellerDashboard = () => {
     const navigate = useNavigate();
@@ -95,10 +97,10 @@ const SellerDashboard = () => {
     const [todayMetrics, setTodayMetrics] = useState<TodayMetrics>({
         visits: 0,
         completedVisits: 0,
-        salesNet: 0,
+        billedSales: 0,
     });
     const [monthMetrics, setMonthMetrics] = useState<MonthMetrics>({
-        salesNet: 0,
+        billedSales: 0,
         averageDailySales: 0,
         goal: 0,
         dailyVisitsGoal: DEFAULT_DAILY_VISITS_GOAL,
@@ -247,30 +249,30 @@ const SellerDashboard = () => {
             );
 
             const sanitizedTodayOrders = (todayOrdersRows || []).filter(
-                (order: any) => order.status !== 'cancelled' && order.status !== 'rejected'
+                (order: any) => isBillableOrderStatus(order.status)
             );
-            const todaySalesNet = sanitizedTodayOrders.reduce(
-                (sum: number, order: any) => sum + grossToNet(order.total_amount),
+            const todayBilledSales = sanitizedTodayOrders.reduce(
+                (sum: number, order: any) => sum + Number(order.total_amount || 0),
                 0
             );
 
             const sanitizedMonthOrders = (monthOrdersRows || []).filter(
-                (order: any) => order.status !== 'cancelled' && order.status !== 'rejected'
+                (order: any) => isBillableOrderStatus(order.status)
             );
-            const monthSalesNet = sanitizedMonthOrders.reduce(
-                (sum: number, order: any) => sum + grossToNet(order.total_amount),
+            const monthBilledSales = sanitizedMonthOrders.reduce(
+                (sum: number, order: any) => sum + Number(order.total_amount || 0),
                 0
             );
 
             setTodayMetrics({
                 visits: (todayVisitRows || []).length,
                 completedVisits: (todayVisitRows || []).filter((visit: any) => visit.status === 'completed').length,
-                salesNet: todaySalesNet,
+                billedSales: todayBilledSales,
             });
 
             setMonthMetrics({
-                salesNet: monthSalesNet,
-                averageDailySales: daysElapsedInMonth > 0 ? monthSalesNet / daysElapsedInMonth : 0,
+                billedSales: monthBilledSales,
+                averageDailySales: daysElapsedInMonth > 0 ? monthBilledSales / daysElapsedInMonth : 0,
                 goal: Number(goalRow?.target_amount) || 0,
                 dailyVisitsGoal: Number(goalRow?.daily_visits_goal) || DEFAULT_DAILY_VISITS_GOAL,
             });
@@ -368,7 +370,7 @@ const SellerDashboard = () => {
     );
 
     const salesGoalPct = monthMetrics.goal > 0
-        ? Math.round((monthMetrics.salesNet / monthMetrics.goal) * 100)
+        ? Math.round((monthMetrics.billedSales / monthMetrics.goal) * 100)
         : 0;
 
     const limitedPendingVisits = useMemo(() => pendingVisits.slice(0, 5), [pendingVisits]);
@@ -401,11 +403,11 @@ const SellerDashboard = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 <KPICard title="Visitas Hoy" value={todayMetrics.visits} icon={MapPin} color="emerald" trend={`${todayMetrics.completedVisits} completadas`} trendUp />
-                <KPICard title="Ventas Hoy" value={formatCurrency(todayMetrics.salesNet)} icon={ShoppingCart} color="blue" trend="Monto neto del día" trendUp={todayMetrics.salesNet > 0} />
-                <KPICard title="Promedio Diario Mes" value={formatCurrency(monthMetrics.averageDailySales)} icon={TrendingUp} color="amber" trend="Promedio neto mes actual" trendUp={monthMetrics.averageDailySales > 0} />
+                <KPICard title="Facturado Hoy" value={formatCurrency(todayMetrics.billedSales)} icon={ShoppingCart} color="blue" trend="Monto facturado desde pedidos" trendUp={todayMetrics.billedSales > 0} />
+                <KPICard title="Promedio Diario Mes" value={formatCurrency(monthMetrics.averageDailySales)} icon={TrendingUp} color="amber" trend="Promedio facturado mes actual" trendUp={monthMetrics.averageDailySales > 0} />
                 <KPICard title="Visitas Ayer sin Cotizar" value={pendingVisits.length} icon={ClipboardList} color="indigo" trend="Pendiente actual" trendUp={pendingVisits.length === 0} />
                 <KPICard title="Cotizaciones Ayer sin Pedido" value={pendingQuotations.length} icon={ShoppingBag} color="rose" trend="Estados sent o approved" trendUp={pendingQuotations.length === 0} />
-                <KPICard title="Ventas Acumuladas Mes" value={formatCurrency(monthMetrics.salesNet)} icon={Calendar} color="indigo" trend={monthMetrics.goal > 0 ? `${salesGoalPct}% de meta neta` : 'Sin meta cargada'} trendUp={monthMetrics.goal > 0 && monthMetrics.salesNet >= monthMetrics.goal} />
+                <KPICard title="Facturado Acumulado Mes" value={formatCurrency(monthMetrics.billedSales)} icon={Calendar} color="indigo" trend={monthMetrics.goal > 0 ? `${salesGoalPct}% de meta` : 'Sin meta cargada'} trendUp={monthMetrics.goal > 0 && monthMetrics.billedSales >= monthMetrics.goal} />
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -518,8 +520,8 @@ const SellerDashboard = () => {
                     </div>
 
                     <div className="premium-card p-5 border border-gray-50">
-                        <h4 className="font-black text-gray-900 mb-2">Metas Netas</h4>
-                        <GoalProgressChart current={monthMetrics.salesNet} target={monthMetrics.goal || 1} />
+                        <h4 className="font-black text-gray-900 mb-2">Meta de Facturación</h4>
+                        <GoalProgressChart current={monthMetrics.billedSales} target={monthMetrics.goal || 1} />
                         <div className="mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
                             <p className="text-[10px] font-black text-emerald-600 uppercase tracking-wider">Meta diaria visitas</p>
                             <div className="mt-2 flex items-center gap-2">

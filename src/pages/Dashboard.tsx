@@ -13,7 +13,6 @@ import GoalProgressChart from '../components/charts/GoalProgressChart';
 import ActivityChart from '../components/charts/ActivityChart';
 import ZoneDistributionChart from '../components/charts/ZoneDistributionChart';
 import KPICard from '../components/KPICard';
-import { grossToNet } from '../utils/amounts';
 import { getPreviousBusinessDay } from '../utils/businessDate';
 
 const gpsComunaCache = new Map<string, string>();
@@ -37,6 +36,9 @@ const getLatestIsoDate = (...values: Array<string | null | undefined>) => values
         if (!latest) return current;
         return new Date(current).getTime() > new Date(latest).getTime() ? current : latest;
     }, null);
+
+const isBillableOrderStatus = (status: string | null | undefined) =>
+    String(status || '').toLowerCase() !== 'cancelled';
 
 const resolveComunaFromGps = async (lat: number, lng: number): Promise<string | null> => {
     const roundedLat = lat.toFixed(5);
@@ -224,8 +226,8 @@ const Dashboard = () => {
                 let activeOrdersCount = 0; // Not strictly used but kept for logic structure
 
                 monthOrders?.forEach(o => {
-                    if (o.status !== 'cancelled' && o.status !== 'rejected') {
-                        monthSales += grossToNet(o.total_amount);
+                    if (isBillableOrderStatus(o.status)) {
+                        monthSales += Number(o.total_amount || 0);
                         activeOrdersCount++;
                     }
                 });
@@ -241,11 +243,10 @@ const Dashboard = () => {
                 // 1. Sales Trend (Daily Sales in Current Month)
                 const salesByDay = new Map<number, number>();
                 monthOrders?.forEach(o => {
-                    // Filter out cancelled orders
-                    if (o.status === 'cancelled' || o.status === 'rejected') return;
+                    if (!isBillableOrderStatus(o.status)) return;
 
                     const day = new Date(o.created_at).getDate();
-                    salesByDay.set(day, (salesByDay.get(day) || 0) + grossToNet(o.total_amount));
+                    salesByDay.set(day, (salesByDay.get(day) || 0) + Number(o.total_amount || 0));
                 });
 
                 const trendData = [];
@@ -820,8 +821,8 @@ const Dashboard = () => {
 
                     const summary = activeSellers.map((seller: any) => {
                         const sellerTodayVisits = ((todayVisitsRows || []) as any[]).filter((visit: any) => visit.sales_rep_id === seller.id);
-                        const sellerTodayOrders = ((todayOrdersRows || []) as any[]).filter((order: any) => order.user_id === seller.id && order.status !== 'cancelled' && order.status !== 'rejected');
-                        const sellerMonthOrders = ((monthOrdersRows || []) as any[]).filter((order: any) => order.user_id === seller.id && order.status !== 'cancelled' && order.status !== 'rejected');
+                        const sellerTodayOrders = ((todayOrdersRows || []) as any[]).filter((order: any) => order.user_id === seller.id && isBillableOrderStatus(order.status));
+                        const sellerMonthOrders = ((monthOrdersRows || []) as any[]).filter((order: any) => order.user_id === seller.id && isBillableOrderStatus(order.status));
                         const sellerYesterdayVisits = ((yesterdayVisitsRows || []) as any[]).filter((visit: any) => visit.sales_rep_id === seller.id);
                         const sellerYesterdayQuotes = ((yesterdayQuotesRows || []) as any[]).filter((quote: any) => quote.seller_id === seller.id);
 
@@ -835,8 +836,8 @@ const Dashboard = () => {
                         }).length;
 
                         const pendingQuotesNoOrder = sellerYesterdayQuotes.filter((quote: any) => !convertedQuoteIds.has(quote.id)).length;
-                        const todaySalesNet = sellerTodayOrders.reduce((sum: number, order: any) => sum + grossToNet(order.total_amount), 0);
-                        const monthSalesNet = sellerMonthOrders.reduce((sum: number, order: any) => sum + grossToNet(order.total_amount), 0);
+                        const todaySalesNet = sellerTodayOrders.reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
+                        const monthSalesNet = sellerMonthOrders.reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
 
                         return {
                             id: seller.id,
@@ -1133,11 +1134,11 @@ const Dashboard = () => {
                         color="emerald"
                     />
                     <KPICard
-                        title="Ventas Hoy"
+                        title="Facturado Hoy"
                         value={`$${Math.round(teamDashboardTotals.todaySalesNet).toLocaleString()}`}
                         icon={ShoppingCart}
                         color="blue"
-                        trend="Monto neto del equipo"
+                        trend="Monto facturado desde pedidos"
                         trendUp={teamDashboardTotals.todaySalesNet > 0}
                     />
                     <KPICard
@@ -1145,7 +1146,7 @@ const Dashboard = () => {
                         value={`$${Math.round(teamDashboardTotals.averageDailyMonthSales).toLocaleString()}`}
                         icon={TrendingUp}
                         color="amber"
-                        trend="Suma de promedios diarios"
+                        trend="Promedio facturado del mes"
                         trendUp={teamDashboardTotals.averageDailyMonthSales > 0}
                     />
                     <KPICard
@@ -1165,22 +1166,22 @@ const Dashboard = () => {
                         trendUp={teamDashboardTotals.pendingQuotesNoOrder === 0}
                     />
                     <KPICard
-                        title="Ventas Acumuladas Mes"
+                        title="Facturado Acumulado Mes"
                         value={`$${Math.round(teamDashboardTotals.monthSalesNet).toLocaleString()}`}
                         icon={CalendarIcon}
                         color="indigo"
-                        trend="Monto neto mensual del equipo"
+                        trend="Monto facturado mensual del equipo"
                         trendUp={teamDashboardTotals.monthSalesNet > 0}
                     />
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <KPICard
-                        title="Venta Mensual Neta"
+                        title="Facturado Mensual"
                         value={`$${monthlyStats.currentSales.toLocaleString()}`}
                         icon={ShoppingCart}
                         color="indigo"
-                        trend={monthlyStats.goal > 0 ? `${Math.round((monthlyStats.currentSales / monthlyStats.goal) * 100)}% de Meta Neta` : undefined}
+                        trend={monthlyStats.goal > 0 ? `${Math.round((monthlyStats.currentSales / monthlyStats.goal) * 100)}% de meta` : undefined}
                         trendUp={monthlyStats.currentSales > 0}
                     />
                     <KPICard
@@ -1234,12 +1235,12 @@ const Dashboard = () => {
                     <div className="premium-card p-6 flex flex-col items-center">
                         <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center self-start">
                             <Target size={20} className="mr-2 text-violet-600" />
-                            Progreso de Meta Neta
+                            Progreso de Facturación
                         </h3>
                         <GoalProgressChart current={monthlyStats.currentSales} target={monthlyStats.goal || 1} />
 
                         <div className="w-full mt-4 flex justify-between text-xs font-bold text-gray-500 border-t border-gray-100 pt-4">
-                            <span>Comisión Est.:</span>
+                            <span>Comisión est. s/facturado:</span>
                             <span className="text-emerald-600">${Math.round(monthlyStats.currentSales * monthlyStats.commissionRate).toLocaleString()}</span>
                         </div>
                     </div>
@@ -1293,11 +1294,11 @@ const Dashboard = () => {
                                     <tr>
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Vendedor</th>
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas Hoy</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Ventas Hoy</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Facturado Hoy</th>
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Prom. Diario Mes</th>
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas Ayer sin Cotizar</th>
                                         <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Cotizaciones Ayer sin Pedido</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Venta Acum. Mes</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Facturado Acum. Mes</th>
                                     </tr>
                                 </thead>
                                 <tbody>
