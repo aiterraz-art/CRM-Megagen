@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { ShoppingBag } from 'lucide-react';
+import { ShoppingBag, X } from 'lucide-react';
 
 interface PipelineStage {
     id: string;
@@ -66,6 +66,11 @@ const hasAutoLostNoResponse = (comments: string | null | undefined): boolean => 
     return normalized.includes(AUTO_LOST_MESSAGE);
 };
 
+type LostReasonDialogState = {
+    quote: Quotation;
+    mode: 'stage_change' | 'edit';
+};
+
 const Pipeline = () => {
     const { profile, effectiveRole } = useUser();
     const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -77,6 +82,9 @@ const Pipeline = () => {
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
     const [minAmount, setMinAmount] = useState('');
+    const [lostReasonDialog, setLostReasonDialog] = useState<LostReasonDialogState | null>(null);
+    const [lostReasonDraft, setLostReasonDraft] = useState('');
+    const [savingLostReason, setSavingLostReason] = useState(false);
     const canViewAllPipeline = effectiveRole === 'admin' || effectiveRole === 'jefe';
 
     useEffect(() => {
@@ -175,33 +183,11 @@ const Pipeline = () => {
         }
     };
 
-    const onDragEnd = async (result: DropResult) => {
-        const { destination, source, draggableId } = result;
-
-        if (!destination) return;
-        if (destination.droppableId === source.droppableId) {
-            return;
-        }
-
-        const newStage = normalizeStage(destination.droppableId);
-        const currentQuote = quotations.find((quote) => quote.id === draggableId);
-        if (!currentQuote) return;
-
-        let lostReason: string | null = currentQuote.lost_reason || null;
-        if (newStage === 'lost' && normalizeStage(currentQuote.stage) !== 'lost') {
-            const answer = window.prompt('Indica la razón del cierre perdido:', currentQuote.lost_reason || '');
-            const normalizedReason = String(answer || '').trim();
-            if (!normalizedReason) {
-                alert('Debes indicar la razón del cierre perdido.');
-                return;
-            }
-            lostReason = normalizedReason;
-        }
-
+    const persistQuotationStage = async (quote: Quotation, newStage: string, lostReason: string | null) => {
         // Optimistic Update
         const previousQuotations = quotations;
         const updatedQuotations = quotations.map(q =>
-            q.id === draggableId
+            q.id === quote.id
                 ? { ...q, stage: newStage, lost_reason: newStage === 'lost' ? lostReason : null }
                 : q
         );
@@ -222,14 +208,65 @@ const Pipeline = () => {
         const { error } = await supabase
             .from('quotations')
             .update(updatePayload)
-            .eq('id', draggableId);
+            .eq('id', quote.id);
 
         if (error) {
             console.error('Error updating stage:', error);
             setQuotations(previousQuotations);
             alert('Error al actualizar etapa.');
+            return false;
+        }
+        return true;
+    };
+
+    const openLostReasonDialog = (quote: Quotation, mode: 'stage_change' | 'edit') => {
+        setLostReasonDialog({ quote, mode });
+        setLostReasonDraft(quote.lost_reason || '');
+    };
+
+    const closeLostReasonDialog = () => {
+        if (savingLostReason) return;
+        setLostReasonDialog(null);
+        setLostReasonDraft('');
+    };
+
+    const handleConfirmLostReason = async () => {
+        if (!lostReasonDialog) return;
+        const normalizedReason = lostReasonDraft.trim();
+        if (!normalizedReason) {
+            alert('Debes indicar la razón del cierre perdido.');
             return;
         }
+
+        setSavingLostReason(true);
+        try {
+            const saved = await persistQuotationStage(lostReasonDialog.quote, 'lost', normalizedReason);
+            if (saved) {
+                closeLostReasonDialog();
+            }
+        } finally {
+            setSavingLostReason(false);
+        }
+    };
+
+    const onDragEnd = async (result: DropResult) => {
+        const { destination, source, draggableId } = result;
+
+        if (!destination) return;
+        if (destination.droppableId === source.droppableId) {
+            return;
+        }
+
+        const newStage = normalizeStage(destination.droppableId);
+        const currentQuote = quotations.find((quote) => quote.id === draggableId);
+        if (!currentQuote) return;
+
+        if (newStage === 'lost' && normalizeStage(currentQuote.stage) !== 'lost') {
+            openLostReasonDialog(currentQuote, 'stage_change');
+            return;
+        }
+
+        await persistQuotationStage(currentQuote, newStage, newStage === 'lost' ? currentQuote.lost_reason || null : null);
     };
 
     const quotesByStage = useMemo(() => {
@@ -436,6 +473,19 @@ const Pipeline = () => {
                                                                     Motivo: {quote.lost_reason}
                                                                 </p>
                                                             )}
+                                                            {normalizeStage(quote.stage) === 'lost' && !quote.autoLostByNoResponse && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(event) => {
+                                                                        event.preventDefault();
+                                                                        event.stopPropagation();
+                                                                        openLostReasonDialog(quote, 'edit');
+                                                                    }}
+                                                                    className="mt-2 rounded-lg border border-red-100 bg-red-50 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-red-700 hover:bg-red-100"
+                                                                >
+                                                                    Editar motivo
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </Draggable>
@@ -454,6 +504,66 @@ const Pipeline = () => {
                     })}
                 </div>
             </DragDropContext>
+
+            {lostReasonDialog && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-lg rounded-[2rem] bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                        <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5">
+                            <div>
+                                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-red-500">Cierre perdido</p>
+                                <h3 className="mt-1 text-xl font-black text-gray-900">
+                                    {lostReasonDialog.mode === 'edit' ? 'Editar motivo de pérdida' : 'Indicar motivo de pérdida'}
+                                </h3>
+                                <p className="mt-2 text-sm font-medium text-gray-500">
+                                    {Array.isArray(lostReasonDialog.quote.clients)
+                                        ? lostReasonDialog.quote.clients[0]?.name
+                                        : lostReasonDialog.quote.clients?.name || `Cotización #${lostReasonDialog.quote.folio}`}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeLostReasonDialog}
+                                className="rounded-full p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                                disabled={savingLostReason}
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="px-6 py-5">
+                            <label className="mb-2 block text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                Razón de pérdida
+                            </label>
+                            <textarea
+                                value={lostReasonDraft}
+                                onChange={(event) => setLostReasonDraft(event.target.value)}
+                                rows={4}
+                                placeholder="Ej. precio fuera de presupuesto, eligió otro proveedor, cierre postergado, etc."
+                                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 outline-none transition focus:border-red-300 focus:bg-white"
+                            />
+                        </div>
+
+                        <div className="flex flex-col-reverse gap-3 border-t border-gray-100 bg-gray-50/70 px-6 py-4 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                onClick={closeLostReasonDialog}
+                                className="rounded-2xl px-5 py-3 text-sm font-black text-gray-500 transition hover:bg-gray-200/70"
+                                disabled={savingLostReason}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void handleConfirmLostReason()}
+                                className="rounded-2xl bg-red-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-red-200 transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={savingLostReason}
+                            >
+                                {savingLostReason ? 'Guardando...' : 'Guardar motivo'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
