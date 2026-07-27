@@ -27,6 +27,7 @@ interface Quotation {
     status?: string | null;
     sent_at?: string | null;
     comments?: string | null;
+    lost_reason?: string | null;
     autoLostByNoResponse?: boolean;
     created_at: string;
     clients: any; // Supabase can return object or array depending on relationship setup
@@ -101,6 +102,7 @@ const Pipeline = () => {
                     stage, 
                     status,
                     sent_at,
+                    lost_reason,
                     comments,
                     created_at, 
                     folio,
@@ -127,6 +129,7 @@ const Pipeline = () => {
                         total_amount,
                         status,
                         sent_at,
+                        lost_reason,
                         comments,
                         created_at,
                         folio,
@@ -181,11 +184,26 @@ const Pipeline = () => {
         }
 
         const newStage = normalizeStage(destination.droppableId);
+        const currentQuote = quotations.find((quote) => quote.id === draggableId);
+        if (!currentQuote) return;
+
+        let lostReason: string | null = currentQuote.lost_reason || null;
+        if (newStage === 'lost' && normalizeStage(currentQuote.stage) !== 'lost') {
+            const answer = window.prompt('Indica la razón del cierre perdido:', currentQuote.lost_reason || '');
+            const normalizedReason = String(answer || '').trim();
+            if (!normalizedReason) {
+                alert('Debes indicar la razón del cierre perdido.');
+                return;
+            }
+            lostReason = normalizedReason;
+        }
 
         // Optimistic Update
         const previousQuotations = quotations;
         const updatedQuotations = quotations.map(q =>
-            q.id === draggableId ? { ...q, stage: newStage } : q
+            q.id === draggableId
+                ? { ...q, stage: newStage, lost_reason: newStage === 'lost' ? lostReason : null }
+                : q
         );
         setQuotations(updatedQuotations);
 
@@ -193,6 +211,7 @@ const Pipeline = () => {
         const updatePayload: any = supportsStageColumn
             ? { stage: newStage, status: statusFromStage(newStage) }
             : { status: statusFromStage(newStage) };
+        updatePayload.lost_reason = newStage === 'lost' ? lostReason : null;
         if (newStage === 'sent') {
             updatePayload.sent_at = new Date().toISOString();
         }
@@ -410,6 +429,11 @@ const Pipeline = () => {
                                                             {normalizeStage(quote.stage) === 'lost' && quote.autoLostByNoResponse && (
                                                                 <p className="mt-1 text-[9px] font-black text-red-600 leading-tight">
                                                                     ({AUTO_LOST_MESSAGE})
+                                                                </p>
+                                                            )}
+                                                            {normalizeStage(quote.stage) === 'lost' && quote.lost_reason && (
+                                                                <p className="mt-1 text-[9px] font-bold text-red-700 leading-tight">
+                                                                    Motivo: {quote.lost_reason}
                                                                 </p>
                                                             )}
                                                         </div>

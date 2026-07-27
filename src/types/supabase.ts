@@ -1356,6 +1356,7 @@ export interface Database {
                     folio: number | null
                     comments: string | null
                     interaction_type: string | null
+                    lost_reason: string | null
                     created_at: string | null
                 }
                 Insert: {
@@ -1371,6 +1372,7 @@ export interface Database {
                     folio?: number | null
                     comments?: string | null
                     interaction_type?: string | null
+                    lost_reason?: string | null
                     created_at?: string | null
                 }
                 Update: {
@@ -1386,6 +1388,7 @@ export interface Database {
                     folio?: number | null
                     comments?: string | null
                     interaction_type?: string | null
+                    lost_reason?: string | null
                     created_at?: string | null
                 }
             }
