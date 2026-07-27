@@ -140,6 +140,8 @@ const Orders = () => {
     const [search, setSearch] = useState('');
     const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<DeliveryStatusFilter>('all');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
     const [viewMode, setViewMode] = useState<ViewMode>('all');
     const [currentPage, setCurrentPage] = useState(1);
     const [resendingOrderId, setResendingOrderId] = useState<string | null>(null);
@@ -788,14 +790,17 @@ const Orders = () => {
             const matchesOrderStatus = orderStatusFilter === 'all' || (order.status || '').toLowerCase() === orderStatusFilter;
             const matchesDeliveryStatus = deliveryStatusFilter === 'all' || (order.delivery_status || '').toLowerCase() === deliveryStatusFilter;
             const matchesView = viewMode === 'all' || order.user_id === profile?.id;
+            const orderTimestamp = order.created_at ? new Date(order.created_at).getTime() : null;
+            const matchesDateFrom = !dateFrom || (orderTimestamp !== null && orderTimestamp >= new Date(`${dateFrom}T00:00:00`).getTime());
+            const matchesDateTo = !dateTo || (orderTimestamp !== null && orderTimestamp <= new Date(`${dateTo}T23:59:59`).getTime());
 
-            return matchesSearch && matchesOrderStatus && matchesDeliveryStatus && matchesView;
+            return matchesSearch && matchesOrderStatus && matchesDeliveryStatus && matchesView && matchesDateFrom && matchesDateTo;
         });
-    }, [deliveryStatusFilter, orderStatusFilter, orders, profile?.id, search, viewMode]);
+    }, [dateFrom, dateTo, deliveryStatusFilter, orderStatusFilter, orders, profile?.id, search, viewMode]);
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [search, orderStatusFilter, deliveryStatusFilter, viewMode]);
+    }, [search, orderStatusFilter, deliveryStatusFilter, viewMode, dateFrom, dateTo]);
 
     const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
     const paginatedOrders = useMemo(() => {
@@ -813,8 +818,10 @@ const Orders = () => {
     const orderStats = useMemo(() => {
         const completed = filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'completed').length;
         const delivered = filteredOrders.filter((o) => (o.delivery_status || '').toLowerCase() === 'delivered').length;
-        const totalAmount = filteredOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
-        return { total: filteredOrders.length, completed, delivered, totalAmount };
+        const billedAmount = filteredOrders
+            .filter((o) => (o.status || '').toLowerCase() !== 'cancelled')
+            .reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+        return { total: filteredOrders.length, completed, delivered, billedAmount };
     }, [filteredOrders]);
 
     return (
@@ -862,8 +869,8 @@ const Orders = () => {
                     <p className="text-3xl font-black text-indigo-600 mt-2">{orderStats.delivered}</p>
                 </div>
                 <div className="premium-card p-4">
-                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Total Vendido</p>
-                    <p className="text-3xl font-black text-gray-900 mt-2">{formatMoney(orderStats.totalAmount)}</p>
+                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Monto Facturado</p>
+                    <p className="text-3xl font-black text-gray-900 mt-2">{formatMoney(orderStats.billedAmount)}</p>
                 </div>
             </div>
 
@@ -876,6 +883,23 @@ const Orders = () => {
                             onChange={(e) => setSearch(e.target.value)}
                             placeholder="Buscar por cliente, vendedor, folio pedido o cotización..."
                             className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:min-w-[320px]">
+                        <input
+                            type="date"
+                            value={dateFrom}
+                            onChange={(e) => setDateFrom(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                            aria-label="Fecha desde"
+                        />
+                        <input
+                            type="date"
+                            value={dateTo}
+                            onChange={(e) => setDateTo(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                            aria-label="Fecha hasta"
                         />
                     </div>
 
@@ -896,6 +920,24 @@ const Orders = () => {
                         </div>
                     )}
                 </div>
+
+                {(dateFrom || dateTo) && (
+                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3">
+                        <p className="text-xs font-bold text-indigo-700">
+                            Periodo seleccionado: {dateFrom || 'inicio'} a {dateTo || 'hoy'}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setDateFrom('');
+                                setDateTo('');
+                            }}
+                            className="rounded-xl border border-indigo-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-wider text-indigo-700 transition hover:bg-indigo-100"
+                        >
+                            Limpiar fechas
+                        </button>
+                    </div>
+                )}
 
                 <div className="flex flex-wrap gap-2">
                     {([
