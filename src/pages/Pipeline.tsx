@@ -473,7 +473,7 @@ const Pipeline = () => {
                                                                     Motivo: {quote.lost_reason}
                                                                 </p>
                                                             )}
-                                                            {normalizeStage(quote.stage) === 'lost' && !quote.autoLostByNoResponse && (
+                                                            {normalizeStage(quote.stage) === 'lost' && (
                                                                 <button
                                                                     type="button"
                                                                     onClick={(event) => {
@@ -483,7 +483,7 @@ const Pipeline = () => {
                                                                     }}
                                                                     className="mt-2 rounded-lg border border-red-100 bg-red-50 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-red-700 hover:bg-red-100"
                                                                 >
-                                                                    Editar motivo
+                                                                    {quote.lost_reason ? 'Editar motivo' : 'Agregar motivo'}
                                                                 </button>
                                                             )}
                                                         </div>
