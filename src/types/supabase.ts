@@ -1347,6 +1347,7 @@ export interface Database {
                     id: string
                     client_id: string | null
                     seller_id: string | null
+                    source_visit_id: string | null
                     items: Json | null
                     total_amount: number | null
                     payment_terms: Json | null
@@ -1361,6 +1362,7 @@ export interface Database {
                     id?: string
                     client_id?: string | null
                     seller_id?: string | null
+                    source_visit_id?: string | null
                     items?: Json | null
                     total_amount?: number | null
                     payment_terms?: Json | null
@@ -1375,6 +1377,7 @@ export interface Database {
                     id?: string
                     client_id?: string | null
                     seller_id?: string | null
+                    source_visit_id?: string | null
                     items?: Json | null
                     total_amount?: number | null
                     payment_terms?: Json | null

@@ -69,7 +69,7 @@ const ConversionsRanking = () => {
 
             const { data: visits, error: visitsError } = await supabase
                 .from('visits')
-                .select('sales_rep_id, client_id, check_in_time, type')
+                .select('id, sales_rep_id, check_in_time, status, type')
                 .in('sales_rep_id', sellerIds)
                 .eq('type', 'cold_visit')
                 .gte('check_in_time', fromIso)
@@ -77,52 +77,72 @@ const ConversionsRanking = () => {
 
             if (visitsError) throw visitsError;
 
-            const coldVisits = (visits || []) as Array<{ sales_rep_id: string | null; client_id: string | null; check_in_time: string | null }>;
+            const coldVisits = (visits || []) as Array<{
+                id: string;
+                sales_rep_id: string | null;
+                check_in_time: string | null;
+                status: string | null;
+            }>;
 
-            const bySeller = new Map<string, { coldVisits: number; clientFirstVisit: Map<string, number> }>();
-            sellerIds.forEach((id) => bySeller.set(id, { coldVisits: 0, clientFirstVisit: new Map() }));
+            const bySeller = new Map<string, { coldVisits: number; convertedVisitIds: Set<string> }>();
+            sellerIds.forEach((id) => bySeller.set(id, { coldVisits: 0, convertedVisitIds: new Set() }));
 
             coldVisits.forEach((row) => {
                 if (!row.sales_rep_id || !bySeller.has(row.sales_rep_id)) return;
+                if ((row.status || '').toLowerCase() === 'cancelled') return;
                 const sellerData = bySeller.get(row.sales_rep_id)!;
                 sellerData.coldVisits += 1;
-
-                if (!row.client_id || !row.check_in_time) return;
-                const at = new Date(row.check_in_time).getTime();
-                const previous = sellerData.clientFirstVisit.get(row.client_id);
-                if (previous === undefined || at < previous) {
-                    sellerData.clientFirstVisit.set(row.client_id, at);
-                }
             });
 
-            const clientIds = Array.from(
-                new Set(Array.from(bySeller.values()).flatMap((v) => Array.from(v.clientFirstVisit.keys())))
-            );
+            const visitIds = coldVisits.map((visit) => visit.id);
+            if (visitIds.length > 0) {
+                const { data: orders, error: ordersError } = await supabase
+                    .from('orders')
+                    .select('id, visit_id, client_id, created_at')
+                    .in('visit_id', visitIds);
 
-            const clientsMap = new Map<string, { status: string | null; updated_at: string | null }>();
-            if (clientIds.length > 0) {
-                const { data: clients, error: clientsError } = await supabase
-                    .from('clients')
-                    .select('id, status, updated_at')
-                    .in('id', clientIds);
+                if (ordersError) throw ordersError;
 
-                if (clientsError) throw clientsError;
+                const visitSellerMap = new Map<string, string>();
+                coldVisits.forEach((visit) => {
+                    if (visit.sales_rep_id) {
+                        visitSellerMap.set(visit.id, visit.sales_rep_id);
+                    }
+                });
 
-                (clients || []).forEach((c: any) => {
-                    clientsMap.set(c.id, { status: c.status, updated_at: c.updated_at });
+                const candidateOrders = (orders || []).filter((order: any) => order?.client_id && order?.visit_id);
+                const candidateClientIds = Array.from(new Set(candidateOrders.map((order: any) => order.client_id)));
+
+                const firstOrderIdByClient = new Map<string, string>();
+                if (candidateClientIds.length > 0) {
+                    const { data: allClientOrders, error: allClientOrdersError } = await supabase
+                        .from('orders')
+                        .select('id, client_id, created_at')
+                        .in('client_id', candidateClientIds)
+                        .order('created_at', { ascending: true })
+                        .order('id', { ascending: true });
+
+                    if (allClientOrdersError) throw allClientOrdersError;
+
+                    (allClientOrders || []).forEach((order: any) => {
+                        if (!order?.client_id || firstOrderIdByClient.has(order.client_id)) return;
+                        firstOrderIdByClient.set(order.client_id, order.id);
+                    });
+                }
+
+                candidateOrders.forEach((order: any) => {
+                    const visitId = order?.visit_id;
+                    const clientId = order?.client_id;
+                    const sellerId = visitSellerMap.get(visitId);
+                    if (!visitId || !clientId || !sellerId || !bySeller.has(sellerId)) return;
+                    if (firstOrderIdByClient.get(clientId) !== order.id) return;
+                    bySeller.get(sellerId)!.convertedVisitIds.add(visitId);
                 });
             }
 
             const result: RankingRow[] = sellerRows.map((seller) => {
-                const stats = bySeller.get(seller.id) || { coldVisits: 0, clientFirstVisit: new Map<string, number>() };
-                let conversions = 0;
-
-                stats.clientFirstVisit.forEach((firstVisitAt, clientId) => {
-                    const clientData = clientsMap.get(clientId);
-                    if (!clientData || clientData.status !== 'active') return;
-                    const updatedAt = clientData.updated_at ? new Date(clientData.updated_at).getTime() : 0;
-                    if (updatedAt >= firstVisitAt) conversions += 1;
-                });
+                const stats = bySeller.get(seller.id) || { coldVisits: 0, convertedVisitIds: new Set<string>() };
+                const conversions = stats.convertedVisitIds.size;
 
                 const conversionPct = stats.coldVisits > 0 ? Math.round((conversions / stats.coldVisits) * 100) : 0;
 
@@ -246,7 +266,7 @@ const ConversionsRanking = () => {
             </div>
 
             <div className="text-center text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-                Ranking calculado con visitas tipo cold_visit convertidas a cliente activo
+                Ranking calculado con el primer pedido real de cada cliente captado en visita en frío
             </div>
         </div>
     );

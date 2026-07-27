@@ -202,6 +202,7 @@ const Quotations: React.FC = () => {
     const [isClientModalOpen, setIsClientModalOpen] = useState(false);
     const [isItemModalOpen, setIsItemModalOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<any | null>(null);
+    const [selectedSourceVisitId, setSelectedSourceVisitId] = useState<string | null>(null);
     const [createError, setCreateError] = useState<string | null>(null);
     const [fetchError, setFetchError] = useState<string | null>(null);
     const [collectionsDebtWarning, setCollectionsDebtWarning] = useState<CollectionsDebtSnapshot | null>(null);
@@ -767,6 +768,7 @@ const Quotations: React.FC = () => {
                 if (draft.isOpen && !selectedClient && !editingQuotation) {
                     setIsItemModalOpen(true);
                     setSelectedClient(draft.client);
+                    setSelectedSourceVisitId(draft.sourceVisitId || null);
                     setFormItems(draft.items);
                     setFormComments(draft.comments);
                     setPaymentTerms(draft.paymentTerms);
@@ -784,6 +786,7 @@ const Quotations: React.FC = () => {
             const draft = {
                 isOpen: true,
                 client: selectedClient,
+                sourceVisitId: selectedSourceVisitId,
                 items: formItems,
                 comments: formComments,
                 paymentTerms: paymentTerms,
@@ -794,7 +797,7 @@ const Quotations: React.FC = () => {
             // Clear draft if closed and not editing
             localStorage.removeItem('quotation_draft');
         }
-    }, [isItemModalOpen, selectedClient, formItems, formComments, paymentTerms, editingQuotation, selectedSellerId]);
+    }, [isItemModalOpen, selectedClient, selectedSourceVisitId, formItems, formComments, paymentTerms, editingQuotation, selectedSellerId]);
 
     useEffect(() => {
         if (!selectedClient?.id || availableClients.length === 0) return;
@@ -856,8 +859,9 @@ const Quotations: React.FC = () => {
         };
     }, [isItemModalOpen, selectedClient?.id, selectedClient?.rut]);
 
-    const handleClientSelect = (client: any) => {
+    const handleClientSelect = (client: any, options?: { sourceVisitId?: string | null }) => {
         setSelectedClient(client);
+        setSelectedSourceVisitId(options?.sourceVisitId || null);
         setIsClientModalOpen(false);
         setIsItemModalOpen(true);
         // Reset form
@@ -881,6 +885,7 @@ const Quotations: React.FC = () => {
         }
         setEditingQuotation(q);
         setSelectedClient(q.client);
+        setSelectedSourceVisitId(q.source_visit_id || null);
         const loadedItems = (q.items || []).map((item: any) => {
             const basePrice = toWholeMoney(item.price);
             const discountPct = Number(item.discount || 0);
@@ -1202,7 +1207,9 @@ const Quotations: React.FC = () => {
     // Handle Auto-Open from Clients Page
     useEffect(() => {
         if (location.state?.client) {
-            handleClientSelect(location.state.client);
+            handleClientSelect(location.state.client, {
+                sourceVisitId: location.state?.sourceVisitId || null
+            });
             // Clear state so it doesn't reopen on refresh/navigation
             navigate(location.pathname, { replace: true, state: {} });
         }
@@ -1272,6 +1279,19 @@ const Quotations: React.FC = () => {
             }
         }
     }, [isInteractionModalOpen, activeVisit]);
+
+    const linkOrderToSourceVisit = useCallback(async (orderId: string | null | undefined, sourceVisitId: string | null | undefined) => {
+        if (!orderId || !sourceVisitId) return;
+
+        const { error } = await supabase
+            .from('orders')
+            .update({ visit_id: sourceVisitId })
+            .eq('id', orderId);
+
+        if (error) {
+            console.warn('No se pudo vincular el pedido a la visita en frío de origen:', error.message);
+        }
+    }, []);
 
     const handleCreateQuotation = async () => {
         if (!profile || !selectedClient) return;
@@ -1363,6 +1383,7 @@ const Quotations: React.FC = () => {
                     .from('quotations')
                     .update({
                         seller_id: sellerIdForQuotation,
+                        source_visit_id: selectedSourceVisitId,
                         items: calculatedItems,
                         total_amount: grandTotal,
                         payment_terms: paymentTerms,
@@ -1388,6 +1409,7 @@ const Quotations: React.FC = () => {
                         id: crypto.randomUUID(),
                         client_id: selectedClient.id,
                         seller_id: sellerIdForQuotation,
+                        source_visit_id: selectedSourceVisitId,
                         items: calculatedItems,
                         total_amount: grandTotal,
                         payment_terms: paymentTerms,
@@ -1439,6 +1461,7 @@ const Quotations: React.FC = () => {
             setFormComments('');
             setPaymentTerms({ type: 'Contado', days: 0 });
             setSelectedClient(null);
+            setSelectedSourceVisitId(null);
             setCreateError(null);
             setEditingQuotation(null);
             setSelectedSellerId((prev) => canAssignQuotationSeller(effectiveRole) ? prev : profile.id);
@@ -1664,6 +1687,7 @@ const Quotations: React.FC = () => {
             }
 
             const response = (data || {}) as any;
+            const sourceVisitId = quotation?.source_visit_id || null;
             await logQuotationOrderConversionSafe({
                 attemptId,
                 quotationId: quotation.id,
@@ -1678,6 +1702,7 @@ const Quotations: React.FC = () => {
                 },
             });
             if (response?.already_exists) {
+                await linkOrderToSourceVisit(response?.order_id || null, sourceVisitId);
                 await syncQuotationAsApproved(quotation.id, {
                     id: response?.order_id || null,
                     folio: response?.order_folio || null,
@@ -1702,6 +1727,7 @@ const Quotations: React.FC = () => {
             }
 
             createdOrderId = response?.order_id || null;
+            await linkOrderToSourceVisit(createdOrderId, sourceVisitId);
             await syncQuotationAsApproved(quotation.id, {
                 id: createdOrderId,
                 folio: response?.order_folio || null,
@@ -1837,6 +1863,7 @@ const Quotations: React.FC = () => {
         closePaymentProofModal,
         fetchQuotations,
         getQuotationCreditDays,
+        linkOrderToSourceVisit,
         requestDiscountApprovalReason,
         effectiveRole,
         profile?.id,
