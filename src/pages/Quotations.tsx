@@ -79,6 +79,8 @@ const canCloseQuotationSale = (
     actorId: string | null | undefined,
     quotationSellerId: string | null | undefined
 ) => quotationSellerId === actorId || role === 'admin' || role === 'facturador';
+const isQuotationConverted = (quotation: any) =>
+    Boolean(quotation?.has_order || quotation?.linked_order_id || quotation?.status === 'approved');
 
 const getSellerDisplayName = (sellerProfile: SellerOption | null | undefined) => {
     const fullName = String(sellerProfile?.full_name || '').trim();
@@ -2094,7 +2096,7 @@ const Quotations: React.FC = () => {
                         const hasWhatsappTarget = Boolean(normalizePhoneForWhatsapp(q.client_phone || q.client?.phone));
                         const hasEmailTarget = Boolean(String(q.client_email || q.client?.email || '').trim());
                         const canConvertOrder = canCloseQuotationSale(effectiveRole, profile?.id, q.seller_id);
-                        const isConvertedQuotation = Boolean(q.has_order || q.linked_order_id || q.status === 'approved');
+                        const isConvertedQuotation = isQuotationConverted(q);
 
                         return (
                         <div key={q.id} className="premium-card p-4 flex flex-col justify-between group">
@@ -2189,12 +2191,18 @@ const Quotations: React.FC = () => {
                                 <div className="flex flex-wrap gap-2">
                                     <button
                                         onClick={() => openQuoteViaWhatsApp(q)}
-                                        disabled={!hasWhatsappTarget}
-                                        className={`flex-1 min-w-[78px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasWhatsappTarget
+                                        disabled={!hasWhatsappTarget || isConvertedQuotation}
+                                        className={`flex-1 min-w-[78px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasWhatsappTarget || isConvertedQuotation
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-600 hover:text-white'
                                             }`}
-                                        title={hasWhatsappTarget ? 'Enviar por WhatsApp' : 'Cliente sin celular válido'}
+                                        title={
+                                            isConvertedQuotation
+                                                ? `Esta cotización ya fue convertida a pedido${q.linked_order_folio ? ` #${q.linked_order_folio}` : ''}.`
+                                                : hasWhatsappTarget
+                                                    ? 'Enviar por WhatsApp'
+                                                    : 'Cliente sin celular válido'
+                                        }
                                     >
                                         <MessageSquare size={12} className="mr-1" />
                                         WSP
@@ -2202,12 +2210,18 @@ const Quotations: React.FC = () => {
 
                                     <button
                                         onClick={() => openQuoteViaEmail(q)}
-                                        disabled={!hasEmailTarget}
-                                        className={`flex-1 min-w-[86px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasEmailTarget
+                                        disabled={!hasEmailTarget || isConvertedQuotation}
+                                        className={`flex-1 min-w-[86px] px-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest shadow-sm border active:scale-95 transition-all flex items-center justify-center ${!hasEmailTarget || isConvertedQuotation
                                                 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                                                 : 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-600 hover:text-white'
                                             }`}
-                                        title={hasEmailTarget ? 'Compartir PDF con correo como respaldo' : 'Cliente sin correo'}
+                                        title={
+                                            isConvertedQuotation
+                                                ? `Esta cotización ya fue convertida a pedido${q.linked_order_folio ? ` #${q.linked_order_folio}` : ''}.`
+                                                : hasEmailTarget
+                                                    ? 'Compartir PDF con correo como respaldo'
+                                                    : 'Cliente sin correo'
+                                        }
                                     >
                                         <Share2 size={12} className="mr-1" />
                                         Compartir
@@ -2365,9 +2379,14 @@ const Quotations: React.FC = () => {
                             )}
                             onSendEmail={(pdfAttachment) => openQuoteViaEmail(selectedForTemplate, pdfAttachment)}
                             onMarkedAsSent={async () => {
+                                if (isQuotationConverted(selectedForTemplate)) return;
                                 await markQuotationAsSent(selectedForTemplate.id);
                             }}
-                            canShareAndDownload
+                            canShareAndDownload={!isQuotationConverted(selectedForTemplate)}
+                            shareBlockReason={isQuotationConverted(selectedForTemplate)
+                                ? `Esta cotización ya fue convertida a pedido${selectedForTemplate.linked_order_folio ? ` #${selectedForTemplate.linked_order_folio}` : ''}.`
+                                : undefined}
+                            readOnly={isQuotationConverted(selectedForTemplate)}
                             onClose={() => setSelectedForTemplate(null)}
                         />
                     </Suspense>
