@@ -1415,7 +1415,64 @@ const Quotations: React.FC = () => {
         }
     }, []);
 
+    const getQuotationValidationError = useCallback(() => {
+        if (!profile) {
+            return 'No se pudo identificar tu usuario actual. Cierra sesión y vuelve a ingresar.';
+        }
+
+        if (!selectedClient) {
+            return 'Debes seleccionar un cliente antes de generar la cotización.';
+        }
+
+        const normalizedItems = formItems
+            .map(item => ({
+                ...item,
+                detail: String(item.detail || '').trim(),
+                qty: Number(item.qty) || 0,
+                price: toWholeMoney(item.price),
+                discountPct: Number(item.discountPct) || 0,
+                netPrice: toWholeMoney(item.netPrice)
+            }))
+            .filter(item => item.detail.length > 0 || item.qty > 0 || item.price > 0);
+
+        if (normalizedItems.length === 0) {
+            return 'Debes agregar al menos un ítem válido.';
+        }
+
+        const invalidItem = normalizedItems.find(item => !item.detail || item.qty <= 0 || item.price < 0);
+        if (invalidItem) {
+            return 'Cada ítem debe tener descripción, cantidad mayor a 0 y precio válido.';
+        }
+
+        if (normalizedItems.some((item) => !resolveInventoryProduct(item))) {
+            return 'Solo se permiten productos del inventario. Selecciona cada ítem desde las sugerencias.';
+        }
+
+        if (paymentTerms.type === 'Crédito' && paymentTerms.days <= 0) {
+            return 'Para pago a crédito debes indicar días mayores a 0.';
+        }
+
+        return null;
+    }, [formItems, paymentTerms.days, paymentTerms.type, profile, resolveInventoryProduct, selectedClient]);
+
+    const handleOpenInteractionModal = useCallback(() => {
+        const validationError = getQuotationValidationError();
+        if (validationError) {
+            setCreateError(validationError);
+            return;
+        }
+
+        setCreateError(null);
+        setIsInteractionModalOpen(true);
+    }, [getQuotationValidationError]);
+
     const handleCreateQuotation = async () => {
+        const validationError = getQuotationValidationError();
+        if (validationError) {
+            setCreateError(validationError);
+            return;
+        }
+
         if (!profile || !selectedClient) return;
         const actingSellerOption = buildProfileSellerOption({
             id: profile.id,
@@ -1452,23 +1509,6 @@ const Quotations: React.FC = () => {
             }))
             .filter(item => item.detail.length > 0 || item.qty > 0 || item.price > 0);
 
-        if (normalizedItems.length === 0) {
-            setCreateError('Debes agregar al menos un ítem válido.');
-            return;
-        }
-        const invalidItem = normalizedItems.find(item => !item.detail || item.qty <= 0 || item.price < 0);
-        if (invalidItem) {
-            setCreateError('Cada ítem debe tener descripción, cantidad mayor a 0 y precio válido.');
-            return;
-        }
-        if (normalizedItems.some((item) => !resolveInventoryProduct(item))) {
-            setCreateError('Solo se permiten productos del inventario. Selecciona cada ítem desde las sugerencias.');
-            return;
-        }
-        if (paymentTerms.type === 'Crédito' && paymentTerms.days <= 0) {
-            setCreateError('Para pago a crédito debes indicar días mayores a 0.');
-            return;
-        }
         setSubmitting(true);
         setCreateError(null);
 
@@ -3332,7 +3372,7 @@ const Quotations: React.FC = () => {
                                 </div>
                                 <div className="w-full md:w-auto flex gap-2">
                                     <button
-                                        onClick={() => setIsInteractionModalOpen(true)}
+                                        onClick={handleOpenInteractionModal}
                                         disabled={submitting}
                                         className="w-full md:w-auto bg-indigo-600 text-white px-8 py-3 md:py-4 rounded-2xl font-bold flex items-center justify-center shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
                                     >
@@ -3359,11 +3399,11 @@ const Quotations: React.FC = () => {
                             <p className="text-gray-400 font-medium text-sm">Capturaremos tu ubicación actual para el registro.</p>
                         </div>
 
-                        <div className="mt-8 space-y-3">
-                            {[
-                                { id: 'Presencial', icon: <User size={18} />, desc: 'Visita en clínica', disabled: !activeVisit },
-                                { id: 'WhatsApp', icon: <MessageSquare size={18} />, desc: 'Conversación digital', disabled: false },
-                                { id: 'Teléfono', icon: <Phone size={18} />, desc: 'Llamada comercial', disabled: false }
+	                        <div className="mt-8 space-y-3">
+	                            {[
+	                                { id: 'Presencial', icon: <User size={18} />, desc: 'Visita en clínica', disabled: !activeVisit },
+	                                { id: 'WhatsApp', icon: <MessageSquare size={18} />, desc: 'Conversación digital', disabled: false },
+	                                { id: 'Teléfono', icon: <Phone size={18} />, desc: 'Llamada comercial', disabled: false }
                             ].map((type) => (
                                 <button
                                     key={type.id}
@@ -3381,12 +3421,19 @@ const Quotations: React.FC = () => {
                                         </div>
                                     </div>
                                     {selectedInteractionType === type.id && <CheckCircle2 size={18} className="text-indigo-600" />}
-                                </button>
-                            ))}
-                        </div>
+	                                </button>
+	                            ))}
+	                        </div>
 
-                        <div className="mt-8 flex gap-3">
-                            <button
+                            {createError && (
+                                <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-left">
+                                    <p className="text-xs font-black uppercase tracking-[0.2em] text-red-500">Revisa antes de generar</p>
+                                    <p className="mt-1 text-sm font-semibold text-red-700">{createError}</p>
+                                </div>
+                            )}
+
+	                        <div className="mt-8 flex gap-3">
+	                            <button
                                 onClick={() => setIsInteractionModalOpen(false)}
                                 className="flex-1 py-4 text-gray-400 font-bold text-sm hover:text-gray-600"
                             >
