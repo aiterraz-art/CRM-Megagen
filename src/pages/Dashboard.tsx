@@ -40,6 +40,36 @@ const getLatestIsoDate = (...values: Array<string | null | undefined>) => values
 const isBillableOrderStatus = (status: string | null | undefined) =>
     String(status || '').toLowerCase() !== 'cancelled';
 
+const buildMonthlySalesTrend = (
+    orders: Array<{ created_at?: string | null; total_amount?: number | null; status?: string | null }>,
+    year: number,
+    monthOneBased: number,
+    today: Date
+) => {
+    const salesByDay = new Map<number, number>();
+
+    orders.forEach((order) => {
+        if (!isBillableOrderStatus(order.status)) return;
+        if (!order.created_at) return;
+
+        const day = new Date(order.created_at).getDate();
+        salesByDay.set(day, (salesByDay.get(day) || 0) + Number(order.total_amount || 0));
+    });
+
+    const trendData: Array<{ name: string; sales: number }> = [];
+    const daysInMonth = new Date(year, monthOneBased, 0).getDate();
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        if (today.getMonth() === monthOneBased - 1 && day > today.getDate()) break;
+        trendData.push({
+            name: `${day}`,
+            sales: salesByDay.get(day) || 0
+        });
+    }
+
+    return trendData;
+};
+
 const resolveComunaFromGps = async (lat: number, lng: number): Promise<string | null> => {
     const roundedLat = lat.toFixed(5);
     const roundedLng = lng.toFixed(5);
@@ -241,25 +271,12 @@ const Dashboard = () => {
                 // --- CHART DATA PROCESSING ---
 
                 // 1. Sales Trend (Daily Sales in Current Month)
-                const salesByDay = new Map<number, number>();
-                monthOrders?.forEach(o => {
-                    if (!isBillableOrderStatus(o.status)) return;
-
-                    const day = new Date(o.created_at).getDate();
-                    salesByDay.set(day, (salesByDay.get(day) || 0) + Number(o.total_amount || 0));
-                });
-
-                const trendData = [];
-                const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
-                for (let i = 1; i <= daysInMonth; i++) {
-                    // Only show up to today if current month
-                    if (now.getMonth() === currentMonth - 1 && i > now.getDate()) break;
-                    trendData.push({
-                        name: `${i}`,
-                        sales: salesByDay.get(i) || 0
-                    });
-                }
-                setSalesTrend(trendData);
+                setSalesTrend(buildMonthlySalesTrend(
+                    (monthOrders || []) as Array<{ created_at?: string | null; total_amount?: number | null; status?: string | null }>,
+                    currentYear,
+                    currentMonth,
+                    now
+                ));
 
                 // 2. Weekly Activity (Last 7 Days)
                 const sevenDaysAgo = new Date();
@@ -864,6 +881,12 @@ const Dashboard = () => {
                         monthSalesNet: summary.reduce((sum, seller) => sum + (seller.monthSalesNet || 0), 0)
                     };
                     setTeamDashboardTotals(totals);
+                    setSalesTrend(buildMonthlySalesTrend(
+                        (monthOrdersRows || []) as Array<{ created_at?: string | null; total_amount?: number | null; status?: string | null }>,
+                        teamCurrentYear,
+                        teamCurrentMonth,
+                        teamNow
+                    ));
 
                     const uniqueZones = Array.from(
                         new Set(
