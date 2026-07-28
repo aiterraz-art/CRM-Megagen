@@ -70,6 +70,46 @@ const buildMonthlySalesTrend = (
     return trendData;
 };
 
+const buildWeeklyActivitySeries = (
+    visits: Array<{ check_in_time?: string | null }>,
+    orders: Array<{ created_at?: string | null }>,
+    endDate: Date
+) => {
+    const startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - 6);
+    startDate.setHours(0, 0, 0, 0);
+
+    const weekDays = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+    const activityMap = new Map<string, { name: string; visits: number; orders: number }>();
+
+    for (let day = new Date(startDate); day <= endDate; day.setDate(day.getDate() + 1)) {
+        const dateKey = day.toISOString().split('T')[0];
+        activityMap.set(dateKey, {
+            name: weekDays[day.getDay()],
+            visits: 0,
+            orders: 0
+        });
+    }
+
+    visits.forEach((visit) => {
+        if (!visit?.check_in_time) return;
+        const dateKey = visit.check_in_time.split('T')[0];
+        if (!activityMap.has(dateKey)) return;
+        activityMap.get(dateKey)!.visits += 1;
+    });
+
+    orders.forEach((order) => {
+        if (!order?.created_at) return;
+        const dateKey = order.created_at.split('T')[0];
+        if (!activityMap.has(dateKey)) return;
+        activityMap.get(dateKey)!.orders += 1;
+    });
+
+    return Array.from(activityMap.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([, value]) => value);
+};
+
 const resolveComunaFromGps = async (lat: number, lng: number): Promise<string | null> => {
     const roundedLat = lat.toFixed(5);
     const roundedLng = lng.toFixed(5);
@@ -296,36 +336,11 @@ const Dashboard = () => {
                     .not('quotation_id', 'is', null)
                     .gte('created_at', sevenDaysAgo.toISOString());
 
-                const activityMap = new Map<string, { name: string; visits: number; orders: number }>();
-                const weekDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-
-                for (let d = new Date(sevenDaysAgo); d <= now; d.setDate(d.getDate() + 1)) {
-                    const dateKey = d.toISOString().split('T')[0];
-                    const dayName = weekDays[d.getDay()];
-                    activityMap.set(dateKey, { name: dayName, visits: 0, orders: 0 });
-                }
-
-                weekVisits?.forEach(v => {
-                    const k = v.check_in_time.split('T')[0];
-                    if (activityMap.has(k)) {
-                        const entry = activityMap.get(k)!;
-                        entry.visits++;
-                    }
-                });
-
-                weekOrders?.forEach(o => {
-                    const k = o.created_at.split('T')[0];
-                    if (activityMap.has(k)) {
-                        const entry = activityMap.get(k)!;
-                        entry.orders++;
-                    }
-                });
-
-                const activityArray = Array.from(activityMap.entries())
-                    .sort((a, b) => a[0].localeCompare(b[0]))
-                    .map(([_, val]) => val);
-
-                setWeeklyActivity(activityArray);
+                setWeeklyActivity(buildWeeklyActivitySeries(
+                    (weekVisits || []) as Array<{ check_in_time?: string | null }>,
+                    (weekOrders || []) as Array<{ created_at?: string | null }>,
+                    now
+                ));
 
                 // 3. Zone Distribution
                 const { data: monthVisits } = await supabase
@@ -745,6 +760,11 @@ const Dashboard = () => {
                     const endOfYesterday = new Date(yesterdayDate);
                     endOfYesterday.setHours(23, 59, 59, 999);
                     const daysElapsedInMonth = Math.max(1, teamNow.getDate());
+                    const weekStart = new Date(selectedDate);
+                    weekStart.setDate(weekStart.getDate() - 6);
+                    weekStart.setHours(0, 0, 0, 0);
+                    const weekEnd = new Date(selectedDate);
+                    weekEnd.setHours(23, 59, 59, 999);
 
                     const todayVisitsRows = preloadedTodayVisitsRows.length > 0
                         ? preloadedTodayVisitsRows
@@ -765,6 +785,22 @@ const Dashboard = () => {
                             .not('quotation_id', 'is', null)
                             .gte('created_at', startOfToday.toISOString())
                             .lte('created_at', endOfToday.toISOString())).data || [];
+
+                    const weekVisitsRows = (await supabase
+                        .from('visits')
+                        .select('check_in_time, sales_rep_id')
+                        .in('sales_rep_id', sellerIds)
+                        .gte('check_in_time', weekStart.toISOString())
+                        .lte('check_in_time', weekEnd.toISOString())
+                        .neq('status', 'cancelled')).data || [];
+
+                    const weekOrdersRows = (await supabase
+                        .from('orders')
+                        .select('created_at, user_id, status, quotation_id')
+                        .in('user_id', sellerIds)
+                        .not('quotation_id', 'is', null)
+                        .gte('created_at', weekStart.toISOString())
+                        .lte('created_at', weekEnd.toISOString())).data || [];
 
                     const monthOrdersRows = preloadedMonthOrdersRows.length > 0
                         ? preloadedMonthOrdersRows
@@ -881,6 +917,11 @@ const Dashboard = () => {
                         monthSalesNet: summary.reduce((sum, seller) => sum + (seller.monthSalesNet || 0), 0)
                     };
                     setTeamDashboardTotals(totals);
+                    setWeeklyActivity(buildWeeklyActivitySeries(
+                        (weekVisitsRows || []) as Array<{ check_in_time?: string | null }>,
+                        ((weekOrdersRows || []) as any[]).filter((order: any) => isBillableOrderStatus(order.status)) as Array<{ created_at?: string | null }>,
+                        weekEnd
+                    ));
                     setSalesTrend(buildMonthlySalesTrend(
                         (monthOrdersRows || []) as Array<{ created_at?: string | null; total_amount?: number | null; status?: string | null }>,
                         teamCurrentYear,
