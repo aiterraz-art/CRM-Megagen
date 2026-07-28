@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw } from 'lucide-react';
+import { AlertTriangle, LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
 import ApprovalRealtimeNotifier from './ApprovalRealtimeNotifier';
 import PushSubscriptionManager from './PushSubscriptionManager';
+import { countPendingLostReasons, LOST_REASON_REFRESH_EVENT } from '../utils/lostReason';
 
 interface LayoutProps {
     children?: React.ReactNode;
@@ -285,10 +286,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const { profile, isSupervisor, effectiveRole, realRole, simulatedRole, setSimulatedRole, hasPermission } = useUser();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [openGroupId, setOpenGroupId] = useState<MenuGroupId | null>(null);
+    const [pendingLostReasonCount, setPendingLostReasonCount] = useState(0);
+    const [showLostReasonAlert, setShowLostReasonAlert] = useState(false);
+    const [lostReasonAlertAcknowledged, setLostReasonAlertAcknowledged] = useState(false);
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
     const canViewPurchaseOrders = hasPermission('VIEW_PURCHASE_ORDERS') || hasPermission('MANAGE_PURCHASE_ORDERS');
     const canViewKitLoans = hasPermission('VIEW_KIT_LOANS');
     const canViewSizeChanges = hasPermission('VIEW_SIZE_CHANGES');
+    const shouldTrackPendingLostReasons = realRole === 'seller' && effectiveRole === 'seller' && Boolean(profile?.id);
 
     const menuContext = useMemo(
         () => ({
@@ -339,6 +344,60 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         setOpenGroupId(defaultOpenGroupId);
     }, [defaultOpenGroupId]);
 
+    useEffect(() => {
+        setLostReasonAlertAcknowledged(false);
+        setShowLostReasonAlert(false);
+    }, [profile?.id]);
+
+    const loadPendingLostReasonCount = useCallback(async () => {
+        if (!shouldTrackPendingLostReasons || !profile?.id) {
+            setPendingLostReasonCount(0);
+            setShowLostReasonAlert(false);
+            return;
+        }
+
+        const { data, error } = await supabase
+            .from('quotations')
+            .select('id, lost_reason')
+            .eq('seller_id', profile.id)
+            .eq('status', 'rejected');
+
+        if (error) {
+            console.error('Error cargando cierres perdidos sin motivo:', error);
+            return;
+        }
+
+        const pendingCount = countPendingLostReasons(data || []);
+        setPendingLostReasonCount(pendingCount);
+        if (pendingCount === 0) {
+            setShowLostReasonAlert(false);
+            return;
+        }
+        if (!lostReasonAlertAcknowledged) {
+            setShowLostReasonAlert(true);
+        }
+    }, [lostReasonAlertAcknowledged, profile?.id, shouldTrackPendingLostReasons]);
+
+    useEffect(() => {
+        void loadPendingLostReasonCount();
+    }, [loadPendingLostReasonCount]);
+
+    useEffect(() => {
+        if (!shouldTrackPendingLostReasons) return;
+
+        const handleRefresh = () => {
+            void loadPendingLostReasonCount();
+        };
+
+        window.addEventListener('focus', handleRefresh);
+        window.addEventListener(LOST_REASON_REFRESH_EVENT, handleRefresh as EventListener);
+
+        return () => {
+            window.removeEventListener('focus', handleRefresh);
+            window.removeEventListener(LOST_REASON_REFRESH_EVENT, handleRefresh as EventListener);
+        };
+    }, [loadPendingLostReasonCount, shouldTrackPendingLostReasons]);
+
     const handleLogout = async () => {
         await supabase.auth.signOut();
         navigate('/login');
@@ -350,8 +409,21 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         setOpenGroupId((current) => (current === groupId ? null : groupId));
     };
 
+    const handleDismissLostReasonAlert = () => {
+        setLostReasonAlertAcknowledged(true);
+        setShowLostReasonAlert(false);
+    };
+
+    const handleGoToPipeline = () => {
+        setLostReasonAlertAcknowledged(true);
+        setShowLostReasonAlert(false);
+        navigate('/pipeline');
+        closeMenu();
+    };
+
     const renderMenuItem = (item: MenuEntry, nested = false) => {
         const isActive = location.pathname === item.path;
+        const badgeCount = item.id === 'pipeline' && shouldTrackPendingLostReasons ? pendingLostReasonCount : 0;
 
         return (
             <Link
@@ -362,6 +434,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             >
                 <span className="relative z-10 shrink-0">{item.icon}</span>
                 <span className="font-bold relative z-10 truncate">{item.label}</span>
+                {badgeCount > 0 && (
+                    <span className="ml-auto min-w-[1.5rem] rounded-full bg-red-500 px-2 py-0.5 text-center text-[10px] font-black text-white shadow-lg shadow-red-500/30">
+                        {badgeCount}
+                    </span>
+                )}
                 {isActive && (
                     <div className="ml-auto w-1.5 h-6 bg-white rounded-full shrink-0"></div>
                 )}
@@ -526,6 +603,49 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                     </div>
                 </div>
             </main>
+            {showLostReasonAlert && pendingLostReasonCount > 0 && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-xl overflow-hidden rounded-[2rem] border border-red-100 bg-white shadow-2xl">
+                        <div className="border-b border-red-100 bg-gradient-to-r from-red-50 via-amber-50 to-white px-6 py-5">
+                            <div className="flex items-start gap-4">
+                                <div className="rounded-2xl bg-red-100 p-3 text-red-600">
+                                    <AlertTriangle size={22} />
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-black uppercase tracking-[0.24em] text-red-500">Seguimiento obligatorio</p>
+                                    <h3 className="mt-1 text-2xl font-black text-gray-900">
+                                        Tienes {pendingLostReasonCount} cierre{pendingLostReasonCount === 1 ? '' : 's'} perdido{pendingLostReasonCount === 1 ? '' : 's'} sin motivo
+                                    </h3>
+                                    <p className="mt-2 text-sm font-medium text-gray-600">
+                                        Antes de cerrar bien tu seguimiento comercial, debes registrar la razón de pérdida de esas cotizaciones en el embudo.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="px-6 py-5">
+                            <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                                Verás este aviso cada vez que ingreses al CRM mientras sigan existiendo cierres perdidos sin motivo registrado.
+                            </div>
+                        </div>
+                        <div className="flex flex-col-reverse gap-3 border-t border-gray-100 bg-gray-50/80 px-6 py-4 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                onClick={handleDismissLostReasonAlert}
+                                className="rounded-2xl px-5 py-3 text-sm font-black text-gray-500 transition hover:bg-gray-200/80"
+                            >
+                                Recordármelo después
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleGoToPipeline}
+                                className="rounded-2xl bg-red-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-red-200 transition hover:bg-red-700"
+                            >
+                                Ir al embudo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <ApprovalRealtimeNotifier />
             <PushSubscriptionManager />
             <GlobalVisitTimer />

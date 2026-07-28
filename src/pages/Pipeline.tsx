@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
-import { ShoppingBag, X } from 'lucide-react';
+import { AlertTriangle, ShoppingBag, X } from 'lucide-react';
+import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
+import { buildQuotationPreviewData } from '../utils/quotationPreview';
+import { hasLostReason, notifyLostReasonUpdated } from '../utils/lostReason';
 
 interface PipelineStage {
     id: string;
@@ -35,6 +38,7 @@ interface Quotation {
 }
 
 const AUTO_LOST_MESSAGE = '3 dias sin respuesta negociacion perdida';
+const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
 
 const normalizeStage = (stage: string | null | undefined): string => {
     const value = (stage || '').toLowerCase().trim();
@@ -85,6 +89,8 @@ const Pipeline = () => {
     const [lostReasonDialog, setLostReasonDialog] = useState<LostReasonDialogState | null>(null);
     const [lostReasonDraft, setLostReasonDraft] = useState('');
     const [savingLostReason, setSavingLostReason] = useState(false);
+    const [selectedLostPreview, setSelectedLostPreview] = useState<any | null>(null);
+    const [loadingLostPreviewId, setLoadingLostPreviewId] = useState<string | null>(null);
     const canViewAllPipeline = effectiveRole === 'admin' || effectiveRole === 'jefe';
 
     useEffect(() => {
@@ -216,6 +222,7 @@ const Pipeline = () => {
             alert('Error al actualizar etapa.');
             return false;
         }
+        notifyLostReasonUpdated();
         return true;
     };
 
@@ -248,6 +255,53 @@ const Pipeline = () => {
             setSavingLostReason(false);
         }
     };
+
+    const openLostPreview = useCallback(async (quote: Quotation) => {
+        setLoadingLostPreviewId(quote.id);
+        try {
+            const { data, error } = await supabase
+                .from('quotations')
+                .select(`
+                    id,
+                    folio,
+                    created_at,
+                    total_amount,
+                    comments,
+                    items,
+                    seller_id,
+                    clients (
+                        id,
+                        name,
+                        rut,
+                        address,
+                        comuna,
+                        zone,
+                        giro,
+                        phone,
+                        email,
+                        purchase_contact
+                    )
+                `)
+                .eq('id', quote.id)
+                .single();
+
+            if (error) throw error;
+
+            const client = Array.isArray(data?.clients) ? data.clients[0] : data?.clients;
+            setSelectedLostPreview({
+                ...data,
+                client,
+                clients: client,
+                client_name: client?.name || (Array.isArray(quote.clients) ? quote.clients[0]?.name : quote.clients?.name) || 'Cliente',
+                seller_name: quote.seller_name || 'Vendedor',
+            });
+        } catch (error: any) {
+            console.error('Error loading lost quotation preview:', error);
+            alert(error?.message || 'No se pudo cargar la vista previa de la cotización.');
+        } finally {
+            setLoadingLostPreviewId(null);
+        }
+    }, []);
 
     const onDragEnd = async (result: DropResult) => {
         const { destination, source, draggableId } = result;
@@ -298,6 +352,16 @@ const Pipeline = () => {
         });
         return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
     }, [quotations]);
+
+    const pendingLostReasonCount = useMemo(() => {
+        if (effectiveRole !== 'seller' || !profile?.id) return 0;
+        return quotations.filter(
+            (quote) =>
+                quote.seller_id === profile.id
+                && normalizeStage(quote.stage) === 'lost'
+                && !hasLostReason(quote.lost_reason)
+        ).length;
+    }, [effectiveRole, profile?.id, quotations]);
 
     useEffect(() => {
         const filteredQuotes = Object.values(quotesByStage).flat();
@@ -411,6 +475,30 @@ const Pipeline = () => {
                 </div>
             </div>
 
+            {effectiveRole === 'seller' && pendingLostReasonCount > 0 && (
+                <div className="rounded-[2rem] border border-red-200 bg-gradient-to-r from-red-50 via-amber-50 to-white px-5 py-4 shadow-sm">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="flex items-start gap-3">
+                            <div className="mt-0.5 rounded-2xl bg-red-100 p-2 text-red-600">
+                                <AlertTriangle size={18} />
+                            </div>
+                            <div>
+                                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-red-500">Acción obligatoria</p>
+                                <h3 className="mt-1 text-lg font-black text-gray-900">
+                                    Tienes {pendingLostReasonCount} cierre{pendingLostReasonCount === 1 ? '' : 's'} perdido{pendingLostReasonCount === 1 ? '' : 's'} sin motivo registrado
+                                </h3>
+                                <p className="mt-1 text-sm font-medium text-gray-600">
+                                    Cada cotización perdida debe quedar con su razón documentada para cerrar bien el seguimiento comercial.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="rounded-2xl border border-red-100 bg-white px-4 py-3 text-sm font-bold text-gray-700 shadow-sm">
+                            Revisa la columna <span className="text-red-600">Cierre Perdido</span> y usa <span className="text-red-600">Agregar motivo obligatorio</span>.
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <DragDropContext onDragEnd={onDragEnd}>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 h-[calc(100vh-250px)] overflow-x-auto pb-4">
                     {STAGES.map(stage => {
@@ -443,7 +531,12 @@ const Pipeline = () => {
                                                             ref={provided.innerRef}
                                                             {...provided.draggableProps}
                                                             {...provided.dragHandleProps}
-                                                            className={`bg-white p-2 rounded-md shadow-sm border border-gray-100 cursor-grab group hover:shadow-md transition-all will-change-transform ${snapshot.isDragging ? 'shadow-xl scale-[1.02]' : ''} ${snapshot.isDropAnimating ? 'transition-transform duration-150 ease-out' : ''}`}
+                                                            onClick={() => {
+                                                                if (normalizeStage(quote.stage) === 'lost') {
+                                                                    void openLostPreview(quote);
+                                                                }
+                                                            }}
+                                                            className={`bg-white p-2 rounded-md shadow-sm border border-gray-100 group hover:shadow-md transition-all will-change-transform ${normalizeStage(quote.stage) === 'lost' ? 'cursor-pointer' : 'cursor-grab'} ${snapshot.isDragging ? 'shadow-xl scale-[1.02]' : ''} ${snapshot.isDropAnimating ? 'transition-transform duration-150 ease-out' : ''} ${normalizeStage(quote.stage) === 'lost' && !hasLostReason(quote.lost_reason) ? 'ring-2 ring-red-200 border-red-200 bg-red-50/40' : ''}`}
                                                         >
                                                             <div className="flex justify-between items-start mb-0.5">
                                                                 <span className="text-[8px] font-black text-gray-400">#{quote.folio}</span>
@@ -462,6 +555,11 @@ const Pipeline = () => {
                                                                 <span className="font-black text-indigo-600 text-[11px]">
                                                                     {formatCurrency(quote.total_amount || 0)}
                                                                 </span>
+                                                                {loadingLostPreviewId === quote.id && (
+                                                                    <span className="text-[8px] font-black uppercase tracking-widest text-indigo-500">
+                                                                        Cargando...
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                             {normalizeStage(quote.stage) === 'lost' && quote.autoLostByNoResponse && (
                                                                 <p className="mt-1 text-[9px] font-black text-red-600 leading-tight">
@@ -471,6 +569,11 @@ const Pipeline = () => {
                                                             {normalizeStage(quote.stage) === 'lost' && quote.lost_reason && (
                                                                 <p className="mt-1 text-[9px] font-bold text-red-700 leading-tight">
                                                                     Motivo: {quote.lost_reason}
+                                                                </p>
+                                                            )}
+                                                            {normalizeStage(quote.stage) === 'lost' && !hasLostReason(quote.lost_reason) && (
+                                                                <p className="mt-1 text-[9px] font-black uppercase tracking-wide text-red-600 leading-tight">
+                                                                    Motivo pendiente obligatorio
                                                                 </p>
                                                             )}
                                                             {normalizeStage(quote.stage) === 'lost' && (
@@ -483,7 +586,7 @@ const Pipeline = () => {
                                                                     }}
                                                                     className="mt-2 rounded-lg border border-red-100 bg-red-50 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-red-700 hover:bg-red-100"
                                                                 >
-                                                                    {quote.lost_reason ? 'Editar motivo' : 'Agregar motivo'}
+                                                                    {quote.lost_reason ? 'Editar motivo' : 'Agregar motivo obligatorio'}
                                                                 </button>
                                                             )}
                                                         </div>
@@ -563,6 +666,20 @@ const Pipeline = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {selectedLostPreview && (
+                <Suspense fallback={<div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm" />}>
+                    <QuotationTemplate
+                        data={buildQuotationPreviewData(
+                            selectedLostPreview,
+                            formatPaymentTermsFromCreditDays(getClientCreditDays(selectedLostPreview.client))
+                        )}
+                        canShareAndDownload={false}
+                        readOnly
+                        onClose={() => setSelectedLostPreview(null)}
+                    />
+                </Suspense>
             )}
         </div>
     );
