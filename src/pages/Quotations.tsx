@@ -31,12 +31,19 @@ import { Database } from '../types/supabase';
 
 const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
 
+type QuotationSellerDirectoryRow = Database['public']['Tables']['quotation_sellers']['Row'];
+type SellerSource = 'profile' | 'directory';
+
 type SellerOption = {
+    key: string;
+    source: SellerSource;
     id: string;
     full_name: string | null;
     email: string | null;
     role: string | null;
     status: string | null;
+    linked_profile_id?: string | null;
+    active?: boolean | null;
 };
 
 type QuotationOrderConversionLog = Database['public']['Tables']['quotation_order_conversion_logs']['Row'];
@@ -94,6 +101,36 @@ const getSellerDisplayName = (sellerProfile: SellerOption | null | undefined) =>
 
     return 'Vendedor';
 };
+
+const buildProfileSellerOption = (profileRow: {
+    id: string;
+    full_name: string | null;
+    email: string | null;
+    role: string | null;
+    status: string | null;
+}): SellerOption => ({
+    key: `profile:${profileRow.id}`,
+    source: 'profile',
+    id: profileRow.id,
+    full_name: profileRow.full_name || null,
+    email: profileRow.email || null,
+    role: profileRow.role || null,
+    status: profileRow.status || null,
+    linked_profile_id: profileRow.id,
+    active: profileRow.status === 'active',
+});
+
+const buildDirectorySellerOption = (sellerRow: QuotationSellerDirectoryRow): SellerOption => ({
+    key: `directory:${sellerRow.id}`,
+    source: 'directory',
+    id: sellerRow.id,
+    full_name: sellerRow.name || null,
+    email: sellerRow.email || null,
+    role: 'external',
+    status: sellerRow.active ? 'active' : 'inactive',
+    linked_profile_id: sellerRow.linked_profile_id || null,
+    active: sellerRow.active,
+});
 
 const normalizeSuggestionValue = (value: unknown) => String(value || '').trim().toLowerCase();
 
@@ -225,6 +262,10 @@ const Quotations: React.FC = () => {
     const [orderConversionStage, setOrderConversionStage] = useState<string | null>(null);
     const [availableSellers, setAvailableSellers] = useState<SellerOption[]>([]);
     const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
+    const [isSellerDirectoryModalOpen, setIsSellerDirectoryModalOpen] = useState(false);
+    const [newSellerName, setNewSellerName] = useState('');
+    const [newSellerEmail, setNewSellerEmail] = useState('');
+    const [creatingSeller, setCreatingSeller] = useState(false);
     const [conversionHistoryQuotation, setConversionHistoryQuotation] = useState<any | null>(null);
     const [conversionHistoryLogs, setConversionHistoryLogs] = useState<QuotationOrderConversionLog[]>([]);
     const [conversionHistoryLoading, setConversionHistoryLoading] = useState(false);
@@ -494,9 +535,11 @@ const Quotations: React.FC = () => {
             } else if (quotesData) {
                 // Manual Fetch for Auxiliary Data to avoid Join issues
                 const sellerIds = Array.from(new Set(quotesData.map((q: any) => q.seller_id).filter(Boolean)));
+                const sellerCatalogIds = Array.from(new Set(quotesData.map((q: any) => q.seller_catalog_id).filter(Boolean)));
                 const quotationIds = quotesData.map((q: any) => q.id);
 
                 let profilesMap: Record<string, any> = {};
+                let sellerCatalogMap: Record<string, QuotationSellerDirectoryRow> = {};
                 let locationsMap: Record<string, any> = {};
                 let ordersByQuotationId: Record<string, any> = {};
 
@@ -511,6 +554,22 @@ const Quotations: React.FC = () => {
                             .in('id', sellerIds)
                             .then(({ data }) => {
                                 if (data) data.forEach(p => profilesMap[p.id] = p);
+                            })
+                    );
+                }
+
+                if (sellerCatalogIds.length > 0) {
+                    promises.push(
+                        supabase
+                            .from('quotation_sellers')
+                            .select('id, name, email, linked_profile_id, active, created_at, created_by, updated_at')
+                            .in('id', sellerCatalogIds)
+                            .then(({ data }) => {
+                                if (data) {
+                                    data.forEach((seller) => {
+                                        sellerCatalogMap[seller.id] = seller as QuotationSellerDirectoryRow;
+                                    });
+                                }
                             })
                     );
                 }
@@ -564,6 +623,7 @@ const Quotations: React.FC = () => {
 
                 const formattedData = quotesData.map((q: any) => {
                     const sellerProfile = profilesMap[q.seller_id];
+                    const directorySeller = q.seller_catalog_id ? sellerCatalogMap[q.seller_catalog_id] : null;
                     const loc = locationsMap[q.id];
                     const linkedOrder = ordersByQuotationId[q.id] || null;
                     const isConverted = Boolean(linkedOrder?.id || q.status === 'approved');
@@ -581,9 +641,10 @@ const Quotations: React.FC = () => {
                         client_contact: client?.purchase_contact || 'Sin Nombre de Contacto',
                         client_giro: client?.giro || '',
                         client_comuna: client?.comuna || '',
-                        seller_email: sellerProfile?.email || 'N/A',
-                        seller_name: getSellerDisplayName(sellerProfile),
+                        seller_email: q.seller_email_snapshot || directorySeller?.email || sellerProfile?.email || 'N/A',
+                        seller_name: q.seller_name_snapshot || directorySeller?.name || getSellerDisplayName(sellerProfile),
                         seller_role: sellerProfile?.role || null,
+                        seller_catalog: directorySeller,
                         linked_order_id: linkedOrder?.id || null,
                         linked_order_folio: linkedOrder?.folio || null,
                         linked_order_status: linkedOrder?.status || null,
@@ -696,20 +757,42 @@ const Quotations: React.FC = () => {
             return;
         }
 
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('id, full_name, email, role, status')
-            .eq('status', 'active')
-            .in('role', ['seller', 'jefe', 'admin'])
-            .order('full_name');
+        const [
+            { data: profilesData, error: profilesError },
+            { data: directoryData, error: directoryError }
+        ] = await Promise.all([
+            supabase
+                .from('profiles')
+                .select('id, full_name, email, role, status')
+                .eq('status', 'active')
+                .in('role', ['seller', 'jefe', 'admin'])
+                .order('full_name'),
+            supabase
+                .from('quotation_sellers')
+                .select('id, name, email, linked_profile_id, active, created_at, created_by, updated_at')
+                .eq('active', true)
+                .order('name')
+        ]);
 
-        if (error) {
-            console.error('Error fetching sellers for quotation assignment:', error);
+        if (profilesError || directoryError) {
+            console.error('Error fetching sellers for quotation assignment:', profilesError || directoryError);
             setAvailableSellers([]);
             return;
         }
 
-        setAvailableSellers((data || []) as SellerOption[]);
+        const internalOptions = (profilesData || []).map((row) => buildProfileSellerOption(row as SellerOption));
+        const directoryOptions = (directoryData || []).map((row) => buildDirectorySellerOption(row as QuotationSellerDirectoryRow));
+        const byKey = new globalThis.Map<string, SellerOption>();
+
+        [...internalOptions, ...directoryOptions].forEach((option) => {
+            byKey.set(option.key, option);
+        });
+
+        setAvailableSellers(
+            Array.from(byKey.values()).sort((left, right) =>
+                getSellerDisplayName(left).localeCompare(getSellerDisplayName(right), 'es')
+            )
+        );
     }, [effectiveRole]);
 
     const fetchClientsForModal = useCallback(async () => {
@@ -719,6 +802,43 @@ const Quotations: React.FC = () => {
         const { data } = await query;
         if (data) setAvailableClients(data);
     }, [canViewAll, isSellerRole, profile?.id]);
+
+    const handleCreateExternalSeller = useCallback(async () => {
+        const normalizedName = newSellerName.trim();
+        const normalizedEmail = newSellerEmail.trim().toLowerCase();
+
+        if (!normalizedName) {
+            alert('Debes ingresar el nombre del vendedor.');
+            return;
+        }
+
+        setCreatingSeller(true);
+        try {
+            const { data, error } = await supabase
+                .from('quotation_sellers')
+                .insert({
+                    name: normalizedName,
+                    email: normalizedEmail || null,
+                    created_by: profile?.id || null,
+                    active: true,
+                    updated_at: new Date().toISOString(),
+                })
+                .select('id, name, email, linked_profile_id, active, created_at, created_by, updated_at')
+                .single();
+
+            if (error) throw error;
+
+            await fetchAvailableSellers();
+            setSelectedSellerId(`directory:${data.id}`);
+            setNewSellerName('');
+            setNewSellerEmail('');
+            setIsSellerDirectoryModalOpen(false);
+        } catch (error: any) {
+            alert(error?.message || 'No se pudo crear el vendedor externo.');
+        } finally {
+            setCreatingSeller(false);
+        }
+    }, [fetchAvailableSellers, newSellerEmail, newSellerName, profile?.id]);
 
     useEffect(() => {
         fetchQuotations();
@@ -872,7 +992,7 @@ const Quotations: React.FC = () => {
         setPaymentTerms(getPaymentTermsFromCreditDays(getClientCreditDays(client)));
         setManualLocation(null);
         setEditingQuotation(null); // Ensure we are NOT in edit mode
-        setSelectedSellerId((prev) => canAssignQuotationSeller(effectiveRole) ? prev : (profile?.id || null));
+        setSelectedSellerId((prev) => canAssignQuotationSeller(effectiveRole) ? prev : (profile?.id ? `profile:${profile.id}` : null));
     };
 
     const handleEditQuotation = (q: any) => {
@@ -906,7 +1026,7 @@ const Quotations: React.FC = () => {
         setFormComments(q.comments || '');
         setPaymentTerms(getPaymentTermsFromCreditDays(getClientCreditDays(q.client)));
         setCreateError(null);
-        setSelectedSellerId(q.seller_id || null);
+        setSelectedSellerId(q.seller_catalog_id ? `directory:${q.seller_catalog_id}` : (q.seller_id ? `profile:${q.seller_id}` : null));
         setIsItemModalOpen(true);
     };
 
@@ -1297,11 +1417,30 @@ const Quotations: React.FC = () => {
 
     const handleCreateQuotation = async () => {
         if (!profile || !selectedClient) return;
-        const sellerIdForQuotation = canAssignQuotationSeller(effectiveRole) ? selectedSellerId : profile.id;
-        if (!sellerIdForQuotation) {
+        const actingSellerOption = buildProfileSellerOption({
+            id: profile.id,
+            full_name: profile.full_name || null,
+            email: profile.email || null,
+            role: effectiveRole,
+            status: profile.status || null
+        });
+        const sellerOptionForQuotation = canAssignQuotationSeller(effectiveRole)
+            ? selectedSellerOption
+            : actingSellerOption;
+
+        if (!sellerOptionForQuotation) {
             setCreateError('Debes seleccionar un vendedor para la cotización.');
             return;
         }
+
+        const sellerProfileIdForQuotation = sellerOptionForQuotation.source === 'profile'
+            ? sellerOptionForQuotation.id
+            : sellerOptionForQuotation.linked_profile_id || null;
+        const sellerCatalogIdForQuotation = sellerOptionForQuotation.source === 'directory'
+            ? sellerOptionForQuotation.id
+            : null;
+        const sellerNameSnapshot = getSellerDisplayName(sellerOptionForQuotation);
+        const sellerEmailSnapshot = String(sellerOptionForQuotation.email || '').trim() || null;
         const normalizedItems = formItems
             .map(item => ({
                 ...item,
@@ -1337,7 +1476,7 @@ const Quotations: React.FC = () => {
             const shouldPromoteProspectToEvaluating = isProspectStatus(selectedClient.status);
             let latitude: number | null = null;
             let longitude: number | null = null;
-            const shouldCaptureSellerLocation = !(canAssignQuotationSeller(effectiveRole) && sellerIdForQuotation !== profile.id);
+            const shouldCaptureSellerLocation = !(canAssignQuotationSeller(effectiveRole) && sellerProfileIdForQuotation !== profile.id);
 
             if (manualLocation && shouldCaptureSellerLocation) {
                 latitude = manualLocation.lat;
@@ -1382,9 +1521,12 @@ const Quotations: React.FC = () => {
             // 3. Direct Insert (Bypassing RPC to ensure items are saved)
             if (editingQuotation) {
                 const { error: updateError } = await supabase
-                    .from('quotations')
-                    .update({
-                        seller_id: sellerIdForQuotation,
+                        .from('quotations')
+                        .update({
+                        seller_id: sellerProfileIdForQuotation,
+                        seller_catalog_id: sellerCatalogIdForQuotation,
+                        seller_name_snapshot: sellerNameSnapshot,
+                        seller_email_snapshot: sellerEmailSnapshot,
                         source_visit_id: selectedSourceVisitId,
                         items: calculatedItems,
                         total_amount: grandTotal,
@@ -1410,7 +1552,10 @@ const Quotations: React.FC = () => {
                     .insert({
                         id: crypto.randomUUID(),
                         client_id: selectedClient.id,
-                        seller_id: sellerIdForQuotation,
+                        seller_id: sellerProfileIdForQuotation,
+                        seller_catalog_id: sellerCatalogIdForQuotation,
+                        seller_name_snapshot: sellerNameSnapshot,
+                        seller_email_snapshot: sellerEmailSnapshot,
                         source_visit_id: selectedSourceVisitId,
                         items: calculatedItems,
                         total_amount: grandTotal,
@@ -1440,7 +1585,7 @@ const Quotations: React.FC = () => {
                 let locationNotice = '';
                 if (latitude !== null && longitude !== null && insertData) {
                     const locationResult = await queueQuotationLocation({
-                        seller_id: sellerIdForQuotation,
+                        seller_id: sellerProfileIdForQuotation || profile.id,
                         quotation_id: insertData.id,
                         lat: latitude,
                         lng: longitude
@@ -1989,18 +2134,18 @@ const Quotations: React.FC = () => {
     const formItemCount = useMemo(() => {
         return formItems.reduce((count, item) => count + (Number(item.qty || 0) > 0 ? Number(item.qty || 0) : 0), 0);
     }, [formItems]);
-    const selectedSellerProfile = useMemo(() => {
+    const selectedSellerOption = useMemo(() => {
         if (!selectedSellerId) return null;
-        if (profile?.id === selectedSellerId) {
-            return {
+        if (profile?.id && selectedSellerId === `profile:${profile.id}`) {
+            return buildProfileSellerOption({
                 id: profile.id,
                 full_name: profile.full_name || null,
                 email: profile.email || null,
                 role: effectiveRole,
                 status: profile.status || null
-            } as SellerOption;
+            });
         }
-        return availableSellers.find((seller) => seller.id === selectedSellerId) || null;
+        return availableSellers.find((seller) => seller.key === selectedSellerId) || null;
     }, [availableSellers, effectiveRole, profile?.email, profile?.full_name, profile?.id, profile?.status, selectedSellerId]);
 
     return (
@@ -2640,7 +2785,26 @@ const Quotations: React.FC = () => {
                                 )}
                                 {canAssignQuotationSeller(effectiveRole) && (
                                     <div className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
-                                        <label className="text-[10px] uppercase font-black tracking-widest text-indigo-500">Vendedor asignado</label>
+                                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                            <div>
+                                                <label className="text-[10px] uppercase font-black tracking-widest text-indigo-500">Vendedor asignado</label>
+                                                {selectedSellerOption && (
+                                                    <p className="mt-2 text-sm font-bold text-indigo-900">
+                                                        {getSellerDisplayName(selectedSellerOption)}
+                                                        <span className="ml-2 text-xs font-medium text-indigo-600">
+                                                            {selectedSellerOption.source === 'directory' ? 'Externo sin usuario' : 'Usuario CRM'}
+                                                        </span>
+                                                    </p>
+                                                )}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsSellerDirectoryModalOpen(true)}
+                                                className="rounded-2xl border border-indigo-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-indigo-700 transition hover:bg-indigo-100"
+                                            >
+                                                Agregar vendedor externo
+                                            </button>
+                                        </div>
                                         <select
                                             value={selectedSellerId || ''}
                                             onChange={(e) => setSelectedSellerId(e.target.value || null)}
@@ -2648,13 +2812,13 @@ const Quotations: React.FC = () => {
                                         >
                                             <option value="">Selecciona un vendedor</option>
                                             {availableSellers.map((seller) => (
-                                                <option key={seller.id} value={seller.id}>
-                                                    {(seller.full_name || seller.email || 'Usuario').toUpperCase()}
+                                                <option key={seller.key} value={seller.key}>
+                                                    {`${getSellerDisplayName(seller).toUpperCase()}${seller.source === 'directory' ? ' · EXTERNO' : ''}`}
                                                 </option>
                                             ))}
                                         </select>
                                         <p className="mt-2 text-xs font-medium text-indigo-700">
-                                            La cotización quedará asignada al vendedor seleccionado y seguirá su flujo normal dentro del CRM.
+                                            Puedes asignar usuarios reales del CRM o vendedores externos sin cuenta. La cotización conservará el nombre comercial seleccionado.
                                         </p>
                                     </div>
                                 )}
@@ -2997,6 +3161,103 @@ const Quotations: React.FC = () => {
                                 <div className="mx-6 mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3">
                                     <span className="font-bold">Error:</span>
                                     <span className="text-sm">{createError}</span>
+                                </div>
+                            )}
+
+                            {isSellerDirectoryModalOpen && (
+                                <div className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                                    <div className="w-full max-w-2xl rounded-[2rem] bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                                        <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5">
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-indigo-500">Catálogo comercial</p>
+                                                <h3 className="mt-1 text-2xl font-black text-gray-900">Agregar vendedor externo</h3>
+                                                <p className="mt-2 text-sm font-medium text-gray-500">
+                                                    Úsalo para vendedores que deben aparecer en la cotización, pero no necesitan acceso al CRM.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsSellerDirectoryModalOpen(false)}
+                                                className="rounded-full p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                                                disabled={creatingSeller}
+                                            >
+                                                <XIcon size={18} />
+                                            </button>
+                                        </div>
+
+                                        <div className="px-6 py-5 space-y-5">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="mb-2 block text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                        Nombre
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        value={newSellerName}
+                                                        onChange={(e) => setNewSellerName(e.target.value)}
+                                                        placeholder="Ej. Daniela Carvajal"
+                                                        className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 outline-none transition focus:border-indigo-300 focus:bg-white"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="mb-2 block text-[11px] font-black uppercase tracking-widest text-gray-400">
+                                                        Correo opcional
+                                                    </label>
+                                                    <input
+                                                        type="email"
+                                                        value={newSellerEmail}
+                                                        onChange={(e) => setNewSellerEmail(e.target.value)}
+                                                        placeholder="Ej. dcarvajal@externo.cl"
+                                                        className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 outline-none transition focus:border-indigo-300 focus:bg-white"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-4">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Vendedores externos disponibles</p>
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    {availableSellers.filter((seller) => seller.source === 'directory').length === 0 && (
+                                                        <span className="text-sm font-medium text-indigo-700">Todavía no hay vendedores externos creados.</span>
+                                                    )}
+                                                    {availableSellers.filter((seller) => seller.source === 'directory').map((seller) => (
+                                                        <button
+                                                            key={seller.key}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSelectedSellerId(seller.key);
+                                                                setIsSellerDirectoryModalOpen(false);
+                                                            }}
+                                                            className={`rounded-full border px-3 py-2 text-xs font-black uppercase tracking-wide transition ${selectedSellerId === seller.key
+                                                                ? 'border-indigo-500 bg-indigo-600 text-white'
+                                                                : 'border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100'
+                                                                }`}
+                                                        >
+                                                            {getSellerDisplayName(seller)}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex flex-col-reverse gap-3 border-t border-gray-100 bg-gray-50/80 px-6 py-4 sm:flex-row sm:justify-end">
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsSellerDirectoryModalOpen(false)}
+                                                className="rounded-2xl px-5 py-3 text-sm font-black text-gray-500 transition hover:bg-gray-200/80"
+                                                disabled={creatingSeller}
+                                            >
+                                                Cerrar
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleCreateExternalSeller()}
+                                                className="rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                disabled={creatingSeller}
+                                            >
+                                                {creatingSeller ? 'Guardando...' : 'Guardar vendedor externo'}
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
 

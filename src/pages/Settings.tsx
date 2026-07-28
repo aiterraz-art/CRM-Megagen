@@ -14,6 +14,7 @@ type InvitePayload = {
 
 type OrderNotificationSettingsRow = Database['public']['Tables']['order_notification_settings']['Row'];
 type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_settings']['Row'];
+type QuotationSellerRow = Database['public']['Tables']['quotation_sellers']['Row'];
 
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
@@ -84,6 +85,13 @@ const Settings: React.FC = () => {
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
     const [sendingInvite, setSendingInvite] = useState(false);
     const [inviteData, setInviteData] = useState({ email: '', full_name: '', role: 'seller' });
+    const [inviteMode, setInviteMode] = useState<'user' | 'additional_seller'>('user');
+    const [additionalSellerName, setAdditionalSellerName] = useState('');
+    const [additionalSellerEmail, setAdditionalSellerEmail] = useState('');
+    const [quotationSellers, setQuotationSellers] = useState<QuotationSellerRow[]>([]);
+    const [loadingQuotationSellers, setLoadingQuotationSellers] = useState(false);
+    const [savingQuotationSeller, setSavingQuotationSeller] = useState(false);
+    const [togglingQuotationSellerId, setTogglingQuotationSellerId] = useState<string | null>(null);
     const [pendingInvites, setPendingInvites] = useState<any[]>([]); // New state for Pending Invites
     const [resendingInviteEmail, setResendingInviteEmail] = useState<string | null>(null);
 
@@ -140,6 +148,7 @@ const Settings: React.FC = () => {
         fetchUsers();
         fetchRolePermissions();
         fetchPendingInvites(); // Fetch whitelisted users
+        fetchQuotationSellers();
     }, []);
 
     const activeBackofficeRecipients = useMemo(
@@ -161,6 +170,24 @@ const Settings: React.FC = () => {
 
             const pending = whitelist.filter(w => !existingEmails.has(w.email?.toLowerCase()));
             setPendingInvites(pending);
+        }
+    };
+
+    const fetchQuotationSellers = async () => {
+        setLoadingQuotationSellers(true);
+        try {
+            const { data, error } = await supabase
+                .from('quotation_sellers')
+                .select('*')
+                .order('active', { ascending: false })
+                .order('name');
+
+            if (error) throw error;
+            setQuotationSellers((data || []) as QuotationSellerRow[]);
+        } catch (error: any) {
+            console.error('Error fetching quotation sellers:', error);
+        } finally {
+            setLoadingQuotationSellers(false);
         }
     };
 
@@ -306,6 +333,10 @@ const Settings: React.FC = () => {
 
     const handleInviteUser = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (inviteMode === 'additional_seller') {
+            await handleCreateQuotationSeller();
+            return;
+        }
         setSendingInvite(true);
         try {
             const normalizedEmail = inviteData.email.trim().toLowerCase();
@@ -359,6 +390,68 @@ const Settings: React.FC = () => {
             alert('Error al procesar invitación: ' + (error.message || 'Error desconocido'));
         } finally {
             setSendingInvite(false);
+        }
+    };
+
+    const handleCreateQuotationSeller = async () => {
+        const normalizedName = additionalSellerName.trim();
+        const normalizedEmail = additionalSellerEmail.trim().toLowerCase();
+
+        if (!normalizedName) {
+            alert('Debes indicar el nombre del vendedor adicional.');
+            return;
+        }
+
+        setSavingQuotationSeller(true);
+        try {
+            const { error } = await supabase
+                .from('quotation_sellers')
+                .insert({
+                    name: normalizedName,
+                    email: normalizedEmail || null,
+                    active: true,
+                    created_by: profile?.id || null,
+                    updated_at: new Date().toISOString(),
+                });
+
+            if (error) throw error;
+
+            alert('Vendedor adicional creado correctamente.');
+            setAdditionalSellerName('');
+            setAdditionalSellerEmail('');
+            setIsInviteModalOpen(false);
+            setInviteMode('user');
+            await fetchQuotationSellers();
+        } catch (error: any) {
+            console.error('Error creating quotation seller:', error);
+            alert(`No se pudo crear el vendedor adicional: ${error.message || 'desconocido'}`);
+        } finally {
+            setSavingQuotationSeller(false);
+        }
+    };
+
+    const handleToggleQuotationSeller = async (seller: QuotationSellerRow) => {
+        const nextActive = !seller.active;
+        const actionLabel = nextActive ? 'reactivar' : 'desactivar';
+        if (!window.confirm(`¿Deseas ${actionLabel} a ${seller.name}?`)) return;
+
+        setTogglingQuotationSellerId(seller.id);
+        try {
+            const { error } = await supabase
+                .from('quotation_sellers')
+                .update({
+                    active: nextActive,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', seller.id);
+
+            if (error) throw error;
+            await fetchQuotationSellers();
+        } catch (error: any) {
+            console.error('Error toggling quotation seller:', error);
+            alert(`No se pudo actualizar el vendedor adicional: ${error.message || 'desconocido'}`);
+        } finally {
+            setTogglingQuotationSellerId(null);
         }
     };
 
@@ -677,7 +770,26 @@ const Settings: React.FC = () => {
                         <button onClick={() => setActiveTab('clients')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'clients' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Clientes</button>
                     )}
                     {canAccessUserAdmin && (
-                        <button onClick={() => setIsInviteModalOpen(true)} className="ml-4 px-6 py-2.5 bg-gray-900 text-white rounded-xl font-bold hover:bg-black transition-all shadow-lg flex items-center gap-2"><User size={16} /> Invitar</button>
+                        <button
+                            onClick={() => {
+                                setInviteMode('additional_seller');
+                                setIsInviteModalOpen(true);
+                            }}
+                            className="ml-4 px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg flex items-center gap-2"
+                        >
+                            <User size={16} /> Vendedor Adicional
+                        </button>
+                    )}
+                    {canAccessUserAdmin && (
+                        <button
+                            onClick={() => {
+                                setInviteMode('user');
+                                setIsInviteModalOpen(true);
+                            }}
+                            className="ml-4 px-6 py-2.5 bg-gray-900 text-white rounded-xl font-bold hover:bg-black transition-all shadow-lg flex items-center gap-2"
+                        >
+                            <User size={16} /> Invitar
+                        </button>
                     )}
                 </div>
             </div>
@@ -846,6 +958,72 @@ const Settings: React.FC = () => {
                             </div>
                         </div>
                     )}
+
+                    <div className="border-t border-gray-100">
+                        <div className="p-8 bg-indigo-50/30">
+                            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-6">
+                                <div>
+                                    <h3 className="text-xl font-black text-gray-800 flex items-center gap-3">
+                                        <span className="bg-indigo-100 text-indigo-600 p-2 rounded-lg"><User size={20} /></span>
+                                        Vendedores Adicionales
+                                    </h3>
+                                    <p className="mt-2 text-sm font-medium text-gray-500">
+                                        Vendedores permanentes sin acceso al CRM. Quedan disponibles para seleccionarlos en cotizaciones.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setInviteMode('additional_seller');
+                                        setIsInviteModalOpen(true);
+                                    }}
+                                    className="rounded-2xl bg-indigo-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-indigo-100 hover:bg-indigo-700"
+                                >
+                                    Crear vendedor adicional
+                                </button>
+                            </div>
+
+                            {loadingQuotationSellers ? (
+                                <div className="rounded-2xl bg-white p-8 text-center text-sm font-bold text-gray-400">
+                                    Cargando vendedores adicionales...
+                                </div>
+                            ) : quotationSellers.length === 0 ? (
+                                <div className="rounded-2xl bg-white p-8 text-center text-sm font-bold text-gray-400">
+                                    Aún no hay vendedores adicionales creados.
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {quotationSellers.map((seller) => (
+                                        <div key={seller.id} className="flex flex-col gap-4 rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+                                            <div>
+                                                <p className="font-black text-gray-900">{seller.name}</p>
+                                                <p className="text-xs font-medium text-gray-500">{seller.email || 'Sin correo registrado'}</p>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${seller.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                                                    {seller.active ? 'Activo' : 'Inactivo'}
+                                                </span>
+                                                <button
+                                                    onClick={() => void handleToggleQuotationSeller(seller)}
+                                                    disabled={togglingQuotationSellerId === seller.id}
+                                                    className={`rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
+                                                        seller.active
+                                                            ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                                            : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                    } disabled:opacity-50`}
+                                                >
+                                                    {togglingQuotationSellerId === seller.id
+                                                        ? 'Guardando...'
+                                                        : seller.active
+                                                            ? 'Desactivar'
+                                                            : 'Reactivar'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             ) : activeTab === 'permissions' && canAccessPermissionMatrix ? (
                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-gray-100 overflow-hidden">
@@ -1219,32 +1397,81 @@ const Settings: React.FC = () => {
                 isInviteModalOpen && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 backdrop-blur-md bg-black/40">
                         <div className="bg-white rounded-[3rem] w-full max-w-xl p-12 shadow-2xl relative border border-gray-100">
-                            <h3 className="text-4xl font-black text-gray-900 mb-2">Crear Invitación</h3>
+                            <div className="mb-6 flex rounded-2xl bg-gray-100 p-1.5">
+                                <button
+                                    type="button"
+                                    onClick={() => setInviteMode('user')}
+                                    className={`flex-1 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-widest transition-all ${inviteMode === 'user' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}`}
+                                >
+                                    Usuario con acceso
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setInviteMode('additional_seller')}
+                                    className={`flex-1 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-widest transition-all ${inviteMode === 'additional_seller' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}`}
+                                >
+                                    Vendedor adicional
+                                </button>
+                            </div>
+                            <h3 className="text-4xl font-black text-gray-900 mb-2">
+                                {inviteMode === 'user' ? 'Crear Invitación' : 'Crear Vendedor Adicional'}
+                            </h3>
                             <form onSubmit={handleInviteUser} className="space-y-8">
-                                <input required type="text" value={inviteData.full_name} onChange={e => setInviteData(p => ({ ...p, full_name: e.target.value }))} className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black" placeholder="Nombre" />
-                                <input required type="email" value={inviteData.email} onChange={e => setInviteData(p => ({ ...p, email: e.target.value.toLowerCase() }))} className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black" placeholder="Email" />
+                                {inviteMode === 'user' ? (
+                                    <>
+                                        <input required type="text" value={inviteData.full_name} onChange={e => setInviteData(p => ({ ...p, full_name: e.target.value }))} className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black" placeholder="Nombre" />
+                                        <input required type="email" value={inviteData.email} onChange={e => setInviteData(p => ({ ...p, email: e.target.value.toLowerCase() }))} className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black" placeholder="Email" />
 
-                                <div>
-                                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Rol / Perfil</label>
-                                    <select
-                                        value={inviteData.role}
-                                        onChange={e => setInviteData(p => ({ ...p, role: e.target.value }))}
-                                        className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black appearance-none focus:ring-4 focus:ring-indigo-500/10 transition-all uppercase"
-                                    >
-                                        <option value="seller">Vendedor</option>
-                                        <option value="bodega">Bodega</option>
-                                        <option value="facturador">Facturador</option>
-                                        <option value="tesorero">Tesorero</option>
-                                        <option value="jefe">Jefe de Ventas</option>
-                                        <option value="driver">Repartidor</option>
-                                        <option value="admin">Admin</option>
-                                    </select>
-                                </div>
+                                        <div>
+                                            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Rol / Perfil</label>
+                                            <select
+                                                value={inviteData.role}
+                                                onChange={e => setInviteData(p => ({ ...p, role: e.target.value }))}
+                                                className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black appearance-none focus:ring-4 focus:ring-indigo-500/10 transition-all uppercase"
+                                            >
+                                                <option value="seller">Vendedor</option>
+                                                <option value="bodega">Bodega</option>
+                                                <option value="facturador">Facturador</option>
+                                                <option value="tesorero">Tesorero</option>
+                                                <option value="jefe">Jefe de Ventas</option>
+                                                <option value="driver">Repartidor</option>
+                                                <option value="admin">Admin</option>
+                                            </select>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <input
+                                            required
+                                            type="text"
+                                            value={additionalSellerName}
+                                            onChange={(e) => setAdditionalSellerName(e.target.value)}
+                                            className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black"
+                                            placeholder="Nombre del vendedor adicional"
+                                        />
+                                        <input
+                                            type="email"
+                                            value={additionalSellerEmail}
+                                            onChange={(e) => setAdditionalSellerEmail(e.target.value.toLowerCase())}
+                                            className="w-full h-16 px-8 bg-gray-50 border-none rounded-2xl font-black"
+                                            placeholder="Correo opcional"
+                                        />
+                                        <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm font-medium text-indigo-800">
+                                            Este vendedor quedará guardado de forma permanente en el catálogo comercial y podrá seleccionarse en cotizaciones, sin tener acceso al CRM.
+                                        </div>
+                                    </>
+                                )}
 
                                 <div className="flex gap-4 pt-4">
                                     <button type="button" onClick={() => setIsInviteModalOpen(false)} className="flex-1 h-16 rounded-2xl font-black text-gray-400 hover:bg-gray-50 transition-all">CANCELAR</button>
-                                    <button type="submit" disabled={sendingInvite} className="flex-[2] h-16 bg-gray-900 text-white rounded-2xl font-black shadow-xl shadow-gray-200 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50">
-                                        {sendingInvite ? 'ENVIANDO...' : 'CREAR INVITACIÓN'}
+                                    <button
+                                        type="submit"
+                                        disabled={inviteMode === 'user' ? sendingInvite : savingQuotationSeller}
+                                        className="flex-[2] h-16 bg-gray-900 text-white rounded-2xl font-black shadow-xl shadow-gray-200 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+                                    >
+                                        {inviteMode === 'user'
+                                            ? (sendingInvite ? 'ENVIANDO...' : 'CREAR INVITACIÓN')
+                                            : (savingQuotationSeller ? 'GUARDANDO...' : 'CREAR VENDEDOR ADICIONAL')}
                                     </button>
                                 </div>
                             </form>

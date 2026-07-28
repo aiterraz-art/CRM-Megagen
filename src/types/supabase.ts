@@ -1347,6 +1347,9 @@ export interface Database {
                     id: string
                     client_id: string | null
                     seller_id: string | null
+                    seller_catalog_id: string | null
+                    seller_name_snapshot: string | null
+                    seller_email_snapshot: string | null
                     source_visit_id: string | null
                     items: Json | null
                     total_amount: number | null
@@ -1363,6 +1366,9 @@ export interface Database {
                     id?: string
                     client_id?: string | null
                     seller_id?: string | null
+                    seller_catalog_id?: string | null
+                    seller_name_snapshot?: string | null
+                    seller_email_snapshot?: string | null
                     source_visit_id?: string | null
                     items?: Json | null
                     total_amount?: number | null
@@ -1379,6 +1385,9 @@ export interface Database {
                     id?: string
                     client_id?: string | null
                     seller_id?: string | null
+                    seller_catalog_id?: string | null
+                    seller_name_snapshot?: string | null
+                    seller_email_snapshot?: string | null
                     source_visit_id?: string | null
                     items?: Json | null
                     total_amount?: number | null
@@ -1390,6 +1399,38 @@ export interface Database {
                     interaction_type?: string | null
                     lost_reason?: string | null
                     created_at?: string | null
+                }
+            }
+            quotation_sellers: {
+                Row: {
+                    active: boolean
+                    created_at: string
+                    created_by: string | null
+                    email: string | null
+                    id: string
+                    linked_profile_id: string | null
+                    name: string
+                    updated_at: string
+                }
+                Insert: {
+                    active?: boolean
+                    created_at?: string
+                    created_by?: string | null
+                    email?: string | null
+                    id?: string
+                    linked_profile_id?: string | null
+                    name: string
+                    updated_at?: string
+                }
+                Update: {
+                    active?: boolean
+                    created_at?: string
+                    created_by?: string | null
+                    email?: string | null
+                    id?: string
+                    linked_profile_id?: string | null
+                    name?: string
+                    updated_at?: string
                 }
             }
             lead_message_templates: {

@@ -24,7 +24,9 @@ interface Quotation {
     id: string;
     client_id: string;
     seller_id?: string;
+    seller_catalog_id?: string | null;
     seller_name?: string;
+    seller_name_snapshot?: string | null;
     total_amount: number;
     stage: string;
     status?: string | null;
@@ -112,6 +114,8 @@ const Pipeline = () => {
                     id, 
                     client_id, 
                     seller_id,
+                    seller_catalog_id,
+                    seller_name_snapshot,
                     total_amount, 
                     stage, 
                     status,
@@ -140,6 +144,8 @@ const Pipeline = () => {
                         id,
                         client_id,
                         seller_id,
+                        seller_catalog_id,
+                        seller_name_snapshot,
                         total_amount,
                         status,
                         sent_at,
@@ -162,7 +168,9 @@ const Pipeline = () => {
             setSupportsStageColumn(usingStage);
 
             const sellerIds = Array.from(new Set(((data || []) as any[]).map((q) => q.seller_id).filter(Boolean)));
+            const sellerCatalogIds = Array.from(new Set(((data || []) as any[]).map((q) => q.seller_catalog_id).filter(Boolean)));
             let sellersById: Record<string, string> = {};
+            let catalogSellersById: Record<string, string> = {};
             if (sellerIds.length > 0) {
                 const { data: sellerProfiles } = await supabase
                     .from('profiles')
@@ -172,11 +180,20 @@ const Pipeline = () => {
                     sellersById[s.id] = s.full_name || s.email || 'Vendedor';
                 });
             }
+            if (sellerCatalogIds.length > 0) {
+                const { data: sellerCatalog } = await supabase
+                    .from('quotation_sellers')
+                    .select('id, name')
+                    .in('id', sellerCatalogIds as string[]);
+                (sellerCatalog || []).forEach((seller: any) => {
+                    catalogSellersById[seller.id] = seller.name || 'Vendedor externo';
+                });
+            }
 
             const normalizedQuotes = ((data || []) as any[]).map((q) => ({
                 ...q,
                 stage: usingStage ? normalizeStage(q.stage) : stageFromStatus(q.status),
-                seller_name: q.seller_id ? sellersById[q.seller_id] || 'Vendedor' : 'Sin vendedor',
+                seller_name: q.seller_name_snapshot || (q.seller_catalog_id ? catalogSellersById[q.seller_catalog_id] : null) || (q.seller_id ? sellersById[q.seller_id] || 'Vendedor' : 'Sin vendedor'),
                 autoLostByNoResponse: stageFromStatus(q.status) === 'lost' && hasAutoLostNoResponse(q.comments)
             }));
             setQuotations(normalizedQuotes as Quotation[]);
