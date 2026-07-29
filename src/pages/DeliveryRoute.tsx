@@ -151,9 +151,14 @@ const DeliveryRoute: React.FC = () => {
     const [deliveryGpsStatus, setDeliveryGpsStatus] = useState<'idle' | 'searching' | 'ready' | 'error'>('idle');
 
     const [routeName, setRouteName] = useState<string>("Ruta de Hoy");
+    const [currentRoute, setCurrentRoute] = useState<{ id: string; name: string; status: string; created_at?: string | null } | null>(null);
     const [activeRouteIds, setActiveRouteIds] = useState<string[]>([]);
     const [hasDraftRoutes, setHasDraftRoutes] = useState(false);
+    const [draftRouteCount, setDraftRouteCount] = useState(0);
+    const [currentRoutePendingCount, setCurrentRoutePendingCount] = useState(0);
+    const [hasMultipleInProgressRoutes, setHasMultipleInProgressRoutes] = useState(false);
     const [startingRoute, setStartingRoute] = useState(false);
+    const [finishingRoute, setFinishingRoute] = useState(false);
     const [mapsApiLoaded, setMapsApiLoaded] = useState(false);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
     const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
@@ -211,7 +216,7 @@ const DeliveryRoute: React.FC = () => {
             // 1. Get Active Routes for this User (Use profile.id for impersonation support)
             const { data: myRoutes, error: routeError } = await supabase
                 .from('delivery_routes')
-                .select('id, name, status')
+                .select('id, name, status, created_at')
                 .eq('driver_id', profile.id)
                 .in('status', ['draft', 'in_progress']);
 
@@ -223,19 +228,54 @@ const DeliveryRoute: React.FC = () => {
             if (!myRoutes || myRoutes.length === 0) {
                 setOrders([]);
                 setRouteName("Sin Ruta Asignada");
+                setCurrentRoute(null);
                 setActiveRouteIds([]);
                 setHasDraftRoutes(false);
+                setDraftRouteCount(0);
+                setCurrentRoutePendingCount(0);
+                setHasMultipleInProgressRoutes(false);
                 setLoading(false);
                 return;
             }
 
-            // Set Route Name
-            const names = myRoutes.map(r => r.name).join(", ");
-            setRouteName(names || "Ruta de Hoy");
-            setActiveRouteIds(myRoutes.map((route) => route.id));
-            setHasDraftRoutes(myRoutes.some((route) => String(route.status || '').toLowerCase() === 'draft'));
+            const sortedRoutes = [...myRoutes].sort((a: any, b: any) => {
+                const left = new Date(a.created_at || 0).getTime();
+                const right = new Date(b.created_at || 0).getTime();
+                return left - right;
+            });
+            const inProgressRoutes = sortedRoutes.filter((route: any) => String(route.status || '').toLowerCase() === 'in_progress');
+            const draftRoutes = sortedRoutes.filter((route: any) => String(route.status || '').toLowerCase() === 'draft');
+            const visibleRoutes = inProgressRoutes.length > 0 ? [inProgressRoutes[0]] : (draftRoutes.length > 0 ? [draftRoutes[0]] : [sortedRoutes[0]]);
+            const visibleRouteIds = visibleRoutes.map((route: any) => route.id);
+            const selectedRoute = visibleRoutes[0] || null;
 
-            const routeIds = myRoutes.map(r => r.id);
+            setRouteName(selectedRoute?.name || "Ruta de Hoy");
+            setCurrentRoute(selectedRoute || null);
+            setActiveRouteIds(visibleRouteIds);
+            setHasDraftRoutes(draftRoutes.length > 0);
+            setDraftRouteCount(draftRoutes.length);
+            setHasMultipleInProgressRoutes(inProgressRoutes.length > 1);
+
+            const routeIds = sortedRoutes.map((route: any) => route.id);
+            const { data: routeStatusRows, error: routeStatusError } = await supabase
+                .from('route_items')
+                .select('route_id, status')
+                .in('route_id', routeIds);
+
+            if (routeStatusError) {
+                console.error("Error fetching route status summary:", routeStatusError);
+                throw routeStatusError;
+            }
+
+            const pendingByRoute = new Map<string, number>();
+            (routeStatusRows || []).forEach((item: any) => {
+                if (!item.route_id) return;
+                const normalizedStatus = String(item.status || '').toLowerCase();
+                if (['pending', 'rescheduled', 'failed'].includes(normalizedStatus)) {
+                    pendingByRoute.set(item.route_id, (pendingByRoute.get(item.route_id) || 0) + 1);
+                }
+            });
+            setCurrentRoutePendingCount(selectedRoute ? (pendingByRoute.get(selectedRoute.id) || 0) : 0);
 
             // 2. Get Route Items
             const { data, error } = await supabase
@@ -247,7 +287,7 @@ const DeliveryRoute: React.FC = () => {
                         client:clients (name, address, phone, lat, lng, office)
                     )
                 `)
-                .in('route_id', routeIds)
+                .in('route_id', visibleRouteIds)
                 .in('status', ['pending', 'rescheduled'])
                 .order('sequence_order', { ascending: true }); // Ensure fixed order
 
@@ -289,7 +329,7 @@ const DeliveryRoute: React.FC = () => {
                     id: item.order.id, // Keep order ID as primary key for actions
                     route_item_id: item.id,
                     route_id: item.route_id,
-                    route_status: myRoutes.find((route) => route.id === item.route_id)?.status || null,
+                    route_status: sortedRoutes.find((route: any) => route.id === item.route_id)?.status || null,
                     status: item.status,
                     delivery_status: item.order.delivery_status,
                     client: {
@@ -407,12 +447,12 @@ const DeliveryRoute: React.FC = () => {
     };
 
     const handleStartRoutes = async () => {
-        if (activeRouteIds.length === 0) return;
+        if (!currentRoute || String(currentRoute.status || '').toLowerCase() !== 'draft') return;
 
         setStartingRoute(true);
         try {
             const { error } = await supabase.rpc('start_delivery_routes', {
-                p_route_ids: activeRouteIds
+                p_route_ids: [currentRoute.id]
             });
 
             if (error) throw error;
@@ -424,6 +464,27 @@ const DeliveryRoute: React.FC = () => {
             alert("No se pudo iniciar la ruta: " + error.message);
         } finally {
             setStartingRoute(false);
+        }
+    };
+
+    const handleFinishRoute = async () => {
+        if (!currentRoute || String(currentRoute.status || '').toLowerCase() !== 'in_progress') return;
+
+        setFinishingRoute(true);
+        try {
+            const { error } = await supabase.rpc('finish_delivery_route', {
+                p_route_id: currentRoute.id
+            });
+
+            if (error) throw error;
+
+            await fetchRoute();
+            alert('Ruta terminada correctamente.');
+        } catch (error: any) {
+            console.error("Error finishing delivery route:", error);
+            alert("No se pudo terminar la ruta: " + error.message);
+        } finally {
+            setFinishingRoute(false);
         }
     };
 
@@ -646,7 +707,7 @@ const DeliveryRoute: React.FC = () => {
                     <div>
                         <h1 className="text-2xl font-black italic">{routeName}</h1>
                         <span className="bg-indigo-500 px-3 py-1 rounded-full text-xs font-bold">
-                            {orders.length} Pendientes
+                            {currentRoutePendingCount} Pendientes
                         </span>
                     </div>
 
@@ -660,7 +721,12 @@ const DeliveryRoute: React.FC = () => {
                         </button>
                     )}
                 </div>
-                {hasDraftRoutes && (
+                {hasMultipleInProgressRoutes && (
+                    <div className="mb-4 rounded-2xl border border-red-400/40 bg-red-500/15 px-4 py-3 text-sm font-bold text-red-100">
+                        Detectamos más de una ruta en progreso para este repartidor. Termina la ruta actual antes de abrir otra.
+                    </div>
+                )}
+                {currentRoute && String(currentRoute.status || '').toLowerCase() === 'draft' && (
                     <button
                         onClick={handleStartRoutes}
                         disabled={startingRoute}
@@ -668,6 +734,25 @@ const DeliveryRoute: React.FC = () => {
                     >
                         {startingRoute ? 'Iniciando ruta...' : 'Iniciar ruta'}
                     </button>
+                )}
+                {currentRoute && String(currentRoute.status || '').toLowerCase() === 'in_progress' && currentRoutePendingCount === 0 && (
+                    <button
+                        onClick={handleFinishRoute}
+                        disabled={finishingRoute}
+                        className="w-full mb-4 py-3 rounded-2xl bg-emerald-500 text-white font-black text-sm hover:bg-emerald-400 transition-all disabled:opacity-60"
+                    >
+                        {finishingRoute ? 'Terminando ruta...' : 'Terminar ruta'}
+                    </button>
+                )}
+                {currentRoute && String(currentRoute.status || '').toLowerCase() === 'in_progress' && currentRoutePendingCount > 0 && draftRouteCount > 0 && (
+                    <div className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-500/15 px-4 py-3 text-sm font-bold text-amber-100">
+                        Debes completar y terminar esta ruta antes de poder abrir la siguiente.
+                    </div>
+                )}
+                {currentRoute && String(currentRoute.status || '').toLowerCase() === 'in_progress' && currentRoutePendingCount === 0 && draftRouteCount > 0 && (
+                    <div className="mb-4 rounded-2xl border border-sky-400/30 bg-sky-500/15 px-4 py-3 text-sm font-bold text-sky-100">
+                        Ya no quedan pedidos en esta ruta. Presiona <span className="underline">Terminar ruta</span> para habilitar la siguiente.
+                    </div>
                 )}
                 <div className="flex gap-2">
                     <button
@@ -726,7 +811,16 @@ const DeliveryRoute: React.FC = () => {
                     {orders.length === 0 ? (
                         <div className="text-center py-10 text-gray-400">
                             <CheckCircle2 size={48} className="mx-auto mb-4 opacity-50" />
-                            <p>¡Todo entregado por hoy!</p>
+                            <p>
+                                {currentRoute && String(currentRoute.status || '').toLowerCase() === 'in_progress'
+                                    ? 'No quedan pedidos pendientes en esta ruta.'
+                                    : '¡Todo entregado por hoy!'}
+                            </p>
+                            {currentRoute && String(currentRoute.status || '').toLowerCase() === 'in_progress' && currentRoutePendingCount === 0 && (
+                                <p className="mt-2 text-sm font-bold text-emerald-600">
+                                    Debes terminar la ruta para poder iniciar la siguiente.
+                                </p>
+                            )}
                         </div>
                     ) : (
                         orders.map(order => (

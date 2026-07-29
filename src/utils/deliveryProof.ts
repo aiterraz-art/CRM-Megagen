@@ -73,28 +73,6 @@ export const completeDeliveryProof = async ({
     const { error: itemError } = await routeItemUpdate;
     if (itemError) console.warn('Could not update route_item status:', itemError);
 
-    if (order.route_id) {
-        const { count: remainingItems, error: remainingError } = await supabase
-            .from('route_items')
-            .select('id', { count: 'exact', head: true })
-            .eq('route_id', order.route_id)
-            .in('status', ['pending', 'rescheduled', 'failed']);
-
-        if (remainingError) {
-            console.warn('Could not validate remaining items:', remainingError);
-        } else if ((remainingItems || 0) === 0) {
-            const { error: routeCloseError } = await supabase
-                .from('delivery_routes')
-                .update({ status: 'completed' })
-                .eq('id', order.route_id)
-                .neq('status', 'completed');
-
-            if (routeCloseError) {
-                console.warn('Could not close route automatically:', routeCloseError);
-            }
-        }
-    }
-
     supabase.functions.invoke('send-delivery-notification', {
         body: { order_id: order.id }
     }).then(({ error }) => {
