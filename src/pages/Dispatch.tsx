@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { uploadFileToStorage } from '../utils/storageUpload';
 
 type DispatchTab = 'upload' | 'queue' | 'routes' | 'history';
 
@@ -113,6 +114,7 @@ type RouteDetailItem = {
     order_id: string;
     sequence_order: number;
     status: string;
+    notes: string | null;
     delivered_at: string | null;
     proof_photo_url: string | null;
     order_folio: number | null;
@@ -339,6 +341,14 @@ const Dispatch: React.FC = () => {
     const [selectedRoute, setSelectedRoute] = useState<DeliveryRouteSummary | null>(null);
     const [routeDetails, setRouteDetails] = useState<RouteDetailItem[] | null>(null);
     const [proofViewerUrl, setProofViewerUrl] = useState<string | null>(null);
+    const [routeEditState, setRouteEditState] = useState({ name: '', driverId: '' });
+    const [routeItemDrafts, setRouteItemDrafts] = useState<Record<string, { sequence_order: string; notes: string }>>({});
+    const [proofDrafts, setProofDrafts] = useState<Record<string, File | null>>({});
+    const [savingRouteMeta, setSavingRouteMeta] = useState(false);
+    const [savingRouteItemId, setSavingRouteItemId] = useState<string | null>(null);
+    const [uploadingProofItemId, setUploadingProofItemId] = useState<string | null>(null);
+    const [finishingRouteId, setFinishingRouteId] = useState<string | null>(null);
+    const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
 
     const fetchOrderFlowMap = async (orderIds: string[]) => {
         const normalizedIds = Array.from(new Set(orderIds.filter(Boolean)));
@@ -605,6 +615,23 @@ const Dispatch: React.FC = () => {
         );
     };
 
+    const hydrateRouteDrafts = (route: DeliveryRouteSummary, details: RouteDetailItem[]) => {
+        setRouteEditState({
+            name: route.name || '',
+            driverId: route.driver_id || ''
+        });
+        setRouteItemDrafts(
+            details.reduce<Record<string, { sequence_order: string; notes: string }>>((acc, item) => {
+                acc[item.id] = {
+                    sequence_order: String(item.sequence_order ?? 0),
+                    notes: item.notes || ''
+                };
+                return acc;
+            }, {})
+        );
+        setProofDrafts({});
+    };
+
     const handleDownloadImportTemplate = () => {
         const worksheet = utils.aoa_to_sheet([
             ['numero_factura', 'numero_pedido_crm', 'direccion'],
@@ -800,6 +827,7 @@ const Dispatch: React.FC = () => {
                     order_id,
                     sequence_order,
                     status,
+                    notes,
                     delivered_at,
                     proof_photo_url,
                     order:orders (
@@ -857,6 +885,7 @@ const Dispatch: React.FC = () => {
                     order_id: item.order_id,
                     sequence_order: item.sequence_order || 0,
                     status: item.status || 'pending',
+                    notes: item.notes || null,
                     delivered_at: item.delivered_at,
                     proof_photo_url: item.proof_photo_url,
                     order_folio: item.order?.folio || null,
@@ -871,6 +900,7 @@ const Dispatch: React.FC = () => {
             });
 
             setRouteDetails(mappedDetails);
+            hydrateRouteDrafts(route, mappedDetails);
         } catch (error: any) {
             console.error('Error fetching route details:', error);
             alert(`No se pudieron cargar los detalles de la ruta: ${error?.message || 'desconocido'}`);
@@ -894,6 +924,180 @@ const Dispatch: React.FC = () => {
         } catch (error) {
             console.error('Error downloading image:', error);
             alert('No se pudo descargar la imagen.');
+        }
+    };
+
+    const refreshSelectedRoute = async (routeOverride?: DeliveryRouteSummary | null) => {
+        const route = routeOverride || selectedRoute;
+        if (!route) return;
+
+        const refreshedRoute = routes.find((item) => item.id === route.id) || route;
+        await fetchRouteDetails(refreshedRoute);
+    };
+
+    const handleSaveRouteMeta = async () => {
+        if (!selectedRoute) return;
+        const normalizedName = normalizeText(routeEditState.name);
+        if (!normalizedName) {
+            alert('Debes ingresar un nombre para la ruta.');
+            return;
+        }
+        if (!routeEditState.driverId) {
+            alert('Debes seleccionar un repartidor.');
+            return;
+        }
+
+        setSavingRouteMeta(true);
+        try {
+            const { error: routeError } = await supabase
+                .from('delivery_routes')
+                .update({
+                    name: normalizedName,
+                    driver_id: routeEditState.driverId
+                })
+                .eq('id', selectedRoute.id);
+
+            if (routeError) throw routeError;
+
+            const { error: queueError } = await supabase
+                .from('dispatch_queue_items')
+                .update({ assigned_driver_id: routeEditState.driverId })
+                .eq('route_id', selectedRoute.id);
+
+            if (queueError) throw queueError;
+
+            const updatedRoute = {
+                ...selectedRoute,
+                name: normalizedName,
+                driver_id: routeEditState.driverId
+            };
+            setSelectedRoute(updatedRoute);
+            await fetchRoutes();
+            await refreshSelectedRoute(updatedRoute);
+            alert('Ruta actualizada correctamente.');
+        } catch (error: any) {
+            console.error('Error updating route meta:', error);
+            alert(`No se pudo actualizar la ruta: ${error?.message || 'desconocido'}`);
+        } finally {
+            setSavingRouteMeta(false);
+        }
+    };
+
+    const handleSaveRouteItem = async (item: RouteDetailItem) => {
+        const draft = routeItemDrafts[item.id];
+        if (!draft) return;
+
+        const sequenceOrder = Math.max(1, Math.trunc(Number(draft.sequence_order || item.sequence_order || 1)));
+        setSavingRouteItemId(item.id);
+        try {
+            const { error } = await supabase
+                .from('route_items')
+                .update({
+                    sequence_order: sequenceOrder,
+                    notes: draft.notes.trim() || null
+                })
+                .eq('id', item.id);
+
+            if (error) throw error;
+
+            await fetchRoutes();
+            await refreshSelectedRoute();
+            alert('Pedido de la ruta actualizado.');
+        } catch (error: any) {
+            console.error('Error updating route item:', error);
+            alert(`No se pudo actualizar el pedido de la ruta: ${error?.message || 'desconocido'}`);
+        } finally {
+            setSavingRouteItemId(null);
+        }
+    };
+
+    const handleFinishSelectedRoute = async () => {
+        if (!selectedRoute) return;
+
+        setFinishingRouteId(selectedRoute.id);
+        try {
+            const { error } = await supabase.rpc('finish_delivery_route', {
+                p_route_id: selectedRoute.id
+            });
+
+            if (error) throw error;
+
+            await fetchRoutes();
+            await refreshSelectedRoute({
+                ...selectedRoute,
+                status: 'completed'
+            });
+            alert('Ruta terminada correctamente.');
+        } catch (error: any) {
+            console.error('Error finishing selected route:', error);
+            alert(`No se pudo terminar la ruta: ${error?.message || 'desconocido'}`);
+        } finally {
+            setFinishingRouteId(null);
+        }
+    };
+
+    const handleAdminProofUpload = async (item: RouteDetailItem, markDelivered: boolean) => {
+        const file = proofDrafts[item.id];
+        if (!file) {
+            alert('Debes seleccionar una imagen primero.');
+            return;
+        }
+
+        setUploadingProofItemId(item.id);
+        try {
+            const extension = file.name.split('.').pop() || 'jpg';
+            const path = `manual-delivery-proofs/${selectedRoute?.id || 'route'}/${item.order_id}_${Date.now()}.${extension}`;
+            await uploadFileToStorage({
+                bucket: deliveryProofsBucket,
+                path,
+                file
+            });
+
+            const { data: publicData } = supabase.storage
+                .from(deliveryProofsBucket)
+                .getPublicUrl(path);
+            const publicUrl = publicData.publicUrl;
+            const deliveredAt = item.delivered_at || new Date().toISOString();
+
+            const routeItemPayload: Record<string, any> = {
+                proof_photo_url: publicUrl,
+            };
+            if (markDelivered) {
+                routeItemPayload.status = 'delivered';
+                routeItemPayload.delivered_at = deliveredAt;
+            }
+
+            const { error: routeItemError } = await supabase
+                .from('route_items')
+                .update(routeItemPayload)
+                .eq('id', item.id);
+
+            if (routeItemError) throw routeItemError;
+
+            const orderPayload: Record<string, any> = {
+                delivery_photo_url: publicUrl,
+            };
+            if (markDelivered) {
+                orderPayload.delivery_status = 'delivered';
+                orderPayload.delivered_at = deliveredAt;
+            }
+
+            const { error: orderError } = await supabase
+                .from('orders')
+                .update(orderPayload)
+                .eq('id', item.order_id);
+
+            if (orderError) throw orderError;
+
+            setProofDrafts((prev) => ({ ...prev, [item.id]: null }));
+            await fetchRoutes();
+            await refreshSelectedRoute();
+            alert(markDelivered ? 'Entrega registrada manualmente con imagen.' : 'Imagen de entrega adjuntada correctamente.');
+        } catch (error: any) {
+            console.error('Error uploading admin delivery proof:', error);
+            alert(`No se pudo adjuntar la imagen de entrega: ${error?.message || 'desconocido'}`);
+        } finally {
+            setUploadingProofItemId(null);
         }
     };
 
@@ -1381,7 +1585,63 @@ const Dispatch: React.FC = () => {
                             ) : routeDetails.length === 0 ? (
                                 <div className="text-center py-20 text-gray-400 font-bold">Esta ruta no tiene pedidos visibles.</div>
                             ) : (
-                                <div className="space-y-4">
+                                <div className="space-y-6">
+                                    {normalizeText(selectedRoute.status).toLowerCase() !== 'completed' && (
+                                        <div className="rounded-[2rem] border border-indigo-100 bg-white p-6 shadow-sm">
+                                            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
+                                                <div className="space-y-4 flex-1">
+                                                    <div>
+                                                        <p className="text-[10px] uppercase tracking-widest font-black text-indigo-400">Control de ruta</p>
+                                                        <h4 className="mt-1 text-lg font-black text-slate-900">Editar ruta activa</h4>
+                                                        <p className="mt-1 text-sm font-medium text-gray-500">Cambia nombre, repartidor, orden de entregas o deja la ruta terminada desde administración.</p>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Nombre de la ruta</label>
+                                                            <input
+                                                                value={routeEditState.name}
+                                                                onChange={(event) => setRouteEditState((prev) => ({ ...prev, name: event.target.value }))}
+                                                                className="mt-2 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-300"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Repartidor asignado</label>
+                                                            <select
+                                                                value={routeEditState.driverId}
+                                                                onChange={(event) => setRouteEditState((prev) => ({ ...prev, driverId: event.target.value }))}
+                                                                className="mt-2 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-300"
+                                                            >
+                                                                <option value="">Selecciona repartidor</option>
+                                                                {drivers.map((driver) => (
+                                                                    <option key={driver.id} value={driver.id}>
+                                                                        {driver.full_name || driver.email || 'Repartidor'}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col sm:flex-row gap-3">
+                                                    <button
+                                                        onClick={handleSaveRouteMeta}
+                                                        disabled={savingRouteMeta}
+                                                        className="px-5 py-3 rounded-2xl bg-indigo-600 text-white text-sm font-black hover:bg-indigo-700 transition-all disabled:opacity-60"
+                                                    >
+                                                        {savingRouteMeta ? 'Guardando...' : 'Guardar ruta'}
+                                                    </button>
+                                                    <button
+                                                        onClick={handleFinishSelectedRoute}
+                                                        disabled={finishingRouteId === selectedRoute.id}
+                                                        className="px-5 py-3 rounded-2xl bg-emerald-500 text-white text-sm font-black hover:bg-emerald-600 transition-all disabled:opacity-60"
+                                                    >
+                                                        {finishingRouteId === selectedRoute.id ? 'Terminando...' : 'Dar por terminada'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-4">
                                     {routeDetails.map((item) => (
                                         <div key={item.id} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col xl:flex-row gap-4 xl:items-center xl:justify-between">
                                             <div className="flex items-start gap-4 flex-1 min-w-0">
@@ -1399,6 +1659,85 @@ const Dispatch: React.FC = () => {
                                                     <p className="text-sm text-slate-500 font-medium flex items-start gap-2"><MapPin size={15} className="mt-0.5 shrink-0" /> {item.client_address}{item.client_office ? ` (${item.client_office})` : ''}</p>
                                                     <p className="text-xs font-bold text-slate-500 flex items-center gap-2"><User size={13} /> {item.seller_name || 'Sin vendedor'}</p>
                                                     <OrderFlowPills row={item} />
+                                                    {normalizeText(selectedRoute.status).toLowerCase() !== 'completed' && (
+                                                        <div className="mt-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-3">
+                                                            <div className="grid grid-cols-1 md:grid-cols-[120px_minmax(0,1fr)_auto] gap-3 items-start">
+                                                                <div>
+                                                                    <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Orden</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min={1}
+                                                                        value={routeItemDrafts[item.id]?.sequence_order || String(item.sequence_order)}
+                                                                        onChange={(event) => setRouteItemDrafts((prev) => ({
+                                                                            ...prev,
+                                                                            [item.id]: {
+                                                                                sequence_order: event.target.value,
+                                                                                notes: prev[item.id]?.notes ?? item.notes ?? ''
+                                                                            }
+                                                                        }))}
+                                                                        className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:border-indigo-300"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Nota interna de entrega</label>
+                                                                    <textarea
+                                                                        rows={2}
+                                                                        value={routeItemDrafts[item.id]?.notes ?? item.notes ?? ''}
+                                                                        onChange={(event) => setRouteItemDrafts((prev) => ({
+                                                                            ...prev,
+                                                                            [item.id]: {
+                                                                                sequence_order: prev[item.id]?.sequence_order ?? String(item.sequence_order),
+                                                                                notes: event.target.value
+                                                                            }
+                                                                        }))}
+                                                                        className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-indigo-300 resize-none"
+                                                                        placeholder="Ej: recibido por conserjería, reagendado, incidencia, etc."
+                                                                    />
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => handleSaveRouteItem(item)}
+                                                                    disabled={savingRouteItemId === item.id}
+                                                                    className="mt-6 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all disabled:opacity-60"
+                                                                >
+                                                                    {savingRouteItemId === item.id ? 'Guardando...' : 'Guardar item'}
+                                                                </button>
+                                                            </div>
+
+                                                            <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-end">
+                                                                <div>
+                                                                    <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Imagen de entrega manual</label>
+                                                                    <input
+                                                                        type="file"
+                                                                        accept="image/*"
+                                                                        onChange={(event) => setProofDrafts((prev) => ({
+                                                                            ...prev,
+                                                                            [item.id]: event.target.files?.[0] || null
+                                                                        }))}
+                                                                        className="mt-2 block w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                                                                    />
+                                                                    {proofDrafts[item.id] && (
+                                                                        <p className="mt-2 text-xs font-bold text-indigo-600">{proofDrafts[item.id]?.name}</p>
+                                                                    )}
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => handleAdminProofUpload(item, false)}
+                                                                    disabled={uploadingProofItemId === item.id}
+                                                                    className="px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-black uppercase tracking-widest hover:bg-indigo-100 transition-all disabled:opacity-60"
+                                                                >
+                                                                    {uploadingProofItemId === item.id ? 'Subiendo...' : 'Adjuntar imagen'}
+                                                                </button>
+                                                                {normalizeText(item.status).toLowerCase() !== 'delivered' && (
+                                                                    <button
+                                                                        onClick={() => handleAdminProofUpload(item, true)}
+                                                                        disabled={uploadingProofItemId === item.id}
+                                                                        className="px-4 py-3 rounded-xl bg-emerald-500 text-white text-xs font-black uppercase tracking-widest hover:bg-emerald-600 transition-all disabled:opacity-60"
+                                                                    >
+                                                                        {uploadingProofItemId === item.id ? 'Registrando...' : 'Marcar entregado'}
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
 
@@ -1435,6 +1774,7 @@ const Dispatch: React.FC = () => {
                                             </div>
                                         </div>
                                     ))}
+                                    </div>
                                 </div>
                             )}
                         </div>
