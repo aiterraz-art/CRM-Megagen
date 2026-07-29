@@ -21,6 +21,7 @@ import {
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { uploadFileToStorage } from '../utils/storageUpload';
+import { markDeliveryAttemptClosed } from '../utils/deliveryProof';
 
 type DispatchTab = 'upload' | 'queue' | 'routes' | 'history';
 
@@ -287,6 +288,24 @@ const routeStatusClass = (status: string) => {
     if (normalized === 'completed') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
     if (normalized === 'draft' || normalized === 'planning') return 'bg-amber-50 text-amber-700 border-amber-100';
     return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+};
+
+const routeItemStatusLabel = (status: string | null | undefined) => {
+    const normalized = normalizeText(status).toLowerCase();
+    if (normalized === 'delivered') return 'Entregado';
+    if (normalized === 'closed') return 'Cliente cerrado';
+    if (normalized === 'failed') return 'Fallido';
+    if (normalized === 'rescheduled') return 'Reagendado';
+    return 'Pendiente';
+};
+
+const routeItemStatusClass = (status: string | null | undefined) => {
+    const normalized = normalizeText(status).toLowerCase();
+    if (normalized === 'delivered') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+    if (normalized === 'closed') return 'bg-rose-50 text-rose-700 border-rose-100';
+    if (normalized === 'failed') return 'bg-red-50 text-red-700 border-red-100';
+    if (normalized === 'rescheduled') return 'bg-amber-50 text-amber-700 border-amber-100';
+    return 'bg-amber-50 text-amber-700 border-amber-100';
 };
 
 const parseRpcValidationErrors = (error: any): DispatchImportError[] | null => {
@@ -1130,6 +1149,37 @@ const Dispatch: React.FC = () => {
         }
     };
 
+    const handleAdminMarkClosed = async (item: RouteDetailItem) => {
+        const file = proofDrafts[item.id];
+        if (!file) {
+            alert('Debes seleccionar una imagen primero.');
+            return;
+        }
+
+        setUploadingProofItemId(item.id);
+        try {
+            await markDeliveryAttemptClosed({
+                order: {
+                    id: item.order_id,
+                    route_item_id: item.id,
+                },
+                photoFile: file,
+                bucket: deliveryProofsBucket,
+                notes: routeItemDrafts[item.id]?.notes ?? item.notes ?? null,
+            });
+
+            setProofDrafts((prev) => ({ ...prev, [item.id]: null }));
+            await fetchRoutes();
+            await refreshSelectedRoute();
+            alert('Cliente marcado como cerrado y pedido devuelto a la cola de despacho.');
+        } catch (error: any) {
+            console.error('Error marking admin delivery as closed:', error);
+            alert(`No se pudo registrar cliente cerrado: ${error?.message || 'desconocido'}`);
+        } finally {
+            setUploadingProofItemId(null);
+        }
+    };
+
     if (!canManageDispatch) {
         return <div className="p-10 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para Admin, Facturación y Tesorería.</div>;
     }
@@ -1686,7 +1736,7 @@ const Dispatch: React.FC = () => {
                                                     <div className="flex flex-wrap items-center gap-2">
                                                         <span className="px-2 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest">Factura {item.invoice_number || '—'}</span>
                                                         <span className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest">Pedido #{item.order_folio || item.order_id.slice(0, 8)}</span>
-                                                        <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${normalizeText(item.status).toLowerCase() === 'delivered' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>{normalizeText(item.status).toLowerCase() === 'delivered' ? 'Entregado' : 'Pendiente'}</span>
+                                                        <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${routeItemStatusClass(item.status)}`}>{routeItemStatusLabel(item.status)}</span>
                                                         {item.address_source === 'excel' && (
                                                             <span className="px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest bg-fuchsia-50 text-fuchsia-700 border-fuchsia-100">Dirección Excel</span>
                                                         )}
@@ -1764,6 +1814,15 @@ const Dispatch: React.FC = () => {
                                                                 </button>
                                                                 {normalizeText(item.status).toLowerCase() !== 'delivered' && (
                                                                     <button
+                                                                        onClick={() => handleAdminMarkClosed(item)}
+                                                                        disabled={uploadingProofItemId === item.id}
+                                                                        className="px-4 py-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-xs font-black uppercase tracking-widest hover:bg-rose-100 transition-all disabled:opacity-60"
+                                                                    >
+                                                                        {uploadingProofItemId === item.id ? 'Guardando...' : 'Cliente cerrado'}
+                                                                    </button>
+                                                                )}
+                                                                {normalizeText(item.status).toLowerCase() !== 'delivered' && (
+                                                                    <button
                                                                         onClick={() => handleAdminProofUpload(item, true)}
                                                                         disabled={uploadingProofItemId === item.id}
                                                                         className="px-4 py-3 rounded-xl bg-emerald-500 text-white text-xs font-black uppercase tracking-widest hover:bg-emerald-600 transition-all disabled:opacity-60"
@@ -1779,7 +1838,9 @@ const Dispatch: React.FC = () => {
 
                                             <div className="flex items-center gap-4 shrink-0">
                                                 <div className="text-right">
-                                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Entregado</p>
+                                                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">
+                                                        {normalizeText(item.status).toLowerCase() === 'closed' ? 'Cerrado' : 'Entregado'}
+                                                    </p>
                                                     <p className="text-xs font-bold text-gray-700 mt-1">{formatDateTime(item.delivered_at)}</p>
                                                 </div>
                                                 {item.proof_photo_url ? (

@@ -1,10 +1,10 @@
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Camera, CheckCircle2, Image as ImageIcon } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, Image as ImageIcon } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { checkGPSConnection } from '../utils/gps';
-import { completeDeliveryProof } from '../utils/deliveryProof';
+import { completeDeliveryProof, markDeliveryAttemptClosed } from '../utils/deliveryProof';
 import { prepareBrowserImageUpload } from '../utils/heic';
 
 const DELIVERY_PROOF_DRAFT_KEY = 'delivery_route_proof_draft';
@@ -286,6 +286,40 @@ const DeliveryProofCapture = () => {
         }
     }, [clearDraft, clearPhotoSelection, deliveryGps, deliveryProofsBucket, navigate, order, photoFile]);
 
+    const handleMarkClosed = useCallback(async () => {
+        if (!order || !photoFile) {
+            setError('Debes adjuntar una foto del local cerrado.');
+            return;
+        }
+
+        if (!deliveryGps) {
+            setError('No se pudo obtener GPS preciso del repartidor. Activa ubicación e intenta nuevamente.');
+            return;
+        }
+
+        setUploading(true);
+        setError(null);
+
+        try {
+            await markDeliveryAttemptClosed({
+                order,
+                photoFile,
+                deliveryPosition: deliveryGps,
+                bucket: deliveryProofsBucket,
+            });
+
+            clearDraft();
+            clearPhotoSelection();
+            alert('Cliente marcado como cerrado. El pedido volvió a la cola para reagendar una nueva ruta.');
+            navigate('/delivery', { replace: true });
+        } catch (closedError: any) {
+            console.error('Error marking delivery as closed from dedicated proof route:', closedError);
+            setError(closedError?.message || 'No se pudo registrar cliente cerrado.');
+        } finally {
+            setUploading(false);
+        }
+    }, [clearDraft, clearPhotoSelection, deliveryGps, deliveryProofsBucket, navigate, order, photoFile]);
+
     if (!canAccess) {
         return <div className="p-8 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para repartidores.</div>;
     }
@@ -417,21 +451,38 @@ const DeliveryProofCapture = () => {
                             )}
                         </div>
 
-                        <button
-                            type="button"
-                            disabled={!photoFile || uploading || photoPreparing || !deliveryGps || deliveryGpsStatus !== 'ready' || order?.route_status === 'draft'}
-                            onClick={handleComplete}
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-green-500 px-4 py-4 text-lg font-bold text-white shadow-xl shadow-green-200 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            {uploading || photoPreparing ? (
-                                photoPreparing ? 'Procesando foto...' : 'Subiendo...'
-                            ) : (
-                                <>
-                                    <CheckCircle2 size={20} />
-                                    Confirmar Entrega
-                                </>
-                            )}
-                        </button>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <button
+                                type="button"
+                                disabled={!photoFile || uploading || photoPreparing || !deliveryGps || deliveryGpsStatus !== 'ready' || order?.route_status === 'draft'}
+                                onClick={handleMarkClosed}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-base font-bold text-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {uploading || photoPreparing ? (
+                                    photoPreparing ? 'Procesando foto...' : 'Guardando...'
+                                ) : (
+                                    <>
+                                        <AlertTriangle size={18} />
+                                        Cliente cerrado
+                                    </>
+                                )}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!photoFile || uploading || photoPreparing || !deliveryGps || deliveryGpsStatus !== 'ready' || order?.route_status === 'draft'}
+                                onClick={handleComplete}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-green-500 px-4 py-4 text-lg font-bold text-white shadow-xl shadow-green-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {uploading || photoPreparing ? (
+                                    photoPreparing ? 'Procesando foto...' : 'Subiendo...'
+                                ) : (
+                                    <>
+                                        <CheckCircle2 size={20} />
+                                        Confirmar Entrega
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

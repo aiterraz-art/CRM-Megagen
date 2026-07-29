@@ -6,7 +6,7 @@ import { MapPin, Phone, CheckCircle2, Camera, Navigation, ArrowLeft, AlertTriang
 import { APIProvider, Map as GoogleMap, AdvancedMarker, Pin, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { checkGPSConnection, watchCurrentLocation } from '../utils/gps';
 import { prepareBrowserImageUpload } from '../utils/heic';
-import { completeDeliveryProof } from '../utils/deliveryProof';
+import { completeDeliveryProof, markDeliveryAttemptClosed } from '../utils/deliveryProof';
 
 // Helper for distance calc (Haversine formula)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -689,6 +689,49 @@ const DeliveryRoute: React.FC = () => {
         }
     };
 
+    const handleMarkClientClosed = async () => {
+        if (!selectedOrder) return;
+        if (!photoFile) {
+            alert('Debes subir una foto del local cerrado.');
+            return;
+        }
+
+        setUploading(true);
+        try {
+            let deliveryPosition = deliveryGps || userLocation;
+            if (!deliveryPosition) {
+                try {
+                    setDeliveryGpsStatus('searching');
+                    const fresh = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 2, minAccuracyMeters: 120 });
+                    deliveryPosition = { lat: fresh.coords.latitude, lng: fresh.coords.longitude };
+                    setUserLocation(deliveryPosition);
+                    setDeliveryGps(deliveryPosition);
+                    setDeliveryGpsStatus('ready');
+                } catch (_gpsErr) {
+                    setDeliveryGpsStatus('error');
+                    alert('No se pudo obtener GPS preciso del repartidor. Activa ubicación e intenta nuevamente.');
+                    return;
+                }
+            }
+
+            await markDeliveryAttemptClosed({
+                order: selectedOrder,
+                photoFile,
+                deliveryPosition,
+                bucket: deliveryProofsBucket,
+            });
+
+            alert('Cliente marcado como cerrado. El pedido volvió a la cola para rearmar otra ruta.');
+            closeDeliveryModal();
+            fetchRoute();
+        } catch (error: any) {
+            console.error('Error marking delivery as closed:', error);
+            alert('Error al registrar cliente cerrado: ' + error.message);
+        } finally {
+            setUploading(false);
+        }
+    };
+
     if (!(effectiveRole === 'driver' || hasPermission('EXECUTE_DELIVERY'))) {
         return <div className="p-8 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para repartidores.</div>;
     }
@@ -950,20 +993,36 @@ const DeliveryRoute: React.FC = () => {
                             )}
                         </div>
 
-                        <button
-                            disabled={!photoFile || uploading || photoPreparing || deliveryGpsStatus !== 'ready' || !deliveryGps}
-                            onClick={handleCompleteDelivery}
-                            className="w-full bg-green-500 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-green-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                        >
-                            {uploading || photoPreparing ? (
-                                photoPreparing ? 'Procesando foto...' : 'Subiendo...'
-                            ) : (
-                                <>
-                                    <CheckCircle2 size={20} />
-                                    Confirmar Entrega
-                                </>
-                            )}
-                        </button>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <button
+                                disabled={!photoFile || uploading || photoPreparing || deliveryGpsStatus !== 'ready' || !deliveryGps}
+                                onClick={handleMarkClientClosed}
+                                className="w-full border border-amber-200 bg-amber-50 text-amber-700 py-4 rounded-xl font-bold text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                                {uploading || photoPreparing ? (
+                                    photoPreparing ? 'Procesando foto...' : 'Guardando...'
+                                ) : (
+                                    <>
+                                        <AlertTriangle size={18} />
+                                        Cliente cerrado
+                                    </>
+                                )}
+                            </button>
+                            <button
+                                disabled={!photoFile || uploading || photoPreparing || deliveryGpsStatus !== 'ready' || !deliveryGps}
+                                onClick={handleCompleteDelivery}
+                                className="w-full bg-green-500 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-green-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                                {uploading || photoPreparing ? (
+                                    photoPreparing ? 'Procesando foto...' : 'Subiendo...'
+                                ) : (
+                                    <>
+                                        <CheckCircle2 size={20} />
+                                        Confirmar Entrega
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -86,3 +86,53 @@ export const completeDeliveryProof = async ({
         publicUrl,
     };
 };
+
+export const markDeliveryAttemptClosed = async ({
+    order,
+    photoFile,
+    bucket,
+    deliveryPosition,
+    notes,
+}: {
+    order: DeliveryOrderLike;
+    photoFile: File;
+    bucket: string;
+    deliveryPosition?: DeliveryPosition | null;
+    notes?: string | null;
+}) => {
+    if (!order.route_item_id) {
+        throw new Error('No se encontró el item de ruta para registrar cliente cerrado.');
+    }
+
+    const attemptedAtIso = new Date().toISOString();
+    const fileExt = photoFile.name.split('.').pop() || 'jpg';
+    const fileName = `${order.id}_closed_${Date.now()}.${fileExt}`;
+    const filePath = `closed-attempts/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(filePath, photoFile);
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(filePath);
+
+    const { error: closeError } = await supabase.rpc('mark_delivery_route_item_closed', {
+        p_route_item_id: order.route_item_id,
+        p_proof_photo_url: publicUrl,
+        p_attempted_at: attemptedAtIso,
+        p_lat: deliveryPosition?.lat ?? null,
+        p_lng: deliveryPosition?.lng ?? null,
+        p_notes: notes ?? null,
+    });
+
+    if (closeError) throw closeError;
+
+    return {
+        attemptedAtIso,
+        filePath,
+        publicUrl,
+    };
+};
