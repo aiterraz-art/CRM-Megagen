@@ -1,4 +1,4 @@
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Camera, CheckCircle2, Image as ImageIcon } from 'lucide-react';
 import { supabase } from '../services/supabase';
@@ -59,8 +59,6 @@ const DeliveryProofCapture = () => {
     const [deliveryGps, setDeliveryGps] = useState<{ lat: number; lng: number } | null>(null);
     const [deliveryGpsStatus, setDeliveryGpsStatus] = useState<'idle' | 'searching' | 'ready' | 'error'>('idle');
 
-    const imageInputRef = useRef<HTMLInputElement | null>(null);
-    const cameraInputRef = useRef<HTMLInputElement | null>(null);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
     const canAccess = effectiveRole === 'driver' || hasPermission('EXECUTE_DELIVERY');
     const isAndroidDevice = useMemo(() => {
@@ -220,18 +218,11 @@ const DeliveryProofCapture = () => {
         saveDraft(false);
     }, [orderId, profile?.id, saveDraft]);
 
-    const openPicker = useCallback((picker: 'image' | 'camera') => {
+    const handlePickerIntent = useCallback(() => {
         if (photoMessage === DELIVERY_PROOF_RESTORE_MESSAGE) {
             setPhotoMessage(null);
         }
         saveDraft(true);
-
-        if (picker === 'camera') {
-            cameraInputRef.current?.click();
-            return;
-        }
-
-        imageInputRef.current?.click();
     }, [photoMessage, saveDraft]);
 
     const handleFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
@@ -343,37 +334,37 @@ const DeliveryProofCapture = () => {
                         </div>
 
                         <div className="grid gap-3 sm:grid-cols-2">
-                            <button
-                                type="button"
-                                onClick={() => openPicker('image')}
-                                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm font-bold text-emerald-700"
+                            <label
+                                htmlFor="delivery-proof-gallery-input"
+                                onClick={handlePickerIntent}
+                                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm font-bold text-emerald-700"
                             >
                                 <ImageIcon size={16} />
                                 Elegir imagen
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => openPicker(isAndroidDevice ? 'camera' : 'image')}
-                                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm font-bold text-blue-700"
+                            </label>
+                            <label
+                                htmlFor={isAndroidDevice ? 'delivery-proof-camera-input' : 'delivery-proof-gallery-input'}
+                                onClick={handlePickerIntent}
+                                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm font-bold text-blue-700"
                             >
                                 <Camera size={16} />
                                 {isAndroidDevice ? 'Tomar foto' : 'Abrir cámara'}
-                            </button>
+                            </label>
                         </div>
 
                         <input
-                            ref={imageInputRef}
+                            id="delivery-proof-gallery-input"
                             type="file"
                             accept="image/*,.heic,.heif"
-                            className="hidden"
+                            className="sr-only"
                             onChange={handleFileChange}
                         />
                         <input
-                            ref={cameraInputRef}
+                            id="delivery-proof-camera-input"
                             type="file"
                             accept="image/*"
                             capture="environment"
-                            className="hidden"
+                            className="sr-only"
                             onChange={handleFileChange}
                         />
 
