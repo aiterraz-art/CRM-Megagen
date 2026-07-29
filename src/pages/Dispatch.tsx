@@ -444,7 +444,6 @@ const Dispatch: React.FC = () => {
         const { data: routesData, error: routesError } = await supabase
             .from('delivery_routes')
             .select('*')
-            .neq('status', 'completed')
             .order('created_at', { ascending: false });
 
         if (routesError) throw routesError;
@@ -509,6 +508,14 @@ const Dispatch: React.FC = () => {
     const queuedItems = useMemo(() => queueItems.filter((item) => item.status === 'queued'), [queueItems]);
     const routedItems = useMemo(() => queueItems.filter((item) => item.status === 'routed'), [queueItems]);
     const historyItems = useMemo(() => queueItems.filter((item) => item.status === 'delivered' || item.status === 'cancelled'), [queueItems]);
+    const activeRoutes = useMemo(
+        () => routes.filter((route) => normalizeText(route.status).toLowerCase() !== 'completed'),
+        [routes]
+    );
+    const closedRoutes = useMemo(
+        () => routes.filter((route) => normalizeText(route.status).toLowerCase() === 'completed'),
+        [routes]
+    );
 
     const filteredQueueItems = useMemo(() => {
         const term = cleanComparableText(queueSearch);
@@ -558,6 +565,45 @@ const Dispatch: React.FC = () => {
     }, [historyItems, historySearch, driverMap]);
 
     const latestBatch = batches[0] || null;
+
+    const renderRouteCard = (route: DeliveryRouteSummary) => {
+        const driver = route.driver_id ? driverMap[route.driver_id] : null;
+        return (
+            <button
+                key={route.id}
+                type="button"
+                onClick={() => fetchRouteDetails(route)}
+                className="text-left bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm hover:shadow-lg hover:border-indigo-100 transition-all"
+            >
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <p className="text-[10px] uppercase tracking-widest font-black text-indigo-400">Ruta</p>
+                        <h3 className="text-xl font-black text-slate-900 mt-1">{route.name}</h3>
+                        <p className="text-sm font-bold text-indigo-600 mt-2">{driver?.full_name || driver?.email || 'Sin repartidor'}</p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">{formatDateTime(route.created_at)}</p>
+                    </div>
+                    <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${routeStatusClass(route.status)}`}>{routeStatusLabel(route.status)}</span>
+                </div>
+                <div className="mt-5 grid grid-cols-3 gap-3 text-center">
+                    <div className="bg-slate-50 rounded-2xl px-3 py-4">
+                        <p className="text-[10px] uppercase tracking-widest font-black text-slate-400">Total</p>
+                        <p className="text-2xl font-black text-slate-900 mt-1">{route.order_count}</p>
+                    </div>
+                    <div className="bg-amber-50 rounded-2xl px-3 py-4">
+                        <p className="text-[10px] uppercase tracking-widest font-black text-amber-400">Pendientes</p>
+                        <p className="text-2xl font-black text-amber-600 mt-1">{route.pending_count}</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-2xl px-3 py-4">
+                        <p className="text-[10px] uppercase tracking-widest font-black text-emerald-400">Entregados</p>
+                        <p className="text-2xl font-black text-emerald-600 mt-1">{route.completed_count}</p>
+                    </div>
+                </div>
+                <div className="mt-4 flex items-center gap-1 text-[10px] font-black text-indigo-500 uppercase tracking-widest">
+                    Ver detalle <ChevronRight size={12} />
+                </div>
+            </button>
+        );
+    };
 
     const handleDownloadImportTemplate = () => {
         const worksheet = utils.aoa_to_sheet([
@@ -871,7 +917,7 @@ const Dispatch: React.FC = () => {
                     <div className="inline-flex bg-gray-100 p-1 rounded-2xl self-start lg:self-auto flex-wrap gap-1">
                         <button onClick={() => setActiveTab('upload')} className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${activeTab === 'upload' ? 'bg-slate-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}>Carga</button>
                         <button onClick={() => setActiveTab('queue')} className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${activeTab === 'queue' ? 'bg-slate-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}>Cola pendiente</button>
-                        <button onClick={() => setActiveTab('routes')} className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${activeTab === 'routes' ? 'bg-slate-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}>Rutas activas</button>
+                        <button onClick={() => setActiveTab('routes')} className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${activeTab === 'routes' ? 'bg-slate-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}>Rutas</button>
                         <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-xl text-sm font-black transition-all ${activeTab === 'history' ? 'bg-slate-900 text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}>Historial</button>
                     </div>
                 </div>
@@ -1151,58 +1197,62 @@ const Dispatch: React.FC = () => {
                 <div className="space-y-6">
                     <div className="bg-white border border-gray-100 rounded-[2rem] p-5 shadow-sm flex items-center justify-between gap-4">
                         <div>
-                            <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Rutas activas</p>
-                            <p className="text-sm font-bold text-gray-700 mt-1">Rutas ya generadas desde la cola validada de despacho.</p>
+                            <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Rutas de despacho</p>
+                            <p className="text-sm font-bold text-gray-700 mt-1">Revisa rutas activas y también las rutas cerradas recientes.</p>
                         </div>
                         <button onClick={fetchRoutes} className="bg-white text-gray-700 px-4 py-2.5 rounded-xl text-sm font-bold flex items-center border border-gray-200 hover:bg-gray-50 transition-all">
                             <RotateCcw size={16} className="mr-2" /> Actualizar
                         </button>
                     </div>
 
-                    {routes.length === 0 ? (
-                        <div className="bg-white rounded-[2rem] p-10 border border-gray-100 text-center text-gray-400 font-bold">No hay rutas activas en este momento.</div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                            {routes.map((route) => {
-                                const driver = route.driver_id ? driverMap[route.driver_id] : null;
-                                return (
-                                    <button
-                                        key={route.id}
-                                        type="button"
-                                        onClick={() => fetchRouteDetails(route)}
-                                        className="text-left bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm hover:shadow-lg hover:border-indigo-100 transition-all"
-                                    >
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div>
-                                                <p className="text-[10px] uppercase tracking-widest font-black text-indigo-400">Ruta</p>
-                                                <h3 className="text-xl font-black text-slate-900 mt-1">{route.name}</h3>
-                                                <p className="text-sm font-bold text-indigo-600 mt-2">{driver?.full_name || driver?.email || 'Sin repartidor'}</p>
-                                                <p className="text-xs text-gray-500 font-medium mt-1">{formatDateTime(route.created_at)}</p>
-                                            </div>
-                                            <span className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-widest ${routeStatusClass(route.status)}`}>{routeStatusLabel(route.status)}</span>
-                                        </div>
-                                        <div className="mt-5 grid grid-cols-3 gap-3 text-center">
-                                            <div className="bg-slate-50 rounded-2xl px-3 py-4">
-                                                <p className="text-[10px] uppercase tracking-widest font-black text-slate-400">Total</p>
-                                                <p className="text-2xl font-black text-slate-900 mt-1">{route.order_count}</p>
-                                            </div>
-                                            <div className="bg-amber-50 rounded-2xl px-3 py-4">
-                                                <p className="text-[10px] uppercase tracking-widest font-black text-amber-400">Pendientes</p>
-                                                <p className="text-2xl font-black text-amber-600 mt-1">{route.pending_count}</p>
-                                            </div>
-                                            <div className="bg-emerald-50 rounded-2xl px-3 py-4">
-                                                <p className="text-[10px] uppercase tracking-widest font-black text-emerald-400">Entregados</p>
-                                                <p className="text-2xl font-black text-emerald-600 mt-1">{route.completed_count}</p>
-                                            </div>
-                                        </div>
-                                        <div className="mt-4 flex items-center gap-1 text-[10px] font-black text-indigo-500 uppercase tracking-widest">
-                                            Ver detalle <ChevronRight size={12} />
-                                        </div>
-                                    </button>
-                                );
-                            })}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="bg-white rounded-[2rem] border border-gray-100 p-5 shadow-sm">
+                            <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Activas</p>
+                            <p className="mt-2 text-3xl font-black text-indigo-600">{activeRoutes.length}</p>
                         </div>
-                    )}
+                        <div className="bg-white rounded-[2rem] border border-gray-100 p-5 shadow-sm">
+                            <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Cerradas</p>
+                            <p className="mt-2 text-3xl font-black text-emerald-600">{closedRoutes.length}</p>
+                        </div>
+                        <div className="bg-white rounded-[2rem] border border-gray-100 p-5 shadow-sm">
+                            <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">Total rutas</p>
+                            <p className="mt-2 text-3xl font-black text-slate-900">{routes.length}</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <h3 className="text-xl font-black text-slate-900">Rutas activas</h3>
+                                <p className="text-sm font-bold text-gray-500 mt-1">Incluye rutas asignadas y en progreso.</p>
+                            </div>
+                            <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-black uppercase tracking-widest">{activeRoutes.length}</span>
+                        </div>
+                        {activeRoutes.length === 0 ? (
+                            <div className="bg-white rounded-[2rem] p-10 border border-gray-100 text-center text-gray-400 font-bold">No hay rutas activas en este momento.</div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                                {activeRoutes.map(renderRouteCard)}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <h3 className="text-xl font-black text-slate-900">Rutas cerradas recientes</h3>
+                                <p className="text-sm font-bold text-gray-500 mt-1">Aquí podrás revisar rutas ya terminadas, incluyendo las de hoy.</p>
+                            </div>
+                            <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black uppercase tracking-widest">{closedRoutes.length}</span>
+                        </div>
+                        {closedRoutes.length === 0 ? (
+                            <div className="bg-white rounded-[2rem] p-10 border border-gray-100 text-center text-gray-400 font-bold">No hay rutas cerradas todavía.</div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                                {closedRoutes.map(renderRouteCard)}
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
 
