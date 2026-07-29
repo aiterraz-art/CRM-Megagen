@@ -5,7 +5,7 @@ import { useUser } from '../contexts/UserContext';
 import { MapPin, Phone, CheckCircle2, Camera, Navigation, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { APIProvider, Map as GoogleMap, AdvancedMarker, Pin, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { checkGPSConnection, watchCurrentLocation } from '../utils/gps';
-import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
+import { prepareBrowserImageUpload } from '../utils/heic';
 import { completeDeliveryProof } from '../utils/deliveryProof';
 
 // Helper for distance calc (Haversine formula)
@@ -537,13 +537,14 @@ const DeliveryRoute: React.FC = () => {
         setPhotoMessage(null);
 
         try {
-            const inMemoryFile = await materializeBrowserFile(file);
-            const normalizedFile = await convertHeicToJpeg(inMemoryFile);
+            const preparedFile = await prepareBrowserImageUpload(file, {
+                fallbackToOriginalOnFailure: isAndroidDevice,
+            });
 
             if (photoPreview) URL.revokeObjectURL(photoPreview);
-            setPhotoFile(normalizedFile);
-            setPhotoPreview(URL.createObjectURL(normalizedFile));
-            setPhotoMessage(isHeicLikeFile(file) ? 'Archivo HEIC convertido automaticamente a JPG para compatibilidad.' : null);
+            setPhotoFile(preparedFile.file);
+            setPhotoPreview(preparedFile.previewable ? URL.createObjectURL(preparedFile.file) : null);
+            setPhotoMessage(preparedFile.message);
         } catch (error: any) {
             setPhotoFile(null);
             if (photoPreview) URL.revokeObjectURL(photoPreview);
@@ -700,7 +701,7 @@ const DeliveryRoute: React.FC = () => {
             onLoad={() => setMapsApiLoaded(true)}
             onError={(error) => console.error('Google Maps API failed to load in delivery route:', error)}
         >
-            <div className="pb-20">
+            <div translate="no" className="notranslate pb-20">
             {/* Header */}
             <div className="bg-slate-900 text-white p-6 rounded-b-[2rem] shadow-xl relative z-10">
                 <div className="flex justify-between items-center mb-4">
@@ -897,15 +898,18 @@ const DeliveryRoute: React.FC = () => {
                         </div>
 
                         <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50 mb-6 relative overflow-hidden group">
-                            {photoPreview ? (
-                                <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
-                            ) : (
+                            <img
+                                src={photoPreview || ''}
+                                alt="Preview"
+                                className={`w-full h-full object-cover ${photoPreview ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+                            />
+                            <div className={`absolute inset-0 flex items-center justify-center ${photoPreview ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
                                 <div className="text-center p-8">
                                     <Camera size={48} className="mx-auto text-gray-300 mb-2" />
-                                    <p className="font-bold text-gray-400">Toma una foto</p>
-                                    <p className="text-xs text-gray-300">Prueba de entrega requerida</p>
+                                    <p className="font-bold text-gray-400">{photoFile ? 'Archivo listo para entrega' : 'Toma una foto'}</p>
+                                    <p className="text-xs text-gray-300">{photoFile ? (photoFile.name || 'Prueba de entrega requerida') : 'Prueba de entrega requerida'}</p>
                                 </div>
-                            )}
+                            </div>
 
                             <input
                                 type="file"

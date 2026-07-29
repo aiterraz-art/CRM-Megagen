@@ -19,6 +19,13 @@ export const isHeicLikeFile = (file: Pick<File, 'name' | 'type'> | null | undefi
     return HEIC_MIME_TYPES.has(mimeType) || HEIC_EXTENSIONS.has(extension);
 };
 
+export const canPreviewImageFile = (file: Pick<File, 'name' | 'type'> | null | undefined) => {
+    if (!file) return false;
+    const mimeType = String(file.type || '').toLowerCase();
+    if (!mimeType.startsWith('image/')) return false;
+    return !isHeicLikeFile(file);
+};
+
 export const materializeBrowserFile = async (file: File) => {
     try {
         const buffer = await file.arrayBuffer();
@@ -55,4 +62,38 @@ export const convertHeicToJpeg = async (file: File) => {
         type: 'image/jpeg',
         lastModified: Date.now(),
     });
+};
+
+export const prepareBrowserImageUpload = async (
+    file: File,
+    options?: { fallbackToOriginalOnFailure?: boolean }
+) => {
+    const sourceFile = isHeicLikeFile(file) ? await materializeBrowserFile(file) : file;
+
+    if (!isHeicLikeFile(sourceFile)) {
+        return {
+            file: sourceFile,
+            previewable: canPreviewImageFile(sourceFile),
+            message: null as string | null,
+        };
+    }
+
+    try {
+        const convertedFile = await convertHeicToJpeg(sourceFile);
+        return {
+            file: convertedFile,
+            previewable: canPreviewImageFile(convertedFile),
+            message: 'Archivo HEIC convertido automaticamente a JPG para compatibilidad.',
+        };
+    } catch (error: any) {
+        if (!options?.fallbackToOriginalOnFailure) {
+            throw error;
+        }
+
+        return {
+            file: sourceFile,
+            previewable: false,
+            message: 'No se pudo convertir el archivo HEIC en este dispositivo. Se guardará el archivo original.',
+        };
+    }
 };

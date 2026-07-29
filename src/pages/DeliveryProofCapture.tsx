@@ -5,7 +5,7 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { checkGPSConnection } from '../utils/gps';
 import { completeDeliveryProof } from '../utils/deliveryProof';
-import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
+import { prepareBrowserImageUpload } from '../utils/heic';
 
 const DELIVERY_PROOF_DRAFT_KEY = 'delivery_route_proof_draft';
 const DELIVERY_PROOF_RESTORE_MESSAGE = 'La app se recargo mientras seleccionabas la foto de entrega. Vuelve a elegir la imagen y luego finaliza la entrega.';
@@ -237,19 +237,20 @@ const DeliveryProofCapture = () => {
         setError(null);
 
         try {
-            const inMemoryFile = await materializeBrowserFile(file);
-            const normalizedFile = await convertHeicToJpeg(inMemoryFile);
+            const preparedFile = await prepareBrowserImageUpload(file, {
+                fallbackToOriginalOnFailure: isAndroidDevice,
+            });
             clearPhotoSelection();
-            setPhotoFile(normalizedFile);
-            setPhotoPreview(URL.createObjectURL(normalizedFile));
-            setPhotoMessage(isHeicLikeFile(file) ? 'Archivo HEIC convertido automaticamente a JPG para compatibilidad.' : null);
+            setPhotoFile(preparedFile.file);
+            setPhotoPreview(preparedFile.previewable ? URL.createObjectURL(preparedFile.file) : null);
+            setPhotoMessage(preparedFile.message);
         } catch (fileError: any) {
             clearPhotoSelection();
             setError(fileError?.message || 'No se pudo procesar la foto seleccionada.');
         } finally {
             setPhotoPreparing(false);
         }
-    }, [clearPhotoSelection, saveDraft]);
+    }, [clearPhotoSelection, isAndroidDevice, saveDraft]);
 
     const handleComplete = useCallback(async () => {
         if (!order || !photoFile) {
@@ -294,7 +295,7 @@ const DeliveryProofCapture = () => {
     }
 
     return (
-        <div className="min-h-[calc(100vh-120px)] bg-slate-50 p-4 sm:p-6">
+        <div translate="no" className="notranslate min-h-[calc(100vh-120px)] bg-slate-50 p-4 sm:p-6">
             <div className="mx-auto max-w-2xl">
                 <button
                     type="button"
@@ -369,15 +370,22 @@ const DeliveryProofCapture = () => {
                         />
 
                         <div className="overflow-hidden rounded-3xl border-2 border-dashed border-gray-200 bg-gray-50">
-                            {photoPreview ? (
-                                <img src={photoPreview} alt="Preview entrega" className="h-72 w-full object-cover" />
-                            ) : (
-                                <div className="flex h-72 flex-col items-center justify-center p-8 text-center">
+                            <div className={`relative h-72 w-full ${photoPreview ? 'bg-black/5' : ''}`}>
+                                <img
+                                    src={photoPreview || ''}
+                                    alt="Preview entrega"
+                                    className={`h-full w-full object-cover ${photoPreview ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+                                />
+                                <div className={`absolute inset-0 flex flex-col items-center justify-center p-8 text-center ${photoPreview ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
                                     <Camera size={48} className="mb-2 text-gray-300" />
-                                    <p className="font-bold text-gray-400">Toma o selecciona una foto</p>
-                                    <p className="text-xs text-gray-300">La prueba de entrega es obligatoria</p>
+                                    <p className="font-bold text-gray-400">
+                                        {photoFile ? 'Archivo listo para entrega' : 'Toma o selecciona una foto'}
+                                    </p>
+                                    <p className="text-xs text-gray-300">
+                                        {photoFile ? (photoFile.name || 'La prueba de entrega es obligatoria') : 'La prueba de entrega es obligatoria'}
+                                    </p>
                                 </div>
-                            )}
+                            </div>
                         </div>
 
                         <div className="min-h-[20px]">
