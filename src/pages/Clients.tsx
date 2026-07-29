@@ -21,6 +21,8 @@ import {
 } from '../utils/clientDuplicates';
 
 type Client = Database['public']['Tables']['clients']['Row'];
+type ClientInsert = Database['public']['Tables']['clients']['Insert'] & { created_by?: string | null };
+type ClientUpdate = Database['public']['Tables']['clients']['Update'] & { created_by?: string | null };
 type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_settings']['Row'];
 
 const DEFAULT_CLIENT_FOLLOWUP_SETTINGS: ClientFollowupSettingsRow = {
@@ -136,6 +138,21 @@ const buildNormalizedSheetRow = (row: Record<string, unknown>) => {
         normalizedRow[normalizeSheetHeader(key)] = value;
     });
     return normalizedRow;
+};
+
+const getSheetValue = (row: Record<string, unknown>, headers: string[]) => {
+    for (const header of headers) {
+        const normalizedHeader = normalizeSheetHeader(header);
+        if (Object.prototype.hasOwnProperty.call(row, normalizedHeader)) {
+            return row[normalizedHeader];
+        }
+    }
+
+    return undefined;
+};
+
+const hasSheetColumn = (row: Record<string, unknown>, headers: string[]) => {
+    return headers.some((header) => Object.prototype.hasOwnProperty.call(row, normalizeSheetHeader(header)));
 };
 
 const isBlankSpreadsheetValue = (value: unknown): boolean => value == null || `${value}`.trim() === '';
@@ -275,8 +292,10 @@ const ClientsContent = () => {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const csvInputRef = useRef<HTMLInputElement>(null);
+    const updateInputRef = useRef<HTMLInputElement>(null);
     const creditDaysInputRef = useRef<HTMLInputElement>(null);
     const [importing, setImporting] = useState(false);
+    const [updatingClients, setUpdatingClients] = useState(false);
     const [creditDaysImporting, setCreditDaysImporting] = useState(false);
     const [mergingDuplicateGroupId, setMergingDuplicateGroupId] = useState<string | null>(null);
 
@@ -913,18 +932,15 @@ const ClientsContent = () => {
                     return;
                 }
 
-                const clientsToInsert: Array<{
-                    payload: any;
-                    meta: { fila: number; vendedor: string; nombre: string; rut: string };
-                }> = [];
                 const { data: existingClients, error: existingClientsError } = await supabase
                     .from('clients')
-                    .select('*')
+                    .select('id, rut')
                     .order('created_at', { ascending: true });
                 if (existingClientsError) throw existingClientsError;
-                const mutableExistingClients = [...(existingClients || [])];
+                const existingClientRows = [...(existingClients || [])];
                 const seenRuts = new Set<string>();
                 const normalizedSellerMap = new globalThis.Map<string, any>();
+                let insertedCount = 0;
                 profiles.forEach((p) => {
                     const email = normalizeSellerToken(p.email || '');
                     const username = email.split('@')[0];
@@ -941,8 +957,9 @@ const ClientsContent = () => {
                 for (let idx = 0; idx < rows.length; idx++) {
                     const row = rows[idx];
                     const rowNumber = idx + 2; // +2 because row 1 is header in Excel
-                    const nombreCell = row['Nombre']?.toString().trim() || '';
-                    const rutCell = row['Rut']?.toString().trim() || '';
+                    const normalizedRow = buildNormalizedSheetRow(row as Record<string, unknown>);
+                    const nombreCell = `${getSheetValue(normalizedRow, ['Nombre', 'Razón Social']) ?? ''}`.trim();
+                    const rutCell = `${getSheetValue(normalizedRow, ['Rut']) ?? ''}`.trim();
                     let name = nombreCell;
                     let rutSource = rutCell;
 
@@ -954,15 +971,30 @@ const ClientsContent = () => {
                     }
 
                     const rut = looksLikeRutValue(rutSource) ? normalizeRut(rutSource).toUpperCase() : null;
-                    const giro = row['Giro']?.toString().trim();
-                    const address = row['Dirección']?.toString().trim();
-                    const office = row['Oficina']?.toString().trim() || row['Depto']?.toString().trim();
-                    const comuna = row['Comuna']?.toString().trim() || row['Ciudad']?.toString().trim();
-                    const phone = row['Teléfono']?.toString().trim();
-                    const email = row['Email']?.toString().trim();
-                    const purchase_contact = row['Contacto']?.toString().trim();
-                    const sellerRaw = (row['Vendedor'] ?? row['Correo Vendedor'] ?? row['Vendedor Email'] ?? '').toString().trim();
+                    const giroRaw = getSheetValue(normalizedRow, ['Giro']);
+                    const addressRaw = getSheetValue(normalizedRow, ['Dirección']);
+                    const officeRaw = getSheetValue(normalizedRow, ['Oficina', 'Depto', 'Oficina / Depto']);
+                    const comunaRaw = getSheetValue(normalizedRow, ['Comuna', 'Ciudad']);
+                    const phoneRaw = getSheetValue(normalizedRow, ['Teléfono']);
+                    const emailRaw = getSheetValue(normalizedRow, ['Email']);
+                    const purchaseContactRaw = getSheetValue(normalizedRow, ['Contacto']);
+                    const notesRaw = getSheetValue(normalizedRow, ['Notas', 'Observaciones']);
+                    const creditDaysRaw = getSheetValue(normalizedRow, ['Días de Crédito', 'Dias de Credito', 'Credit Days']);
+                    const sellerRaw = `${getSheetValue(normalizedRow, ['Vendedor', 'Correo Vendedor', 'Vendedor Email']) ?? ''}`.trim();
                     const sellerToken = normalizeSellerToken(sellerRaw);
+                    const hasSellerColumn = hasSheetColumn(normalizedRow, ['Vendedor', 'Correo Vendedor', 'Vendedor Email']);
+                    const hasCreditDaysColumn = hasSheetColumn(normalizedRow, ['Días de Crédito', 'Dias de Credito', 'Credit Days']);
+                    const giro = `${giroRaw ?? ''}`.trim();
+                    const address = `${addressRaw ?? ''}`.trim();
+                    const office = `${officeRaw ?? ''}`.trim();
+                    const comuna = `${comunaRaw ?? ''}`.trim();
+                    const phone = `${phoneRaw ?? ''}`.trim();
+                    const email = `${emailRaw ?? ''}`.trim();
+                    const purchase_contact = `${purchaseContactRaw ?? ''}`.trim();
+                    const notes = `${notesRaw ?? ''}`.trim();
+                    const existingClient = rut
+                        ? existingClientRows.find((candidate) => normalizeRut(candidate.rut || '').toUpperCase() === rut) || null
+                        : null;
 
                     if (!name) {
                         errorCount++;
@@ -972,17 +1004,25 @@ const ClientsContent = () => {
                         continue;
                     }
 
-                    if (rut) {
-                        if (seenRuts.has(rut)) {
-                            errorCount++;
-                            const reason = `Fila ${rowNumber}: RUT duplicado dentro del archivo (${rut})`;
-                            errors.push(reason);
-                            rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
-                            continue;
-                        }
-                        seenRuts.add(rut);
+                    if (!rut) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber}: RUT obligatorio para crear clientes`;
+                        errors.push(reason);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
                     }
 
+                    if (seenRuts.has(rut)) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber}: RUT duplicado dentro del archivo (${rut})`;
+                        errors.push(reason);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
+                    }
+                    seenRuts.add(rut);
+
+                    const foundProfile = sellerToken ? normalizedSellerMap.get(sellerToken) : null;
+                    const looksLikeEmail = sellerToken ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sellerToken) : false;
                     if (!sellerToken) {
                         errorCount++;
                         const reason = `Fila ${rowNumber}: vendedor obligatorio (columna "Vendedor" vacía)`;
@@ -990,9 +1030,7 @@ const ClientsContent = () => {
                         rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
                         continue;
                     }
-                    const foundProfile = normalizedSellerMap.get(sellerToken);
-                    const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sellerToken);
-                    if (!foundProfile && !looksLikeEmail) {
+                    if (sellerToken && !foundProfile && !looksLikeEmail) {
                         errorCount++;
                         const reason = `Fila ${rowNumber}: vendedor no encontrado (${sellerRaw}). Usa correo corporativo o nombre exacto del perfil.`;
                         errors.push(reason);
@@ -1001,125 +1039,94 @@ const ClientsContent = () => {
                     }
                     const assignedSellerId = foundProfile?.id || null;
 
-                    clientsToInsert.push({
-                        payload: {
-                            name: name,
-                            rut: rut,
-                            giro: giro,
-                            address: address || 'Dirección por actualizar',
-                            comuna: comuna,
-                            phone: phone,
-                            email: email,
-                            purchase_contact: purchase_contact,
+                    const missingRequiredFields: string[] = [];
+                    if (isBlankSpreadsheetValue(giroRaw)) missingRequiredFields.push('Giro');
+                    if (isBlankSpreadsheetValue(addressRaw)) missingRequiredFields.push('Dirección');
+                    if (isBlankSpreadsheetValue(officeRaw)) missingRequiredFields.push('Oficina');
+                    if (isBlankSpreadsheetValue(comunaRaw)) missingRequiredFields.push('Comuna');
+                    if (isBlankSpreadsheetValue(phoneRaw)) missingRequiredFields.push('Teléfono');
+                    if (isBlankSpreadsheetValue(emailRaw)) missingRequiredFields.push('Email');
+                    if (isBlankSpreadsheetValue(purchaseContactRaw)) missingRequiredFields.push('Contacto');
+
+                    if (missingRequiredFields.length > 0) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber}: faltan campos obligatorios (${missingRequiredFields.join(', ')})`;
+                        errors.push(reason);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
+                    }
+
+                    if (existingClient) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber}: el cliente con RUT ${rut} ya existe. Usa el botón "Actualizar cartera".`;
+                        errors.push(reason);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
+                    }
+
+                    let parsedCreditDays: number | null = null;
+                    if (hasCreditDaysColumn && !isBlankSpreadsheetValue(creditDaysRaw)) {
+                        const rawCreditDaysText = `${creditDaysRaw ?? ''}`.trim();
+                        const candidateCreditDays = Number(rawCreditDaysText.replace(',', '.'));
+                        if (!Number.isFinite(candidateCreditDays) || candidateCreditDays < 0 || !Number.isInteger(candidateCreditDays)) {
+                            errorCount++;
+                            const reason = `Fila ${rowNumber}: días de crédito inválidos (${rawCreditDaysText})`;
+                            errors.push(reason);
+                            rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                            continue;
+                        }
+                        parsedCreditDays = candidateCreditDays;
+                    }
+
+                    try {
+                        const insertPayload: ClientInsert = {
+                            name,
+                            rut,
+                            giro: giro || null,
+                            address,
+                            comuna: comuna || null,
+                            phone: phone || null,
+                            email: email || null,
+                            purchase_contact: purchase_contact || null,
                             created_by: assignedSellerId,
                             pending_seller_email: assignedSellerId ? null : sellerToken,
                             status: 'active',
                             zone: 'Santiago',
                             lat: SANTIAGO_CENTER.lat,
                             lng: SANTIAGO_CENTER.lng,
-                            office: office,
-                            credit_days: 0,
-                            notes: 'Importado vía Excel'
-                        },
-                        meta: {
+                            office: office || null,
+                            credit_days: parsedCreditDays ?? 0,
+                            notes: notes || 'Importado vía Excel'
+                        };
+
+                        const { error: insertError } = await supabase
+                            .from('clients')
+                            .insert(insertPayload);
+                        if (insertError) throw insertError;
+
+                        insertedCount++;
+                        successCount++;
+                    } catch (err: any) {
+                        errorCount++;
+                        const reason = `Error al crear ${name || 'cliente'}: ${err.message}`;
+                        errors.push(reason);
+                        rejectedRows.push({
                             fila: rowNumber,
+                            motivo: reason,
                             vendedor: sellerRaw,
                             nombre: name || '',
                             rut: rut || ''
-                        }
-                    });
-                }
-
-                if (clientsToInsert.length > 0) {
-                    for (const entry of clientsToInsert) {
-                        const client = entry.payload;
-                        try {
-                            if (client.rut) {
-                                const payload = { ...client };
-                                const { data: existingByRut, error: existingByRutError } = await supabase
-                                    .from('clients')
-                                    .select('id')
-                                    .eq('rut', client.rut)
-                                    .maybeSingle();
-                                if (existingByRutError && existingByRutError.code !== 'PGRST116') {
-                                    throw existingByRutError;
-                                }
-
-                                if (existingByRut?.id) {
-                                    const { error: updateError } = await supabase
-                                        .from('clients')
-                                        .update(payload)
-                                        .eq('id', existingByRut.id);
-                                    if (updateError) throw updateError;
-                                } else {
-                                    const { error: insertError } = await supabase
-                                        .from('clients')
-                                        .insert(payload);
-                                    if (insertError) {
-                                        if (!isRutUniqueViolation(insertError)) throw insertError;
-
-                                        // Concurrent insert fallback: row appeared between lookup and insert.
-                                        const { data: retryByRut, error: retryByRutError } = await supabase
-                                            .from('clients')
-                                            .select('id')
-                                            .eq('rut', client.rut)
-                                            .maybeSingle();
-                                        if (retryByRutError || !retryByRut?.id) {
-                                            throw insertError;
-                                        }
-
-                                        const { error: retryUpdateError } = await supabase
-                                            .from('clients')
-                                            .update(payload)
-                                            .eq('id', retryByRut.id);
-                                        if (retryUpdateError) throw retryUpdateError;
-                                    }
-                                }
-                            } else {
-                                const duplicateMatch = findDuplicateClientInList(client, mutableExistingClients);
-                                if (duplicateMatch) {
-                                    const { data: updatedClient, error: updateError } = await (supabase.from('clients') as any)
-                                        .update({
-                                            ...client,
-                                            notes: `${duplicateMatch.client.notes || ''}`.trim()
-                                                ? `${duplicateMatch.client.notes || ''} | ${client.notes || ''}`.replace(/^\s*\|\s*|\s*\|\s*$/g, '')
-                                                : client.notes || null
-                                        })
-                                        .eq('id', duplicateMatch.client.id)
-                                        .select()
-                                        .single();
-                                    if (updateError) throw updateError;
-
-                                    const existingIndex = mutableExistingClients.findIndex((row) => row.id === duplicateMatch.client.id);
-                                    if (existingIndex >= 0) {
-                                        mutableExistingClients[existingIndex] = updatedClient as Client;
-                                    }
-                                } else {
-                                    const { data: insertedClient, error } = await (supabase.from('clients') as any)
-                                        .insert(client)
-                                        .select()
-                                        .single();
-                                    if (error) throw error;
-                                    mutableExistingClients.push(insertedClient as Client);
-                                }
-                            }
-                            successCount++;
-                        } catch (err: any) {
-                            errorCount++;
-                            const reason = `Error al guardar ${client.name}: ${err.message}`;
-                            errors.push(reason);
-                            rejectedRows.push({
-                                fila: entry.meta.fila,
-                                motivo: reason,
-                                vendedor: entry.meta.vendedor,
-                                nombre: entry.meta.nombre,
-                                rut: entry.meta.rut
-                            });
-                        }
+                        });
                     }
                 }
 
-                alert(`Importación Finalizada.\n\n✅ Exitosos: ${successCount}\n❌ Errores: ${errorCount}\n\n${errorCount > 0 ? 'Revisa la consola para detalles de errores.' : ''}`);
+                alert(
+                    `Importación Finalizada.\n\n` +
+                    `✅ Exitosos: ${successCount}\n` +
+                    `🆕 Creados: ${insertedCount}\n` +
+                    `❌ Errores: ${errorCount}\n\n` +
+                    `${errorCount > 0 ? 'Revisa la consola para detalles de errores.' : ''}`
+                );
                 if (swappedRutNameRows > 0) {
                     alert(`Aviso: se detectaron ${swappedRutNameRows} filas con columnas Nombre/Rut invertidas y se corrigieron automáticamente.`);
                 }
@@ -1147,16 +1154,389 @@ const ClientsContent = () => {
         reader.readAsBinaryString(file);
     };
 
+    const handleUpdateFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setUpdatingClients(true);
+        const reader = new FileReader();
+
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const rows = XLSX.utils.sheet_to_json(ws) as any[];
+
+                let successCount = 0;
+                let errorCount = 0;
+                let errors: string[] = [];
+                const rejectedRows: Array<{ fila: number; motivo: string; vendedor: string; nombre: string; rut: string }> = [];
+                let swappedRutNameRows = 0;
+
+                if (rows.length === 0) {
+                    alert('El archivo está vacío.');
+                    setUpdatingClients(false);
+                    return;
+                }
+
+                if (!hasPermission('IMPORT_CLIENTS')) {
+                    alert("Acceso denegado: No tienes permisos para actualizar clientes masivos.");
+                    setUpdatingClients(false);
+                    return;
+                }
+
+                const { data: existingClients, error: existingClientsError } = await supabase
+                    .from('clients')
+                    .select('*')
+                    .order('created_at', { ascending: true });
+                if (existingClientsError) throw existingClientsError;
+                const mutableExistingClients = [...(existingClients || [])];
+                const seenRuts = new Set<string>();
+                const normalizedSellerMap = new globalThis.Map<string, any>();
+                let insertedCount = 0;
+                let updatedCount = 0;
+                let skippedCount = 0;
+                profiles.forEach((p) => {
+                    const email = normalizeSellerToken(p.email || '');
+                    const username = email.split('@')[0];
+                    const fullName = normalizeSellerToken(p.full_name || '');
+                    if (email) normalizedSellerMap.set(email, p);
+                    if (username) normalizedSellerMap.set(username, p);
+                    if (fullName) normalizedSellerMap.set(fullName, p);
+                });
+
+                if (profiles.length <= 1 && canViewAll) {
+                    alert('Advertencia: el sistema solo cargó 1 perfil de vendedor. Verifica permisos de lectura de perfiles antes de importar para evitar asignaciones incorrectas.');
+                }
+
+                for (let idx = 0; idx < rows.length; idx++) {
+                    const row = rows[idx];
+                    const rowNumber = idx + 2;
+                    const normalizedRow = buildNormalizedSheetRow(row as Record<string, unknown>);
+                    const clientId = `${getSheetValue(normalizedRow, ['ID']) ?? ''}`.trim();
+                    const nombreCell = `${getSheetValue(normalizedRow, ['Nombre', 'Razón Social']) ?? ''}`.trim();
+                    const rutCell = `${getSheetValue(normalizedRow, ['Rut']) ?? ''}`.trim();
+                    let name = nombreCell;
+                    let rutSource = rutCell;
+
+                    if (looksLikeRutValue(nombreCell) && !looksLikeRutValue(rutCell)) {
+                        name = rutCell;
+                        rutSource = nombreCell;
+                        swappedRutNameRows++;
+                    }
+
+                    const rut = looksLikeRutValue(rutSource) ? normalizeRut(rutSource).toUpperCase() : null;
+                    const giroRaw = getSheetValue(normalizedRow, ['Giro']);
+                    const addressRaw = getSheetValue(normalizedRow, ['Dirección']);
+                    const officeRaw = getSheetValue(normalizedRow, ['Oficina', 'Depto', 'Oficina / Depto']);
+                    const comunaRaw = getSheetValue(normalizedRow, ['Comuna', 'Ciudad']);
+                    const phoneRaw = getSheetValue(normalizedRow, ['Teléfono']);
+                    const emailRaw = getSheetValue(normalizedRow, ['Email']);
+                    const purchaseContactRaw = getSheetValue(normalizedRow, ['Contacto']);
+                    const notesRaw = getSheetValue(normalizedRow, ['Notas', 'Observaciones']);
+                    const creditDaysRaw = getSheetValue(normalizedRow, ['Días de Crédito', 'Dias de Credito', 'Credit Days']);
+                    const sellerRaw = `${getSheetValue(normalizedRow, ['Vendedor', 'Correo Vendedor', 'Vendedor Email']) ?? ''}`.trim();
+                    const sellerToken = normalizeSellerToken(sellerRaw);
+                    const hasSellerColumn = hasSheetColumn(normalizedRow, ['Vendedor', 'Correo Vendedor', 'Vendedor Email']);
+                    const hasCreditDaysColumn = hasSheetColumn(normalizedRow, ['Días de Crédito', 'Dias de Credito', 'Credit Days']);
+                    const giro = `${giroRaw ?? ''}`.trim();
+                    const address = `${addressRaw ?? ''}`.trim();
+                    const office = `${officeRaw ?? ''}`.trim();
+                    const comuna = `${comunaRaw ?? ''}`.trim();
+                    const phone = `${phoneRaw ?? ''}`.trim();
+                    const email = `${emailRaw ?? ''}`.trim();
+                    const purchase_contact = `${purchaseContactRaw ?? ''}`.trim();
+                    const notes = `${notesRaw ?? ''}`.trim();
+
+                    const existingClient = clientId
+                        ? mutableExistingClients.find((candidate) => candidate.id === clientId) || null
+                        : rut
+                            ? mutableExistingClients.find((candidate) => normalizeRut(candidate.rut || '').toUpperCase() === rut) || null
+                            : null;
+
+                    if (!existingClient && !name) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber} sin nombre`;
+                        errors.push(`${reason}: ${JSON.stringify(row)}`);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
+                    }
+
+                    if (rut && !existingClient) {
+                        if (seenRuts.has(rut)) {
+                            errorCount++;
+                            const reason = `Fila ${rowNumber}: RUT duplicado dentro del archivo (${rut})`;
+                            errors.push(reason);
+                            rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                            continue;
+                        }
+                        seenRuts.add(rut);
+                    }
+
+                    const foundProfile = sellerToken ? normalizedSellerMap.get(sellerToken) : null;
+                    const looksLikeEmail = sellerToken ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sellerToken) : false;
+                    if (!existingClient && !sellerToken) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber}: vendedor obligatorio (columna "Vendedor" vacía)`;
+                        errors.push(reason);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
+                    }
+                    if (sellerToken && !foundProfile && !looksLikeEmail) {
+                        errorCount++;
+                        const reason = `Fila ${rowNumber}: vendedor no encontrado (${sellerRaw}). Usa correo corporativo o nombre exacto del perfil.`;
+                        errors.push(reason);
+                        rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || '', rut: rut || '' });
+                        continue;
+                    }
+                    const assignedSellerId = foundProfile?.id || null;
+                    let parsedCreditDays: number | null = null;
+                    if (hasCreditDaysColumn && !isBlankSpreadsheetValue(creditDaysRaw)) {
+                        const rawCreditDaysText = `${creditDaysRaw ?? ''}`.trim();
+                        const candidateCreditDays = Number(rawCreditDaysText.replace(',', '.'));
+                        if (!Number.isFinite(candidateCreditDays) || candidateCreditDays < 0 || !Number.isInteger(candidateCreditDays)) {
+                            errorCount++;
+                            const reason = `Fila ${rowNumber}: días de crédito inválidos (${rawCreditDaysText})`;
+                            errors.push(reason);
+                            rejectedRows.push({ fila: rowNumber, motivo: reason, vendedor: sellerRaw, nombre: name || existingClient?.name || '', rut: rut || existingClient?.rut || '' });
+                            continue;
+                        }
+                        parsedCreditDays = candidateCreditDays;
+                    }
+
+                    try {
+                        if (existingClient) {
+                            const updatePayload: ClientUpdate = {};
+
+                            if (name) updatePayload.name = name;
+                            if (!isBlankSpreadsheetValue(giroRaw)) updatePayload.giro = giro || null;
+                            if (!isBlankSpreadsheetValue(addressRaw)) updatePayload.address = address || null;
+                            if (!isBlankSpreadsheetValue(officeRaw)) updatePayload.office = office || null;
+                            if (!isBlankSpreadsheetValue(comunaRaw)) updatePayload.comuna = comuna || null;
+                            if (!isBlankSpreadsheetValue(phoneRaw)) updatePayload.phone = phone || null;
+                            if (!isBlankSpreadsheetValue(emailRaw)) updatePayload.email = email || null;
+                            if (!isBlankSpreadsheetValue(purchaseContactRaw)) updatePayload.purchase_contact = purchase_contact || null;
+                            if (!isBlankSpreadsheetValue(notesRaw)) updatePayload.notes = notes || null;
+                            if (parsedCreditDays !== null) updatePayload.credit_days = parsedCreditDays;
+                            if (hasSellerColumn && sellerToken) {
+                                updatePayload.created_by = assignedSellerId;
+                                updatePayload.pending_seller_email = assignedSellerId ? null : sellerToken;
+                            }
+
+                            if (Object.keys(updatePayload).length === 0) {
+                                skippedCount++;
+                                continue;
+                            }
+
+                            const { data: updatedClient, error: updateError } = await (supabase.from('clients') as any)
+                                .update(updatePayload)
+                                .eq('id', existingClient.id)
+                                .select()
+                                .single();
+                            if (updateError) throw updateError;
+
+                            const existingIndex = mutableExistingClients.findIndex((candidate) => candidate.id === existingClient.id);
+                            if (existingIndex >= 0) {
+                                mutableExistingClients[existingIndex] = updatedClient as Client;
+                            }
+
+                            updatedCount++;
+                            successCount++;
+                            continue;
+                        }
+
+                        const insertPayload: ClientInsert = {
+                            name,
+                            rut,
+                            giro: giro || null,
+                            address: address || 'Dirección por actualizar',
+                            comuna: comuna || null,
+                            phone: phone || null,
+                            email: email || null,
+                            purchase_contact: purchase_contact || null,
+                            created_by: assignedSellerId,
+                            pending_seller_email: assignedSellerId ? null : sellerToken,
+                            status: 'active',
+                            zone: 'Santiago',
+                            lat: SANTIAGO_CENTER.lat,
+                            lng: SANTIAGO_CENTER.lng,
+                            office: office || null,
+                            credit_days: parsedCreditDays ?? 0,
+                            notes: notes || 'Importado vía Excel'
+                        };
+
+                        if (insertPayload.rut) {
+                            const { data: insertedClient, error: insertError } = await (supabase.from('clients') as any)
+                                .insert(insertPayload)
+                                .select()
+                                .single();
+
+                            if (insertError) {
+                                if (!isRutUniqueViolation(insertError)) throw insertError;
+
+                                const duplicateByRut = mutableExistingClients.find(
+                                    (candidate) => normalizeRut(candidate.rut || '').toUpperCase() === insertPayload.rut
+                                );
+                                if (!duplicateByRut) throw insertError;
+
+                                const { data: updatedClient, error: retryUpdateError } = await (supabase.from('clients') as any)
+                                    .update({
+                                        name: insertPayload.name,
+                                        giro: insertPayload.giro,
+                                        address: insertPayload.address,
+                                        comuna: insertPayload.comuna,
+                                        phone: insertPayload.phone,
+                                        email: insertPayload.email,
+                                        purchase_contact: insertPayload.purchase_contact,
+                                        created_by: insertPayload.created_by,
+                                        pending_seller_email: insertPayload.pending_seller_email,
+                                        office: insertPayload.office,
+                                        credit_days: insertPayload.credit_days,
+                                        notes: insertPayload.notes
+                                    })
+                                    .eq('id', duplicateByRut.id)
+                                    .select()
+                                    .single();
+                                if (retryUpdateError) throw retryUpdateError;
+
+                                const existingIndex = mutableExistingClients.findIndex((candidate) => candidate.id === duplicateByRut.id);
+                                if (existingIndex >= 0) {
+                                    mutableExistingClients[existingIndex] = updatedClient as Client;
+                                }
+
+                                updatedCount++;
+                                successCount++;
+                                continue;
+                            }
+
+                            mutableExistingClients.push(insertedClient as Client);
+                        } else {
+                            const duplicateLookupPayload = {
+                                rut: insertPayload.rut ?? null,
+                                name: insertPayload.name,
+                                email: insertPayload.email ?? null,
+                                phone: insertPayload.phone ?? null,
+                                address: insertPayload.address ?? null,
+                                purchase_contact: insertPayload.purchase_contact ?? null,
+                                comuna: insertPayload.comuna ?? null,
+                                office: insertPayload.office ?? null,
+                                lat: insertPayload.lat ?? null,
+                                lng: insertPayload.lng ?? null
+                            };
+                            const duplicateMatch = findDuplicateClientInList(duplicateLookupPayload, mutableExistingClients);
+                            if (duplicateMatch) {
+                                const { data: updatedClient, error: updateError } = await (supabase.from('clients') as any)
+                                    .update({
+                                        name: insertPayload.name,
+                                        giro: insertPayload.giro,
+                                        address: insertPayload.address,
+                                        comuna: insertPayload.comuna,
+                                        phone: insertPayload.phone,
+                                        email: insertPayload.email,
+                                        purchase_contact: insertPayload.purchase_contact,
+                                        created_by: insertPayload.created_by,
+                                        pending_seller_email: insertPayload.pending_seller_email,
+                                        office: insertPayload.office,
+                                        notes: `${duplicateMatch.client.notes || ''}`.trim()
+                                            ? `${duplicateMatch.client.notes || ''} | ${insertPayload.notes || ''}`.replace(/^\s*\|\s*|\s*\|\s*$/g, '')
+                                            : insertPayload.notes || null
+                                    })
+                                    .eq('id', duplicateMatch.client.id)
+                                    .select()
+                                    .single();
+                                if (updateError) throw updateError;
+
+                                const existingIndex = mutableExistingClients.findIndex((candidate) => candidate.id === duplicateMatch.client.id);
+                                if (existingIndex >= 0) {
+                                    mutableExistingClients[existingIndex] = updatedClient as Client;
+                                }
+
+                                updatedCount++;
+                            } else {
+                                const { data: insertedClient, error: insertError } = await (supabase.from('clients') as any)
+                                    .insert(insertPayload)
+                                    .select()
+                                    .single();
+                                if (insertError) throw insertError;
+                                mutableExistingClients.push(insertedClient as Client);
+                                insertedCount++;
+                            }
+                        }
+
+                        successCount++;
+                    } catch (err: any) {
+                        errorCount++;
+                        const reason = `Error al guardar ${name || existingClient?.name || 'cliente'}: ${err.message}`;
+                        errors.push(reason);
+                        rejectedRows.push({
+                            fila: rowNumber,
+                            motivo: reason,
+                            vendedor: sellerRaw,
+                            nombre: name || existingClient?.name || '',
+                            rut: rut || existingClient?.rut || ''
+                        });
+                    }
+                }
+
+                alert(
+                    `Actualización Finalizada.\n\n` +
+                    `✅ Exitosos: ${successCount}\n` +
+                    `🆕 Creados: ${insertedCount}\n` +
+                    `🔁 Actualizados: ${updatedCount}\n` +
+                    `⏭️ Sin cambios: ${skippedCount}\n` +
+                    `❌ Errores: ${errorCount}\n\n` +
+                    `${errorCount > 0 ? 'Revisa la consola para detalles de errores.' : ''}`
+                );
+                if (swappedRutNameRows > 0) {
+                    alert(`Aviso: se detectaron ${swappedRutNameRows} filas con columnas Nombre/Rut invertidas y se corrigieron automáticamente.`);
+                }
+                if (errors.length > 0) console.error("Client Update Excel Errors:", errors);
+                if (rejectedRows.length > 0) {
+                    const rejectedWb = XLSX.utils.book_new();
+                    const rejectedWs = XLSX.utils.json_to_sheet(rejectedRows, {
+                        header: ['fila', 'motivo', 'vendedor', 'nombre', 'rut']
+                    });
+                    XLSX.utils.book_append_sheet(rejectedWb, rejectedWs, 'Rechazados');
+                    XLSX.writeFile(rejectedWb, 'clientes_actualizacion_rechazados.xlsx');
+                }
+
+                if (updateInputRef.current) updateInputRef.current.value = '';
+                fetchClients();
+            } catch (err) {
+                console.error("Client Update Excel Parse Error:", err);
+                alert("Error al leer el archivo Excel de actualización. Asegúrate de que sea un archivo .xlsx válido.");
+            } finally {
+                setUpdatingClients(false);
+            }
+        };
+
+        reader.readAsBinaryString(file);
+    };
+
     const downloadTemplate = () => {
-        const headers = ['Nombre', 'Rut', 'Giro', 'Dirección', 'Oficina', 'Comuna', 'Teléfono', 'Email', 'Contacto', 'Vendedor'];
+        const headers = ['Nombre', 'Rut', 'Giro', 'Dirección', 'Oficina', 'Comuna', 'Teléfono', 'Email', 'Contacto', 'Vendedor', 'Días de Crédito', 'Notas'];
         const data = [
-            ['Exemplo Dental Ltda', '76.123.456-7', 'Clinica Dental', 'Av Providencia 1234, Providencia', 'Oficina 402', 'Providencia', '+56912345678', 'contacto@clinica.cl', 'Juan Perez', profile?.email || 'vendedor@empresa.cl']
+            ['Exemplo Dental Ltda', '76.123.456-7', 'Clinica Dental', 'Av Providencia 1234, Providencia', 'Oficina 402', 'Providencia', '+56912345678', 'contacto@clinica.cl', 'Juan Perez', profile?.email || 'vendedor@empresa.cl', 30, 'Cliente nuevo importado masivamente']
         ];
 
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
         XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
         XLSX.writeFile(wb, 'plantilla_clientes_crm.xlsx');
+    };
+
+    const downloadUpdateTemplate = () => {
+        const headers = ['ID', 'Nombre', 'Rut', 'Giro', 'Dirección', 'Oficina', 'Comuna', 'Teléfono', 'Email', 'Contacto', 'Vendedor', 'Días de Crédito', 'Notas'];
+        const data = [
+            ['', '', '76.123.456-7', '', '', '', '', '', '', '', profile?.email || 'vendedor@empresa.cl', '', 'Completa solo las columnas que quieras actualizar']
+        ];
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+        XLSX.utils.book_append_sheet(wb, ws, 'Actualizacion');
+        XLSX.writeFile(wb, 'plantilla_actualizacion_clientes.xlsx');
     };
 
     const ownersById = useMemo(() => {
@@ -1550,26 +1930,54 @@ const ClientsContent = () => {
                                 onChange={handleFileUpload}
                                 className="hidden"
                             />
+                            <input
+                                type="file"
+                                accept=".xlsx, .xls"
+                                ref={updateInputRef}
+                                onChange={handleUpdateFileUpload}
+                                className="hidden"
+                            />
                             <button
                                 onClick={downloadTemplate}
                                 className="bg-green-50 text-green-700 px-4 py-4 rounded-2xl font-bold flex items-center justify-center hover:bg-green-100 transition-all text-sm order-30 md:order-none"
-                                title="Descargar Plantilla Excel"
+                                title="Descargar plantilla para crear clientes"
                             >
                                 <FileText size={18} className="mr-2" />
-                                Plantilla
+                                Plantilla Crear
                             </button>
                             <button
                                 onClick={() => csvInputRef.current?.click()}
                                 disabled={importing}
                                 className="bg-green-600 text-white px-4 py-4 rounded-2xl font-bold flex items-center justify-center hover:bg-green-700 shadow-lg shadow-green-100 transition-all text-sm disabled:opacity-50 order-30 md:order-none"
-                                title="Importar Excel"
+                                title="Importar clientes nuevos"
                             >
                                 {importing ? (
                                     <div className="w-5 h-5 border-2 border-white border-t-transparent animate-spin rounded-full mr-2"></div>
                                 ) : (
                                     <Upload size={18} className="mr-2" />
                                 )}
-                                {importing ? '...' : 'Importar Excel'}
+                                {importing ? '...' : 'Importar Clientes'}
+                            </button>
+                            <button
+                                onClick={downloadUpdateTemplate}
+                                className="bg-amber-50 text-amber-700 px-4 py-4 rounded-2xl font-bold flex items-center justify-center hover:bg-amber-100 transition-all text-sm order-30 md:order-none"
+                                title="Descargar plantilla para actualizar cartera"
+                            >
+                                <FileText size={18} className="mr-2" />
+                                Plantilla Actualizar
+                            </button>
+                            <button
+                                onClick={() => updateInputRef.current?.click()}
+                                disabled={updatingClients}
+                                className="bg-amber-600 text-white px-4 py-4 rounded-2xl font-bold flex items-center justify-center hover:bg-amber-700 shadow-lg shadow-amber-100 transition-all text-sm disabled:opacity-50 order-30 md:order-none"
+                                title="Actualizar datos de clientes existentes"
+                            >
+                                {updatingClients ? (
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent animate-spin rounded-full mr-2"></div>
+                                ) : (
+                                    <RefreshCw size={18} className="mr-2" />
+                                )}
+                                {updatingClients ? '...' : 'Actualizar Cartera'}
                             </button>
                         </>
                     )}
