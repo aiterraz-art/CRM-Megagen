@@ -3,6 +3,7 @@ import { supabase } from '../../services/supabase';
 import { X, Building2, User, Phone, Mail, MapPin, FileText, CheckCircle2 } from 'lucide-react';
 import { Database } from '../../types/supabase';
 import { useMapsLibrary } from '@vis.gl/react-google-maps';
+import { is3DentalCompany } from '../../utils/companyConfig';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -29,11 +30,17 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
         lng: 0,
         notes: '',
         giro: '',
-        comuna: ''
+        comuna: '',
+        doctor_specialty: '',
+        scanner_type: '',
+        printer_type: '',
+        implant_systems: '',
+        laboratory_partner: ''
     });
     const [loading, setLoading] = useState(false);
     const placesLib = useMapsLibrary('places');
     const inputRef = useRef<HTMLInputElement>(null);
+    const show3DentalClientFields = is3DentalCompany();
 
     useEffect(() => {
         if (initialData) {
@@ -49,7 +56,12 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
                 lng: initialData.lng || 0,
                 notes: initialData.notes || '',
                 giro: initialData.giro || '',
-                comuna: initialData.comuna || ''
+                comuna: initialData.comuna || '',
+                doctor_specialty: initialData.doctor_specialty || '',
+                scanner_type: initialData.scanner_type || '',
+                printer_type: initialData.printer_type || '',
+                implant_systems: initialData.implant_systems || '',
+                laboratory_partner: initialData.laboratory_partner || ''
             });
 
         } else if (persistenceKey) {
@@ -271,6 +283,65 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
                                 placeholder="Ej. Providencia"
                             />
                         </div>
+
+                        {show3DentalClientFields && (
+                            <>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Especialidad</label>
+                                    <input
+                                        type="text"
+                                        value={formData.doctor_specialty}
+                                        onChange={(e) => handleChange('doctor_specialty', e.target.value)}
+                                        className="w-full px-4 py-3 bg-gray-50 border border-transparent rounded-xl font-bold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200 outline-none transition-all placeholder:font-medium placeholder:text-gray-300"
+                                        placeholder="Ej. Ortodoncia"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Escáner</label>
+                                    <input
+                                        type="text"
+                                        value={formData.scanner_type}
+                                        onChange={(e) => handleChange('scanner_type', e.target.value)}
+                                        className="w-full px-4 py-3 bg-gray-50 border border-transparent rounded-xl font-bold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200 outline-none transition-all placeholder:font-medium placeholder:text-gray-300"
+                                        placeholder="Ej. Medit i700"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Impresora</label>
+                                    <input
+                                        type="text"
+                                        value={formData.printer_type}
+                                        onChange={(e) => handleChange('printer_type', e.target.value)}
+                                        className="w-full px-4 py-3 bg-gray-50 border border-transparent rounded-xl font-bold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200 outline-none transition-all placeholder:font-medium placeholder:text-gray-300"
+                                        placeholder="Ej. Formlabs 4B"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Implantes que usa</label>
+                                    <input
+                                        type="text"
+                                        value={formData.implant_systems}
+                                        onChange={(e) => handleChange('implant_systems', e.target.value)}
+                                        className="w-full px-4 py-3 bg-gray-50 border border-transparent rounded-xl font-bold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200 outline-none transition-all placeholder:font-medium placeholder:text-gray-300"
+                                        placeholder="Ej. Straumann, Neodent"
+                                    />
+                                </div>
+
+                                <div className="space-y-2 md:col-span-2">
+                                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Laboratorio con el que trabaja</label>
+                                    <input
+                                        type="text"
+                                        value={formData.laboratory_partner}
+                                        onChange={(e) => handleChange('laboratory_partner', e.target.value)}
+                                        className="w-full px-4 py-3 bg-gray-50 border border-transparent rounded-xl font-bold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200 outline-none transition-all placeholder:font-medium placeholder:text-gray-300"
+                                        placeholder="Ej. Laboratorio Dental XYZ"
+                                    />
+                                </div>
+                            </>
+                        )}
 
                     </div>
                 </form>

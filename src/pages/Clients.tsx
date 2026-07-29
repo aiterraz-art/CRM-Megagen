@@ -11,6 +11,7 @@ import ClientDetailModal from '../components/modals/ClientDetailModal';
 import { checkGPSConnection } from '../utils/gps';
 import { sendGmailMessage } from '../utils/gmail';
 import { isProspectStatus } from '../utils/prospect';
+import { is3DentalCompany } from '../utils/companyConfig';
 import {
     computeDuplicateClientGroups,
     DuplicateReason,
@@ -229,6 +230,11 @@ const buildClientFormState = (assignedSellerId = '') => ({
     giro: '',
     comuna: '',
     office: '',
+    doctorSpecialty: '',
+    scannerType: '',
+    printerType: '',
+    implantSystems: '',
+    laboratoryPartner: '',
     assignedSellerId,
     creditDays: 0,
     requiresDiscountApproval: true
@@ -309,6 +315,7 @@ const ClientsContent = () => {
     const canManageClientCredit = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'facturador';
     const canMergeDuplicateGroups = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'facturador' || effectiveRole === 'tesorero';
     const canEditAnyClient = hasPermission('MANAGE_CLIENTS') || effectiveRole === 'jefe';
+    const show3DentalClientFields = is3DentalCompany();
     const canViewAll = useMemo(
         () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
         [isSellerRole, hasPermission, isSupervisor, profile?.email]
@@ -609,6 +616,11 @@ const ClientsContent = () => {
                 lng: clientToEdit.lng ?? SANTIAGO_CENTER.lng,
                 notes: clientToEdit.notes || '',
                 giro: clientToEdit.giro || '',
+                doctorSpecialty: clientToEdit.doctor_specialty || '',
+                scannerType: clientToEdit.scanner_type || '',
+                printerType: clientToEdit.printer_type || '',
+                implantSystems: clientToEdit.implant_systems || '',
+                laboratoryPartner: clientToEdit.laboratory_partner || '',
                 comuna: clientToEdit.comuna || '',
                 office: clientToEdit.office || '',
                 assignedSellerId: clientToEdit.created_by || '',
@@ -759,6 +771,13 @@ const ClientsContent = () => {
                         lng: finalLng,
                         notes: clientForm.notes,
                         giro: clientForm.giro,
+                        ...(show3DentalClientFields ? {
+                            doctor_specialty: clientForm.doctorSpecialty || null,
+                            scanner_type: clientForm.scannerType || null,
+                            printer_type: clientForm.printerType || null,
+                            implant_systems: clientForm.implantSystems || null,
+                            laboratory_partner: clientForm.laboratoryPartner || null
+                        } : {}),
                         comuna: finalComuna,
                         office: clientForm.office,
                         ...(effectiveRole === 'admin' ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {}),
@@ -826,6 +845,13 @@ const ClientsContent = () => {
                     status: 'active',
                     zone: 'Santiago',
                     giro: clientForm.giro,
+                    ...(show3DentalClientFields ? {
+                        doctor_specialty: clientForm.doctorSpecialty || null,
+                        scanner_type: clientForm.scannerType || null,
+                        printer_type: clientForm.printerType || null,
+                        implant_systems: clientForm.implantSystems || null,
+                        laboratory_partner: clientForm.laboratoryPartner || null
+                    } : {}),
                     comuna: finalComuna,
                     office: clientForm.office,
                     credit_days: 0,
@@ -2686,6 +2712,67 @@ const ClientsContent = () => {
                                                     />
                                                 </div>
                                             </div>
+
+                                            {show3DentalClientFields && (
+                                                <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5 space-y-5">
+                                                    <div>
+                                                        <p className="text-xs font-black text-indigo-700 uppercase tracking-[0.25em]">Ficha Clínica 3Dental</p>
+                                                        <p className="mt-1 text-sm font-medium text-indigo-900">Información técnica relevante para seguimiento comercial y soporte clínico.</p>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                                        <div className="space-y-2">
+                                                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Especialidad</label>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Ej: Ortodoncia, Implantología"
+                                                                className="w-full p-4 bg-white border border-indigo-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                                value={clientForm.doctorSpecialty}
+                                                                onChange={e => setClientForm({ ...clientForm, doctorSpecialty: e.target.value })}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Escáner</label>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Ej: Medit i700, TRIOS 5"
+                                                                className="w-full p-4 bg-white border border-indigo-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                                value={clientForm.scannerType}
+                                                                onChange={e => setClientForm({ ...clientForm, scannerType: e.target.value })}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Impresora</label>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Ej: Formlabs Form 4B"
+                                                                className="w-full p-4 bg-white border border-indigo-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                                value={clientForm.printerType}
+                                                                onChange={e => setClientForm({ ...clientForm, printerType: e.target.value })}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Implantes que usa</label>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Ej: Straumann, Neodent, Megagen"
+                                                                className="w-full p-4 bg-white border border-indigo-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                                value={clientForm.implantSystems}
+                                                                onChange={e => setClientForm({ ...clientForm, implantSystems: e.target.value })}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-2 md:col-span-2">
+                                                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Laboratorio con el que trabaja</label>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Ej: Laboratorio Dental XYZ"
+                                                                className="w-full p-4 bg-white border border-indigo-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none"
+                                                                value={clientForm.laboratoryPartner}
+                                                                onChange={e => setClientForm({ ...clientForm, laboratoryPartner: e.target.value })}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             {canAssignClientOwner && (
                                                 <div className="space-y-2">

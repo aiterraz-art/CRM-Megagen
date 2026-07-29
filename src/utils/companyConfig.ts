@@ -12,3 +12,9 @@ export const getCompanyConfig = () => {
         collectionsPaymentsEmail
     };
 };
+
+export const is3DentalCompany = () =>
+    String(import.meta.env.VITE_COMPANY_NAME || '')
+        .trim()
+        .toLowerCase()
+        .includes('3dental');

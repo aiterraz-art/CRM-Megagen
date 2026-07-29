@@ -9,6 +9,7 @@ import ScheduleVisitModal from './ScheduleVisitModal';
 import ClientManagementModal from './ClientManagementModal';
 import { useUser } from '../../contexts/UserContext';
 import { googleService } from '../../services/googleService';
+import { is3DentalCompany } from '../../utils/companyConfig';
 import {
     buildCollectionsDebtSnapshotFromRows,
     buildCollectionsRutVariants,
@@ -165,6 +166,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const [showManagementModal, setShowManagementModal] = useState(false);
 
     const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+    const show3DentalClientFields = is3DentalCompany();
     const clientRutVariants = buildCollectionsRutVariants(client.rut);
     const normalizedClientRut = normalizeCollectionsRut(client.rut);
     const mySellerEmail = normalizeCollectionSellerEmail(profile?.email);
@@ -744,6 +746,20 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                                 <div className="col-span-1 md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Notas</label><p className="font-medium text-gray-600 bg-gray-50 p-4 rounded-xl border border-gray-200/50 italic">{client.notes || 'Sin notas registradas.'}</p></div>
                                             </div>
                                         </div>
+                                        {show3DentalClientFields && (
+                                            <div className="bg-white p-5 sm:p-8 rounded-3xl border border-indigo-100 shadow-sm">
+                                                <h3 className="font-bold text-gray-900 mb-4 sm:mb-6 flex items-center gap-2">
+                                                    <Building2 size={20} className="text-indigo-600" /> Ficha Clínica 3Dental
+                                                </h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-8">
+                                                    <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Especialidad</label><p className="font-medium text-gray-700">{client.doctor_specialty || '---'}</p></div>
+                                                    <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Escáner</label><p className="font-medium text-gray-700">{client.scanner_type || '---'}</p></div>
+                                                    <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Impresora</label><p className="font-medium text-gray-700">{client.printer_type || '---'}</p></div>
+                                                    <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Implantes que usa</label><p className="font-medium text-gray-700">{client.implant_systems || '---'}</p></div>
+                                                    <div className="col-span-1 md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Laboratorio con el que trabaja</label><p className="font-medium text-gray-700">{client.laboratory_partner || '---'}</p></div>
+                                                </div>
+                                            </div>
+                                        )}
                                         <div className="bg-white p-5 sm:p-6 rounded-3xl border border-gray-100 shadow-sm">
                                             <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
                                                 <CheckCircle2 size={18} className="text-indigo-600" /> Próxima Acción Recomendada
