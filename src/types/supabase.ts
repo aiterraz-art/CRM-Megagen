@@ -666,6 +666,59 @@ export interface Database {
                     updated_at?: string
                 }
             }
+            supplier_payables: {
+                Row: {
+                    created_at: string
+                    created_by: string
+                    currency: string
+                    description: string
+                    due_date: string
+                    id: string
+                    issue_date: string
+                    notes: string | null
+                    paid_amount: number
+                    reference_number: string | null
+                    status: string
+                    supplier_id: string
+                    total_amount: number
+                    updated_at: string
+                    updated_by: string | null
+                }
+                Insert: {
+                    created_at?: string
+                    created_by: string
+                    currency?: string
+                    description: string
+                    due_date: string
+                    id?: string
+                    issue_date?: string
+                    notes?: string | null
+                    paid_amount?: number
+                    reference_number?: string | null
+                    status?: string
+                    supplier_id: string
+                    total_amount?: number
+                    updated_at?: string
+                    updated_by?: string | null
+                }
+                Update: {
+                    created_at?: string
+                    created_by?: string
+                    currency?: string
+                    description?: string
+                    due_date?: string
+                    id?: string
+                    issue_date?: string
+                    notes?: string | null
+                    paid_amount?: number
+                    reference_number?: string | null
+                    status?: string
+                    supplier_id?: string
+                    total_amount?: number
+                    updated_at?: string
+                    updated_by?: string | null
+                }
+            }
             purchase_orders: {
                 Row: {
                     created_at: string

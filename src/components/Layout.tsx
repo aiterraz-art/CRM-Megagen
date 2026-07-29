@@ -20,6 +20,7 @@ type MenuContext = {
     isSupervisor: boolean;
     canViewProcurement: boolean;
     canViewPurchaseOrders: boolean;
+    canViewSupplierPayables: boolean;
     canViewKitLoans: boolean;
     canViewSizeChanges: boolean;
 };
@@ -278,6 +279,14 @@ const allMenuEntries: MenuEntry[] = [
         group: 'management',
         visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin',
     },
+    {
+        id: 'supplier-payables',
+        label: 'Cuentas por Pagar',
+        path: '/supplier-payables',
+        icon: <CircleDollarSign size={20} />,
+        group: 'management',
+        visibleWhen: ({ canViewSupplierPayables }) => canViewSupplierPayables,
+    },
 ];
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
@@ -291,6 +300,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const [lostReasonAlertAcknowledged, setLostReasonAlertAcknowledged] = useState(false);
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
     const canViewPurchaseOrders = hasPermission('VIEW_PURCHASE_ORDERS') || hasPermission('MANAGE_PURCHASE_ORDERS');
+    const canViewSupplierPayables = hasPermission('VIEW_SUPPLIER_PAYABLES') || hasPermission('MANAGE_SUPPLIER_PAYABLES');
     const canViewKitLoans = hasPermission('VIEW_KIT_LOANS');
     const canViewSizeChanges = hasPermission('VIEW_SIZE_CHANGES');
     const shouldTrackPendingLostReasons = realRole === 'seller' && effectiveRole === 'seller' && Boolean(profile?.id);
@@ -301,10 +311,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             isSupervisor,
             canViewProcurement,
             canViewPurchaseOrders,
+            canViewSupplierPayables,
             canViewKitLoans,
             canViewSizeChanges,
         }),
-        [effectiveRole, isSupervisor, canViewProcurement, canViewPurchaseOrders, canViewKitLoans, canViewSizeChanges]
+        [effectiveRole, isSupervisor, canViewProcurement, canViewPurchaseOrders, canViewSupplierPayables, canViewKitLoans, canViewSizeChanges]
     );
 
     const visibleMenuEntries = useMemo(

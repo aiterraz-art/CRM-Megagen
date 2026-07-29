@@ -48,6 +48,7 @@ const ConversionsRanking = loadable(() => import('./pages/ConversionsRanking'));
 const Procurement = loadable(() => import('./pages/Procurement'));
 const KitLoans = loadable(() => import('./pages/KitLoans'));
 const PurchaseOrders = loadable(() => import('./pages/PurchaseOrders'));
+const SupplierPayables = loadable(() => import('./pages/SupplierPayables'));
 
 const ScreenLoader = () => (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -104,6 +105,15 @@ const PermissionGuard = ({ permission, children }: { permission: string; childre
     const { hasPermission, loading } = useUser();
     if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
     if (!hasPermission(permission)) {
+        return <Navigate to="/" replace />;
+    }
+    return children;
+};
+
+const AnyPermissionGuard = ({ permissions, children }: { permissions: string[]; children: JSX.Element }) => {
+    const { hasPermission, loading } = useUser();
+    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
+    if (!permissions.some((permission) => hasPermission(permission))) {
         return <Navigate to="/" replace />;
     }
     return children;
@@ -291,6 +301,7 @@ function App() {
                             <Route path="procurement" element={<PermissionGuard permission="VIEW_PROCUREMENT"><Procurement /></PermissionGuard>} />
                             <Route path="purchase-orders" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
                             <Route path="suppliers" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
+                            <Route path="supplier-payables" element={<AnyPermissionGuard permissions={['VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES']}><SupplierPayables /></AnyPermissionGuard>} />
                             <Route path="kit-loans" element={<PermissionGuard permission="VIEW_KIT_LOANS"><KitLoans /></PermissionGuard>} />
                             <Route path="team" element={<NonFacturadorGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonFacturadorGuard>} />
                             <Route path="pipeline" element={<NonFacturadorGuard><Pipeline /></NonFacturadorGuard>} />
