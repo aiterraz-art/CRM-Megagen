@@ -348,6 +348,7 @@ const Dispatch: React.FC = () => {
     const [savingRouteItemId, setSavingRouteItemId] = useState<string | null>(null);
     const [uploadingProofItemId, setUploadingProofItemId] = useState<string | null>(null);
     const [finishingRouteId, setFinishingRouteId] = useState<string | null>(null);
+    const [deletingRouteId, setDeletingRouteId] = useState<string | null>(null);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
 
     const fetchOrderFlowMap = async (orderIds: string[]) => {
@@ -1036,6 +1037,34 @@ const Dispatch: React.FC = () => {
         }
     };
 
+    const handleDeleteSelectedRoute = async () => {
+        if (!selectedRoute) return;
+
+        const confirmed = window.confirm(
+            `¿Eliminar la ruta "${selectedRoute.name}"?\n\nLos pedidos volverán a la cola de despacho para rearmar una nueva ruta. Esta acción no se permite si la ruta ya tiene entregas registradas.`
+        );
+        if (!confirmed) return;
+
+        setDeletingRouteId(selectedRoute.id);
+        try {
+            const { error } = await supabase.rpc('delete_delivery_route', {
+                p_route_id: selectedRoute.id
+            });
+
+            if (error) throw error;
+
+            await refreshAll();
+            setSelectedRoute(null);
+            setRouteDetails(null);
+            alert('Ruta eliminada y pedidos devueltos a la cola de despacho.');
+        } catch (error: any) {
+            console.error('Error deleting route:', error);
+            alert(`No se pudo eliminar la ruta: ${error?.message || 'desconocido'}`);
+        } finally {
+            setDeletingRouteId(null);
+        }
+    };
+
     const handleAdminProofUpload = async (item: RouteDetailItem, markDelivered: boolean) => {
         const file = proofDrafts[item.id];
         if (!file) {
@@ -1635,6 +1664,13 @@ const Dispatch: React.FC = () => {
                                                         className="px-5 py-3 rounded-2xl bg-emerald-500 text-white text-sm font-black hover:bg-emerald-600 transition-all disabled:opacity-60"
                                                     >
                                                         {finishingRouteId === selectedRoute.id ? 'Terminando...' : 'Dar por terminada'}
+                                                    </button>
+                                                    <button
+                                                        onClick={handleDeleteSelectedRoute}
+                                                        disabled={deletingRouteId === selectedRoute.id}
+                                                        className="px-5 py-3 rounded-2xl bg-rose-500 text-white text-sm font-black hover:bg-rose-600 transition-all disabled:opacity-60"
+                                                    >
+                                                        {deletingRouteId === selectedRoute.id ? 'Eliminando...' : 'Eliminar ruta'}
                                                     </button>
                                                 </div>
                                             </div>
