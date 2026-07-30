@@ -151,17 +151,20 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
             const targetRepId = assigneeId || session.user.id;
 
             // 3. Save to Supabase (Visits Table with 'scheduled' status)
-            const { data: insertedVisit, error: dbError } = await supabase
-                .from('visits')
-                .insert({
-                    client_id: selectedClient.id,
-                    sales_rep_id: targetRepId,
-                    check_in_time: isoStart,
-                    check_out_time: null,
-                    status: 'scheduled',
-                    title: formData.title,
-                    notes: formData.notes
-                })
+            const visitPayload = {
+                client_id: selectedClient.id,
+                sales_rep_id: targetRepId,
+                scheduled_at: isoStart,
+                check_in_time: isoStart,
+                check_out_time: null,
+                status: 'scheduled',
+                title: formData.title,
+                notes: formData.notes
+            };
+
+            const { data: insertedVisit, error: dbError } = await (supabase
+                .from('visits') as any)
+                .insert(visitPayload)
                 .select('id')
                 .single();
 
