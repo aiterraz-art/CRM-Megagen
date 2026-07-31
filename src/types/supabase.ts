@@ -1128,6 +1128,9 @@ export interface Database {
                     cancelled_by: string | null
                     cancellation_reason: string | null
                     client_id: string | null
+                    courier_marked_at: string | null
+                    courier_marked_by: string | null
+                    courier_name: string | null
                     created_at: string | null
                     delivery_photo_url: string | null
                     delivery_status: string | null
@@ -1146,7 +1149,9 @@ export interface Database {
                     payment_proof_uploaded_at: string | null
                     quotation_id: string | null
                     route_id: string | null
+                    shipment_method: string | null
                     status: string | null
+                    tracking_number: string | null
                     total_amount: number | null
                     total_discount: number | null
                     user_id: string | null
@@ -1157,6 +1162,9 @@ export interface Database {
                     cancelled_by?: string | null
                     cancellation_reason?: string | null
                     client_id?: string | null
+                    courier_marked_at?: string | null
+                    courier_marked_by?: string | null
+                    courier_name?: string | null
                     created_at?: string | null
                     delivery_photo_url?: string | null
                     delivery_status?: string | null
@@ -1175,7 +1183,9 @@ export interface Database {
                     payment_proof_uploaded_at?: string | null
                     quotation_id?: string | null
                     route_id?: string | null
+                    shipment_method?: string | null
                     status?: string | null
+                    tracking_number?: string | null
                     total_amount?: number | null
                     total_discount?: number | null
                     user_id?: string | null
@@ -1186,6 +1196,9 @@ export interface Database {
                     cancelled_by?: string | null
                     cancellation_reason?: string | null
                     client_id?: string | null
+                    courier_marked_at?: string | null
+                    courier_marked_by?: string | null
+                    courier_name?: string | null
                     created_at?: string | null
                     delivery_photo_url?: string | null
                     delivery_status?: string | null
@@ -1204,7 +1217,9 @@ export interface Database {
                     payment_proof_uploaded_at?: string | null
                     quotation_id?: string | null
                     route_id?: string | null
+                    shipment_method?: string | null
                     status?: string | null
+                    tracking_number?: string | null
                     total_amount?: number | null
                     total_discount?: number | null
                     user_id?: string | null

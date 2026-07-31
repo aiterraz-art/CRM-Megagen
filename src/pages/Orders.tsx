@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Eye, FileText, History, RefreshCw, RotateCcw, Search, ShoppingCart, Send } from 'lucide-react';
+import { Eye, FileText, History, PackageCheck, RefreshCw, RotateCcw, Search, ShoppingCart, Send, Truck } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
@@ -13,8 +13,9 @@ import OrderItemsPreviewModal, { type OrderItemsPreviewItem } from '../component
 import OrderPdfPreviewModal from '../components/modals/OrderPdfPreviewModal';
 
 type OrderStatusFilter = 'all' | 'completed' | 'cancelled';
-type DeliveryStatusFilter = 'all' | 'pending' | 'assigned' | 'out_for_delivery' | 'delivered';
+type DeliveryStatusFilter = 'all' | 'pending' | 'assigned' | 'out_for_delivery' | 'delivered' | 'courier_shipped';
 type ViewMode = 'all' | 'mine';
+type CourierProvider = 'chileexpress' | 'fedex';
 
 type EnrichedOrder = {
     id: string;
@@ -34,6 +35,10 @@ type EnrichedOrder = {
     payment_proof_name: string | null;
     payment_proof_mime_type: string | null;
     delivery_photo_url: string | null;
+    shipment_method: string | null;
+    courier_name: string | null;
+    tracking_number: string | null;
+    courier_marked_at: string | null;
 };
 
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString('es-CL')}`;
@@ -45,9 +50,29 @@ const PAGE_SIZE = 10;
 const isBillingBackofficeRole = (role: string | null | undefined) =>
     role === 'facturador' || role === 'tesorero';
 
+const COURIER_OPTIONS: Array<{ value: CourierProvider; label: string }> = [
+    { value: 'chileexpress', label: 'Chilexpress' },
+    { value: 'fedex', label: 'FedEx' }
+];
+
 const normalizeDeliveryStatus = (status: string | null | undefined) => {
     const normalized = String(status || '').trim().toLowerCase();
     return normalized || 'pending';
+};
+
+const normalizeShipmentMethod = (value: string | null | undefined) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized || 'local_dispatch';
+};
+
+const isCourierShipment = (order: Pick<EnrichedOrder, 'shipment_method'>) =>
+    normalizeShipmentMethod(order.shipment_method) === 'courier';
+
+const getCourierLabel = (courierName: string | null | undefined) => {
+    const normalized = String(courierName || '').trim().toLowerCase();
+    if (normalized === 'chileexpress') return 'Chilexpress';
+    if (normalized === 'fedex') return 'FedEx';
+    return courierName || 'Courier';
 };
 
 const chunkArray = <T,>(values: T[], size: number) => {
@@ -83,6 +108,11 @@ const canCancelOrder = (
         || isBillingBackofficeRole(effectiveRole)
         || order.user_id === profileId;
 };
+
+const canManageCourierShipment = (effectiveRole: string | null | undefined) =>
+    effectiveRole === 'admin'
+    || effectiveRole === 'jefe'
+    || isBillingBackofficeRole(effectiveRole);
 
 const getPaymentEmailStatusStyles = (status: string | null | undefined) => {
     switch ((status || '').toLowerCase()) {
@@ -120,6 +150,8 @@ const getDeliveryStatusStyles = (status: string | null | undefined) => {
             return 'bg-indigo-100 text-indigo-700';
         case 'delivered':
             return 'bg-emerald-100 text-emerald-700';
+        case 'courier_shipped':
+            return 'bg-sky-100 text-sky-700';
         default:
             return 'bg-gray-100 text-gray-600';
     }
@@ -135,6 +167,8 @@ const getDeliveryStatusLabel = (status: string | null | undefined) => {
             return 'En reparto';
         case 'delivered':
             return 'Entregado';
+        case 'courier_shipped':
+            return 'Encomienda enviada';
         default:
             return status || 'Pendiente';
     }
@@ -182,6 +216,11 @@ const Orders = () => {
     const [orderPdfBlobUrl, setOrderPdfBlobUrl] = useState<string | null>(null);
     const [orderPdfError, setOrderPdfError] = useState<string | null>(null);
     const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+    const [courierModalOrder, setCourierModalOrder] = useState<EnrichedOrder | null>(null);
+    const [courierProvider, setCourierProvider] = useState<CourierProvider>('chileexpress');
+    const [trackingNumber, setTrackingNumber] = useState('');
+    const [courierModalError, setCourierModalError] = useState<string | null>(null);
+    const [savingCourierOrderId, setSavingCourierOrderId] = useState<string | null>(null);
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewAll = useMemo(
@@ -195,7 +234,7 @@ const Orders = () => {
         try {
             let query = supabase
                 .from('orders')
-                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, delivery_photo_url, total_amount, created_at, payment_email_status, payment_email_error, payment_proof_path, payment_proof_name, payment_proof_mime_type')
+                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, delivery_photo_url, total_amount, created_at, payment_email_status, payment_email_error, payment_proof_path, payment_proof_name, payment_proof_mime_type, shipment_method, courier_name, tracking_number, courier_marked_at')
                 .not('quotation_id', 'is', null)
                 .order('created_at', { ascending: false });
 
@@ -270,7 +309,11 @@ const Orders = () => {
                     payment_proof_path: order.payment_proof_path ?? null,
                     payment_proof_name: order.payment_proof_name ?? null,
                     payment_proof_mime_type: order.payment_proof_mime_type ?? null,
-                    delivery_photo_url: order.delivery_photo_url ?? null
+                    delivery_photo_url: order.delivery_photo_url ?? null,
+                    shipment_method: order.shipment_method ?? null,
+                    courier_name: order.courier_name ?? null,
+                    tracking_number: order.tracking_number ?? null,
+                    courier_marked_at: order.courier_marked_at ?? null
                 };
             });
 
@@ -787,6 +830,68 @@ const Orders = () => {
         }
     }, [effectiveRole, fetchOrders, profile?.id]);
 
+    const closeCourierModal = useCallback(() => {
+        setCourierModalOrder(null);
+        setCourierProvider('chileexpress');
+        setTrackingNumber('');
+        setCourierModalError(null);
+    }, []);
+
+    const openCourierModal = useCallback((order: EnrichedOrder) => {
+        setCourierModalOrder(order);
+        const currentCourier = String(order.courier_name || '').trim().toLowerCase();
+        setCourierProvider(currentCourier === 'fedex' ? 'fedex' : 'chileexpress');
+        setTrackingNumber(String(order.tracking_number || '').trim());
+        setCourierModalError(null);
+    }, []);
+
+    const handleSaveCourierShipment = useCallback(async () => {
+        if (!courierModalOrder) return;
+        if (!profile?.id) {
+            setCourierModalError('No se pudo identificar al usuario actual.');
+            return;
+        }
+        if (!canManageCourierShipment(effectiveRole)) {
+            setCourierModalError('No tienes permisos para marcar encomiendas.');
+            return;
+        }
+
+        const normalizedTracking = trackingNumber.trim();
+        if (!normalizedTracking) {
+            setCourierModalError('Debes ingresar el número de seguimiento.');
+            return;
+        }
+
+        setSavingCourierOrderId(courierModalOrder.id);
+        setCourierModalError(null);
+
+        try {
+            const isDelivered = normalizeDeliveryStatus(courierModalOrder.delivery_status) === 'delivered';
+            const { error } = await supabase
+                .from('orders')
+                .update({
+                    shipment_method: 'courier',
+                    courier_name: courierProvider,
+                    tracking_number: normalizedTracking,
+                    courier_marked_at: new Date().toISOString(),
+                    courier_marked_by: profile.id,
+                    delivery_status: isDelivered ? 'delivered' : 'courier_shipped'
+                })
+                .eq('id', courierModalOrder.id);
+
+            if (error) throw error;
+
+            await fetchOrders();
+            closeCourierModal();
+            alert(`Pedido #${courierModalOrder.folio ?? '-'} marcado como encomienda correctamente.`);
+        } catch (error: any) {
+            console.error('Error saving courier shipment:', error);
+            setCourierModalError(error?.message || 'No se pudo guardar la encomienda.');
+        } finally {
+            setSavingCourierOrderId(null);
+        }
+    }, [closeCourierModal, courierModalOrder, courierProvider, effectiveRole, fetchOrders, profile?.id, trackingNumber]);
+
     const filteredOrders = useMemo(() => {
         const term = search.trim().toLowerCase();
         return orders.filter((order) => {
@@ -967,7 +1072,8 @@ const Orders = () => {
                         { key: 'pending', label: 'Despacho: Pendiente' },
                         { key: 'assigned', label: 'Despacho: Asignado' },
                         { key: 'out_for_delivery', label: 'Despacho: En reparto' },
-                        { key: 'delivered', label: 'Despacho: Entregado' }
+                        { key: 'delivered', label: 'Despacho: Entregado' },
+                        { key: 'courier_shipped', label: 'Despacho: Encomienda' }
                     ] as Array<{ key: DeliveryStatusFilter; label: string }>).map((option) => (
                         <button
                             key={`delivery-${option.key}`}
@@ -1016,8 +1122,11 @@ const Orders = () => {
                                             const canResend = canResendOrderEmail(effectiveRole, profile?.id, order);
                                             const canRetryEmail = canResend && ['failed', 'pending'].includes(String(order.payment_email_status || '').toLowerCase());
                                             const canCancel = canCancelOrder(effectiveRole, profile?.id, order);
+                                            const canManageCourier = canManageCourierShipment(effectiveRole);
                                             const isCancelled = String(order.status || '').toLowerCase() === 'cancelled';
                                             const isDispatchLocked = ['assigned', 'out_for_delivery', 'delivered'].includes(String(order.delivery_status || '').toLowerCase());
+                                            const hasCourier = isCourierShipment(order);
+                                            const canEditCourier = canManageCourier && !isCancelled && (!isDispatchLocked || hasCourier);
                                             return (
                                                 <>
                                         <td className="px-4 py-3">
@@ -1065,9 +1174,21 @@ const Orders = () => {
                                             </div>
                                         </td>
                                         <td className="px-4 py-3">
-                                            <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${getDeliveryStatusStyles(order.delivery_status)}`}>
-                                                {getDeliveryStatusLabel(order.delivery_status)}
-                                            </span>
+                                            <div className="space-y-1">
+                                                <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${getDeliveryStatusStyles(order.delivery_status)}`}>
+                                                    {getDeliveryStatusLabel(order.delivery_status)}
+                                                </span>
+                                                {hasCourier ? (
+                                                    <div className="space-y-1">
+                                                        <p className="text-[11px] font-black text-sky-700">
+                                                            {getCourierLabel(order.courier_name)}
+                                                        </p>
+                                                        <p className="text-[11px] font-medium text-gray-500 break-all">
+                                                            Seguimiento: {order.tracking_number || 'Sin número'}
+                                                        </p>
+                                                    </div>
+                                                ) : null}
+                                            </div>
                                         </td>
                                         <td className="px-4 py-3 text-right font-black text-gray-900">{formatMoney(order.total_amount)}</td>
                                         <td className="px-4 py-3 font-medium text-gray-500">{formatDate(order.created_at)}</td>
@@ -1125,6 +1246,30 @@ const Orders = () => {
                                                             <>
                                                                 <Send size={14} className="mr-2" />
                                                                 Reenviar
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                ) : null}
+
+                                                {canManageCourier ? (
+                                                    <button
+                                                        onClick={() => openCourierModal(order)}
+                                                        disabled={!canEditCourier || savingCourierOrderId === order.id}
+                                                        title={
+                                                            !canEditCourier
+                                                                ? 'No se puede marcar encomienda en un pedido ya tomado por despacho local o cancelado.'
+                                                                : hasCourier
+                                                                    ? 'Editar datos de encomienda'
+                                                                    : 'Marcar pedido enviado por encomienda'
+                                                        }
+                                                        className="inline-flex items-center px-3 py-2 rounded-xl border border-sky-200 bg-sky-50 text-sky-700 text-[11px] font-black uppercase tracking-wider hover:bg-sky-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {savingCourierOrderId === order.id ? (
+                                                            <div className="w-4 h-4 border-2 border-sky-700 border-t-transparent animate-spin rounded-full" />
+                                                        ) : (
+                                                            <>
+                                                                <Truck size={14} className="mr-2" />
+                                                                {hasCourier ? 'Editar encomienda' : 'Marcar encomienda'}
                                                             </>
                                                         )}
                                                     </button>
@@ -1277,6 +1422,93 @@ const Orders = () => {
                     }
                 }}
             />
+
+            {courierModalOrder ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">
+                    <div className="w-full max-w-lg rounded-[2rem] bg-white p-6 shadow-2xl shadow-slate-900/20">
+                        <div className="flex items-start gap-4">
+                            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
+                                <PackageCheck size={26} />
+                            </div>
+                            <div className="flex-1">
+                                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-sky-600">Encomienda</p>
+                                <h3 className="mt-1 text-2xl font-black text-slate-900">
+                                    Pedido #{courierModalOrder.folio ?? '-'}
+                                </h3>
+                                <p className="mt-2 text-sm font-medium text-slate-500">
+                                    Registra el courier y el número de seguimiento para este pedido.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 space-y-5">
+                            <div>
+                                <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">
+                                    Courier
+                                </label>
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                    {COURIER_OPTIONS.map((option) => (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setCourierProvider(option.value)}
+                                            className={`rounded-2xl border px-4 py-4 text-left transition-all ${courierProvider === option.value ? 'border-sky-500 bg-sky-50 text-sky-700 shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+                                        >
+                                            <p className="text-sm font-black">{option.label}</p>
+                                            <p className="mt-1 text-xs font-medium text-slate-400">Seleccionar courier</p>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label htmlFor="tracking-number" className="mb-2 block text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">
+                                    Número de seguimiento
+                                </label>
+                                <input
+                                    id="tracking-number"
+                                    value={trackingNumber}
+                                    onChange={(event) => setTrackingNumber(event.target.value)}
+                                    placeholder="Ej. 123456789CL"
+                                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-bold text-slate-900 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-200"
+                                />
+                            </div>
+
+                            {courierModalError ? (
+                                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                                    {courierModalError}
+                                </div>
+                            ) : null}
+                        </div>
+
+                        <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                onClick={closeCourierModal}
+                                disabled={savingCourierOrderId === courierModalOrder.id}
+                                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void handleSaveCourierShipment()}
+                                disabled={savingCourierOrderId === courierModalOrder.id}
+                                className="inline-flex items-center justify-center rounded-2xl bg-sky-600 px-5 py-3 text-sm font-black text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {savingCourierOrderId === courierModalOrder.id ? (
+                                    <div className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                                ) : (
+                                    <>
+                                        <Truck size={16} className="mr-2" />
+                                        Guardar encomienda
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 };
