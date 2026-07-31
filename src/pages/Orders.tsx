@@ -45,6 +45,11 @@ const PAGE_SIZE = 10;
 const isBillingBackofficeRole = (role: string | null | undefined) =>
     role === 'facturador' || role === 'tesorero';
 
+const normalizeDeliveryStatus = (status: string | null | undefined) => {
+    const normalized = String(status || '').trim().toLowerCase();
+    return normalized || 'pending';
+};
+
 const chunkArray = <T,>(values: T[], size: number) => {
     if (values.length <= size) return [values];
     const chunks: T[][] = [];
@@ -106,7 +111,9 @@ const getPaymentEmailStatusLabel = (status: string | null | undefined) => {
 };
 
 const getDeliveryStatusStyles = (status: string | null | undefined) => {
-    switch ((status || '').toLowerCase()) {
+    switch (normalizeDeliveryStatus(status)) {
+        case 'pending':
+            return 'bg-gray-100 text-gray-600';
         case 'assigned':
             return 'bg-amber-100 text-amber-700';
         case 'out_for_delivery':
@@ -119,7 +126,9 @@ const getDeliveryStatusStyles = (status: string | null | undefined) => {
 };
 
 const getDeliveryStatusLabel = (status: string | null | undefined) => {
-    switch ((status || '').toLowerCase()) {
+    switch (normalizeDeliveryStatus(status)) {
+        case 'pending':
+            return 'Pendiente';
         case 'assigned':
             return 'Asignado';
         case 'out_for_delivery':
@@ -788,7 +797,7 @@ const Orders = () => {
                 || String(order.quotation_folio || '').includes(term);
 
             const matchesOrderStatus = orderStatusFilter === 'all' || (order.status || '').toLowerCase() === orderStatusFilter;
-            const matchesDeliveryStatus = deliveryStatusFilter === 'all' || (order.delivery_status || '').toLowerCase() === deliveryStatusFilter;
+            const matchesDeliveryStatus = deliveryStatusFilter === 'all' || normalizeDeliveryStatus(order.delivery_status) === deliveryStatusFilter;
             const matchesView = viewMode === 'all' || order.user_id === profile?.id;
             const orderTimestamp = order.created_at ? new Date(order.created_at).getTime() : null;
             const matchesDateFrom = !dateFrom || (orderTimestamp !== null && orderTimestamp >= new Date(`${dateFrom}T00:00:00`).getTime());
@@ -817,7 +826,7 @@ const Orders = () => {
 
     const orderStats = useMemo(() => {
         const completed = filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'completed').length;
-        const delivered = filteredOrders.filter((o) => (o.delivery_status || '').toLowerCase() === 'delivered').length;
+        const delivered = filteredOrders.filter((o) => normalizeDeliveryStatus(o.delivery_status) === 'delivered').length;
         const billedAmount = filteredOrders
             .filter((o) => (o.status || '').toLowerCase() !== 'cancelled')
             .reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
