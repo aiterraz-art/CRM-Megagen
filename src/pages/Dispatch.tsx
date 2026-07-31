@@ -13,6 +13,7 @@ import {
     MapPin,
     PackageCheck,
     RotateCcw,
+    Trash2,
     Truck,
     Upload,
     User,
@@ -169,6 +170,30 @@ const formatDateTime = (value: string | null | undefined) => {
 const formatCurrency = (value: number | null | undefined) => {
     if (typeof value !== 'number' || Number.isNaN(value)) return '—';
     return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(value);
+};
+
+const getStoragePathFromPublicUrl = (bucket: string, publicUrl: string | null | undefined) => {
+    const normalizedUrl = normalizeText(publicUrl);
+    if (!normalizedUrl) return null;
+
+    try {
+        const url = new URL(normalizedUrl);
+        const marker = `/storage/v1/object/public/${bucket}/`;
+        const markerIndex = url.pathname.indexOf(marker);
+        if (markerIndex >= 0) {
+            return decodeURIComponent(url.pathname.slice(markerIndex + marker.length));
+        }
+    } catch {
+        // ignore URL parse errors
+    }
+
+    const rawMarker = `/public/${bucket}/`;
+    const rawIndex = normalizedUrl.indexOf(rawMarker);
+    if (rawIndex >= 0) {
+        return decodeURIComponent(normalizedUrl.slice(rawIndex + rawMarker.length));
+    }
+
+    return null;
 };
 
 const queueStatusLabel: Record<DispatchQueueItem['status'], string> = {
@@ -366,6 +391,7 @@ const Dispatch: React.FC = () => {
     const [savingRouteMeta, setSavingRouteMeta] = useState(false);
     const [savingRouteItemId, setSavingRouteItemId] = useState<string | null>(null);
     const [uploadingProofItemId, setUploadingProofItemId] = useState<string | null>(null);
+    const [deletingProofItemId, setDeletingProofItemId] = useState<string | null>(null);
     const [finishingRouteId, setFinishingRouteId] = useState<string | null>(null);
     const [deletingRouteId, setDeletingRouteId] = useState<string | null>(null);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
@@ -1180,6 +1206,57 @@ const Dispatch: React.FC = () => {
         }
     };
 
+    const handleDeleteProofPhoto = async (item: RouteDetailItem) => {
+        if (!item.proof_photo_url && !item.delivery_photo_url) {
+            alert('Este pedido no tiene una foto de entrega guardada.');
+            return;
+        }
+
+        const confirmed = window.confirm('¿Eliminar la foto de prueba de entrega? Luego podrás subir una nueva imagen.');
+        if (!confirmed) return;
+
+        setDeletingProofItemId(item.id);
+        try {
+            const proofPath = getStoragePathFromPublicUrl(deliveryProofsBucket, item.proof_photo_url || item.delivery_photo_url);
+            if (proofPath) {
+                const { error: storageError } = await supabase.storage
+                    .from(deliveryProofsBucket)
+                    .remove([proofPath]);
+
+                if (storageError && !String(storageError.message || '').toLowerCase().includes('not found')) {
+                    throw storageError;
+                }
+            }
+
+            const { error: routeItemError } = await supabase
+                .from('route_items')
+                .update({ proof_photo_url: null })
+                .eq('id', item.id);
+
+            if (routeItemError) throw routeItemError;
+
+            const { error: orderError } = await supabase
+                .from('orders')
+                .update({ delivery_photo_url: null })
+                .eq('id', item.order_id);
+
+            if (orderError) throw orderError;
+
+            setProofDrafts((prev) => ({ ...prev, [item.id]: null }));
+            if (proofViewerUrl && proofViewerUrl === (item.proof_photo_url || item.delivery_photo_url)) {
+                setProofViewerUrl(null);
+            }
+            await fetchRoutes();
+            await refreshSelectedRoute();
+            alert('Foto de prueba eliminada. Ya puedes subir una nueva.');
+        } catch (error: any) {
+            console.error('Error deleting delivery proof photo:', error);
+            alert(`No se pudo eliminar la foto de entrega: ${error?.message || 'desconocido'}`);
+        } finally {
+            setDeletingProofItemId(null);
+        }
+    };
+
     if (!canManageDispatch) {
         return <div className="p-10 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para Admin, Facturación y Tesorería.</div>;
     }
@@ -1789,50 +1866,59 @@ const Dispatch: React.FC = () => {
                                                                 </button>
                                                             </div>
 
-                                                            <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-end">
-                                                                <div>
-                                                                    <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Imagen de entrega manual</label>
-                                                                    <input
-                                                                        type="file"
-                                                                        accept="image/*"
-                                                                        onChange={(event) => setProofDrafts((prev) => ({
-                                                                            ...prev,
-                                                                            [item.id]: event.target.files?.[0] || null
-                                                                        }))}
-                                                                        className="mt-2 block w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-                                                                    />
-                                                                    {proofDrafts[item.id] && (
-                                                                        <p className="mt-2 text-xs font-bold text-indigo-600">{proofDrafts[item.id]?.name}</p>
-                                                                    )}
-                                                                </div>
-                                                                <button
-                                                                    onClick={() => handleAdminProofUpload(item, false)}
-                                                                    disabled={uploadingProofItemId === item.id}
-                                                                    className="px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-black uppercase tracking-widest hover:bg-indigo-100 transition-all disabled:opacity-60"
-                                                                >
-                                                                    {uploadingProofItemId === item.id ? 'Subiendo...' : 'Adjuntar imagen'}
-                                                                </button>
-                                                                {normalizeText(item.status).toLowerCase() !== 'delivered' && (
-                                                                    <button
-                                                                        onClick={() => handleAdminMarkClosed(item)}
-                                                                        disabled={uploadingProofItemId === item.id}
-                                                                        className="px-4 py-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-xs font-black uppercase tracking-widest hover:bg-rose-100 transition-all disabled:opacity-60"
-                                                                    >
-                                                                        {uploadingProofItemId === item.id ? 'Guardando...' : 'Cliente cerrado'}
-                                                                    </button>
-                                                                )}
-                                                                {normalizeText(item.status).toLowerCase() !== 'delivered' && (
-                                                                    <button
-                                                                        onClick={() => handleAdminProofUpload(item, true)}
-                                                                        disabled={uploadingProofItemId === item.id}
-                                                                        className="px-4 py-3 rounded-xl bg-emerald-500 text-white text-xs font-black uppercase tracking-widest hover:bg-emerald-600 transition-all disabled:opacity-60"
-                                                                    >
-                                                                        {uploadingProofItemId === item.id ? 'Registrando...' : 'Marcar entregado'}
-                                                                    </button>
-                                                                )}
-                                                            </div>
                                                         </div>
                                                     )}
+                                                    <div className="mt-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-3">
+                                                        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-end">
+                                                            <div>
+                                                                <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Imagen de entrega manual</label>
+                                                                <input
+                                                                    type="file"
+                                                                    accept="image/*"
+                                                                    onChange={(event) => setProofDrafts((prev) => ({
+                                                                        ...prev,
+                                                                        [item.id]: event.target.files?.[0] || null
+                                                                    }))}
+                                                                    className="mt-2 block w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                                                                />
+                                                                {proofDrafts[item.id] && (
+                                                                    <p className="mt-2 text-xs font-bold text-indigo-600">{proofDrafts[item.id]?.name}</p>
+                                                                )}
+                                                            </div>
+                                                            <button
+                                                                onClick={() => handleAdminProofUpload(item, false)}
+                                                                disabled={uploadingProofItemId === item.id}
+                                                                className="px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-black uppercase tracking-widest hover:bg-indigo-100 transition-all disabled:opacity-60"
+                                                            >
+                                                                {uploadingProofItemId === item.id ? 'Subiendo...' : 'Adjuntar imagen'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleDeleteProofPhoto(item)}
+                                                                disabled={deletingProofItemId === item.id || (!item.proof_photo_url && !item.delivery_photo_url)}
+                                                                className="px-4 py-3 rounded-xl border border-rose-200 bg-white text-rose-700 text-xs font-black uppercase tracking-widest hover:bg-rose-50 transition-all disabled:opacity-50"
+                                                            >
+                                                                {deletingProofItemId === item.id ? 'Eliminando...' : 'Eliminar foto'}
+                                                            </button>
+                                                            {normalizeText(item.status).toLowerCase() !== 'delivered' && (
+                                                                <button
+                                                                    onClick={() => handleAdminMarkClosed(item)}
+                                                                    disabled={uploadingProofItemId === item.id}
+                                                                    className="px-4 py-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-xs font-black uppercase tracking-widest hover:bg-rose-100 transition-all disabled:opacity-60"
+                                                                >
+                                                                    {uploadingProofItemId === item.id ? 'Guardando...' : 'Cliente cerrado'}
+                                                                </button>
+                                                            )}
+                                                            {normalizeText(item.status).toLowerCase() !== 'delivered' && (
+                                                                <button
+                                                                    onClick={() => handleAdminProofUpload(item, true)}
+                                                                    disabled={uploadingProofItemId === item.id}
+                                                                    className="px-4 py-3 rounded-xl bg-emerald-500 text-white text-xs font-black uppercase tracking-widest hover:bg-emerald-600 transition-all disabled:opacity-60"
+                                                                >
+                                                                    {uploadingProofItemId === item.id ? 'Registrando...' : 'Marcar entregado'}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -1860,6 +1946,17 @@ const Dispatch: React.FC = () => {
                                                             title="Descargar foto"
                                                         >
                                                             <Download size={14} />
+                                                        </button>
+                                                        <button
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                void handleDeleteProofPhoto(item);
+                                                            }}
+                                                            disabled={deletingProofItemId === item.id}
+                                                            className="absolute bottom-1 right-1 w-7 h-7 bg-white/90 rounded-lg flex items-center justify-center text-rose-600 opacity-0 group-hover/proof:opacity-100 transition-opacity shadow-lg disabled:opacity-60"
+                                                            title="Eliminar foto"
+                                                        >
+                                                            <Trash2 size={14} />
                                                         </button>
                                                     </div>
                                                 ) : (
