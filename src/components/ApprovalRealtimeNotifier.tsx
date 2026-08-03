@@ -8,6 +8,7 @@ type ApprovalToast = {
     id: string;
     title: string;
     message: string;
+    targetPath: string;
 };
 
 export default function ApprovalRealtimeNotifier() {
@@ -16,7 +17,9 @@ export default function ApprovalRealtimeNotifier() {
     const [toasts, setToasts] = useState<ApprovalToast[]>([]);
     const seenIdsRef = useRef<Set<string>>(new Set());
 
-    const canReceive = realRole === 'admin' || realRole === 'jefe';
+    const canReceivePendingRequests = realRole === 'admin' || realRole === 'jefe';
+    const canReceiveDiscountResolution = realRole === 'seller';
+    const canReceive = canReceivePendingRequests || canReceiveDiscountResolution;
 
     useEffect(() => {
         if (!canReceive || !profile?.id) return;
@@ -66,7 +69,58 @@ export default function ApprovalRealtimeNotifier() {
                     const title = 'Nueva solicitud de aprobación';
                     const message = `${sellerName} solicita aprobación para ${clientName}.`;
 
-                    setToasts((prev) => [{ id: approval.id, title, message }, ...prev].slice(0, 3));
+                    if (!canReceivePendingRequests) return;
+
+                    setToasts((prev) => [{ id: `${approval.id}:pending`, title, message, targetPath: '/operations' }, ...prev].slice(0, 3));
+                }
+            )
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'approval_requests',
+                },
+                async (payload: any) => {
+                    const approval = payload?.new;
+                    const previousApproval = payload?.old;
+                    if (!approval?.id) return;
+                    if (approval.approval_type !== 'extra_discount') return;
+                    if (approval.requester_id !== profile.id) return;
+                    if (approval.status !== 'approved') return;
+                    if (previousApproval?.status === 'approved') return;
+
+                    const toastKey = `${approval.id}:approved`;
+                    if (seenIdsRef.current.has(toastKey)) return;
+
+                    seenIdsRef.current.add(toastKey);
+                    if (seenIdsRef.current.size > 100) {
+                        const firstSeen = seenIdsRef.current.values().next().value;
+                        if (firstSeen) seenIdsRef.current.delete(firstSeen);
+                    }
+
+                    let clientName = 'Cliente';
+                    let quotationFolio: number | string = '-';
+
+                    if (approval?.entity_id) {
+                        const { data: quotation } = await supabase
+                            .from('quotations')
+                            .select('folio, clients(name)')
+                            .eq('id', approval.entity_id)
+                            .maybeSingle();
+                        const joinedClient = Array.isArray(quotation?.clients) ? quotation.clients[0] : quotation?.clients;
+                        clientName = joinedClient?.name || clientName;
+                        quotationFolio = quotation?.folio || '-';
+                    }
+
+                    if (!canReceiveDiscountResolution) return;
+
+                    setToasts((prev) => [{
+                        id: toastKey,
+                        title: 'Descuento aprobado',
+                        message: `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue aprobada. Ya puedes generar el pedido.`,
+                        targetPath: '/quotations'
+                    }, ...prev].slice(0, 3));
                 }
             )
             .subscribe();
@@ -91,7 +145,7 @@ export default function ApprovalRealtimeNotifier() {
             {toasts.map((toast) => (
                 <button
                     key={toast.id}
-                    onClick={() => navigate('/operations')}
+                    onClick={() => navigate(toast.targetPath)}
                     className="w-full text-left rounded-2xl border border-indigo-100 bg-white shadow-xl p-4 hover:bg-indigo-50 transition-colors"
                 >
                     <div className="flex items-start gap-3">

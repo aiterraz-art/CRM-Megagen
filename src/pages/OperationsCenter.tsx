@@ -423,6 +423,22 @@ const OperationsCenter = () => {
             await supabase.from('quotations').update({ comments: current }).eq('id', request.entity_id);
         }
 
+        if (request?.approval_type === 'extra_discount') {
+            try {
+                const { error: pushError } = await supabase.functions.invoke('send-approval-push', {
+                    body: {
+                        approval_id: id,
+                        icon: import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png'
+                    }
+                });
+                if (pushError) {
+                    console.warn('No se pudo disparar push de resolución de aprobación:', pushError.message);
+                }
+            } catch (pushError: any) {
+                console.warn('Error inesperado enviando push de resolución de aprobación:', pushError?.message || pushError);
+            }
+        }
+
         fetchData();
     };
 

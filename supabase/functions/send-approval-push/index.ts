@@ -44,15 +44,15 @@ serve(async (req) => {
     if (approvalError || !approval) {
       throw new Error("Approval request not found");
     }
-    if (approval.status !== "pending") {
+    if (!["pending", "approved", "rejected"].includes(String(approval.status || "").toLowerCase())) {
       return new Response(JSON.stringify({ sent: 0, skipped: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const [{ data: requester }, { data: quotation }, { data: recipients, error: recipientsError }] = await Promise.all([
+    const [{ data: requester }, { data: quotation }, { data: managerRecipients, error: recipientsError }] = await Promise.all([
       supabase.from("profiles").select("full_name, email").eq("id", approval.requester_id).maybeSingle(),
-      supabase.from("quotations").select("clients(name)").eq("id", approval.entity_id).maybeSingle(),
+      supabase.from("quotations").select("folio, clients(name)").eq("id", approval.entity_id).maybeSingle(),
       supabase
         .from("profiles")
         .select("id")
@@ -61,13 +61,15 @@ serve(async (req) => {
     ]);
 
     if (recipientsError) throw recipientsError;
-    if (!recipients || recipients.length === 0) {
+    const recipientIds = approval.status === "pending"
+      ? (managerRecipients || []).map((r) => r.id)
+      : (approval.requester_id ? [approval.requester_id] : []);
+
+    if (recipientIds.length === 0) {
       return new Response(JSON.stringify({ sent: 0, reason: "no_recipients" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const recipientIds = recipients.map((r) => r.id);
     const { data: subscriptions } = await supabase
       .from("push_subscriptions")
       .select("id, endpoint, p256dh, auth, user_id")
@@ -84,12 +86,27 @@ serve(async (req) => {
       : (quotation as any)?.clients;
     const clientName = clientJoined?.name || "cliente";
     const sellerName = requester?.full_name || requester?.email?.split("@")[0] || "vendedor";
+    const quotationFolio = (quotation as any)?.folio || "-";
+
+    const title = approval.status === "approved"
+      ? "Descuento aprobado"
+      : approval.status === "rejected"
+        ? "Descuento rechazado"
+        : "Nueva aprobación pendiente";
+
+    const body = approval.status === "approved"
+      ? `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue aprobada.`
+      : approval.status === "rejected"
+        ? `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue rechazada.`
+        : `${sellerName} solicita aprobación para ${clientName}.`;
+
+    const url = approval.status === "pending" ? "/operations" : "/quotations";
 
     const payload = JSON.stringify({
-      title: "Nueva aprobación pendiente",
-      body: `${sellerName} solicita aprobación para ${clientName}.`,
-      url: "/operations",
-      tag: `approval-${approval.id}`,
+      title,
+      body,
+      url,
+      tag: `approval-${approval.id}-${approval.status}`,
       icon: icon || "/logo_megagen.png",
       badge: icon || "/logo_megagen.png",
     });
