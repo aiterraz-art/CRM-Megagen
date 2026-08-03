@@ -1,75 +1,111 @@
-import { useState, useEffect } from 'react';
-import { X, Calendar, Clock, FileText, CheckCircle2, Search, User } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { X, Calendar, Clock, FileText, CheckCircle2, Search, Building2, UserRound, MapPin, Stethoscope } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { googleService } from '../../services/googleService';
 import { Database } from '../../types/supabase';
 
 type Client = Database['public']['Tables']['clients']['Row'];
+type VisitMode = 'existing' | 'cold';
 
 interface ScheduleVisitModalProps {
-    client?: Client | null; // Optional now
-    assigneeId?: string;    // ID of the seller (for supervisors)
+    client?: Client | null;
+    assigneeId?: string;
+    initialDate?: string;
+    initialStartTime?: string;
+    initialEndTime?: string;
     isOpen: boolean;
     onClose: () => void;
     onSaved: () => void;
 }
 
-const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose, onSaved }: ScheduleVisitModalProps) => {
-    const [loading, setLoading] = useState(false);
-    const [selectedClient, setSelectedClient] = useState<Client | null>(initialClient || null);
+const DEFAULT_START_TIME = '10:00';
+const DEFAULT_END_TIME = '11:00';
 
-    // Client Search State
+const addHourToTime = (time: string) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    const next = new Date();
+    next.setHours(hours || 0, minutes || 0, 0, 0);
+    next.setMinutes(next.getMinutes() + 60);
+    return `${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`;
+};
+
+const buildIsoFromDateTime = (date: string, time: string) => new Date(`${date}T${time}:00`);
+
+const ScheduleVisitModal = ({
+    client: initialClient,
+    assigneeId,
+    initialDate,
+    initialStartTime,
+    initialEndTime,
+    isOpen,
+    onClose,
+    onSaved
+}: ScheduleVisitModalProps) => {
+    const [loading, setLoading] = useState(false);
+    const [visitMode, setVisitMode] = useState<VisitMode>('existing');
+    const [selectedClient, setSelectedClient] = useState<Client | null>(initialClient || null);
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState<Client[]>([]);
     const [searching, setSearching] = useState(false);
-
     const [formData, setFormData] = useState({
         date: new Date().toISOString().split('T')[0],
-        time: '10:00',
+        startTime: DEFAULT_START_TIME,
+        endTime: DEFAULT_END_TIME,
         title: '',
-        notes: ''
+        notes: '',
+        clinicName: '',
+        address: '',
+        doctorName: '',
+        doctorSpecialty: ''
     });
 
-    // Reset state when opening/closing or changing client
-    useEffect(() => {
-        if (isOpen) {
-            setSelectedClient(initialClient || null);
-            setFormData({
-                date: new Date().toISOString().split('T')[0],
-                time: '10:00',
-                title: initialClient ? `Visita: ${initialClient.name}` : '',
-                notes: ''
-            });
-            setSearchTerm('');
-            setSearchResults([]);
-        }
-    }, [isOpen, initialClient]);
+    const effectiveDate = initialDate || new Date().toISOString().split('T')[0];
+    const effectiveStartTime = initialStartTime || DEFAULT_START_TIME;
+    const effectiveEndTime = initialEndTime || addHourToTime(effectiveStartTime) || DEFAULT_END_TIME;
 
-    // Construct title automatically if not manually edited? 
-    // For simplicity, we just set a default when client is selected.
     useEffect(() => {
-        if (selectedClient && !formData.title) {
-            setFormData(prev => ({ ...prev, title: `Visita: ${selectedClient.name}` }));
-        }
-    }, [selectedClient]);
+        if (!isOpen) return;
 
-    // Search Clients
+        setVisitMode(initialClient ? 'existing' : 'existing');
+        setSelectedClient(initialClient || null);
+        setSearchTerm('');
+        setSearchResults([]);
+        setFormData({
+            date: effectiveDate,
+            startTime: effectiveStartTime,
+            endTime: effectiveEndTime,
+            title: initialClient ? `Visita: ${initialClient.name}` : '',
+            notes: '',
+            clinicName: '',
+            address: '',
+            doctorName: '',
+            doctorSpecialty: ''
+        });
+    }, [isOpen, initialClient, effectiveDate, effectiveStartTime, effectiveEndTime]);
+
+    useEffect(() => {
+        if (selectedClient && visitMode === 'existing' && !formData.title) {
+            setFormData((prev) => ({ ...prev, title: `Visita: ${selectedClient.name}` }));
+        }
+    }, [selectedClient, visitMode, formData.title]);
+
     useEffect(() => {
         const searchClients = async () => {
-            if (searchTerm.length < 2) {
+            if (visitMode !== 'existing' || searchTerm.trim().length < 2) {
                 setSearchResults([]);
                 return;
             }
+
             setSearching(true);
             try {
                 const { data } = await supabase
                     .from('clients')
                     .select('*')
-                    .ilike('name', `%${searchTerm}%`)
-                    .limit(5);
+                    .ilike('name', `%${searchTerm.trim()}%`)
+                    .limit(8);
                 setSearchResults(data || []);
             } catch (error) {
-                console.error("Search error:", error);
+                console.error('Search error:', error);
             } finally {
                 setSearching(false);
             }
@@ -77,23 +113,38 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
 
         const timeoutId = setTimeout(searchClients, 300);
         return () => clearTimeout(timeoutId);
-    }, [searchTerm]);
+    }, [searchTerm, visitMode]);
 
+    const canSubmit = useMemo(() => {
+        if (visitMode === 'existing') {
+            return Boolean(selectedClient && formData.date && formData.startTime && formData.endTime);
+        }
+        return Boolean(
+            formData.date
+            && formData.startTime
+            && formData.endTime
+            && formData.clinicName.trim()
+            && formData.doctorName.trim()
+        );
+    }, [visitMode, selectedClient, formData]);
 
     if (!isOpen) return null;
+
     const syncToGoogleCalendar = async (
         targetRepId: string,
         isoStart: string,
         isoEnd: string,
         title: string,
-        notes: string,
-        selected: Client,
-        visitId: string,
-        schedulerEmail: string | null | undefined
+        description: string,
+        location: string,
+        visitId: string
     ) => {
         try {
             const attendees: Array<{ email: string }> = [];
-            if (targetRepId !== (await supabase.auth.getSession()).data.session?.user?.id) {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const sessionUserId = sessionData.session?.user?.id;
+
+            if (targetRepId !== sessionUserId) {
                 const { data: assigneeProfile } = await supabase
                     .from('profiles')
                     .select('email')
@@ -102,10 +153,10 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                 if (assigneeProfile?.email) attendees.push({ email: assigneeProfile.email });
             }
 
-            const gCalEvent: any = {
+            const gCalEvent = {
                 summary: title,
-                description: `Cliente: ${selected.name}\nDirección: ${selected.address}\nNotas: ${notes}\n\nAgendado por: ${schedulerEmail || 'usuario CRM'}`,
-                location: selected.address,
+                description,
+                location,
                 start: { dateTime: isoStart },
                 end: { dateTime: isoEnd },
                 attendees
@@ -118,8 +169,9 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                 },
                 body: JSON.stringify(gCalEvent)
             });
+
             if (gData?.id) {
-                await supabase.from('visits').update({ google_event_id: gData.id }).eq('id', visitId);
+                await supabase.from('visits').update({ google_event_id: gData.id } as any).eq('id', visitId);
             }
         } catch (gError) {
             console.error('Google Calendar Error:', gError);
@@ -127,40 +179,107 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
     };
 
     const handleSave = async () => {
-        if (!selectedClient) {
-            alert("Debes seleccionar un cliente para agendar la visita.");
+        const startDateTime = buildIsoFromDateTime(formData.date, formData.startTime);
+        const endDateTime = buildIsoFromDateTime(formData.date, formData.endTime);
+
+        if (Number.isNaN(startDateTime.getTime()) || Number.isNaN(endDateTime.getTime())) {
+            alert('Debes indicar una fecha y hora válidas.');
+            return;
+        }
+
+        if (endDateTime <= startDateTime) {
+            alert('La hora de término debe ser mayor a la hora de inicio.');
+            return;
+        }
+
+        if (visitMode === 'existing' && !selectedClient) {
+            alert('Debes seleccionar un cliente para agendar la visita.');
+            return;
+        }
+
+        if (visitMode === 'cold' && (!formData.clinicName.trim() || !formData.doctorName.trim())) {
+            alert('Para una visita en frío debes completar el lugar y el nombre del doctor.');
             return;
         }
 
         setLoading(true);
-        try {
-            // 1. Calculate Timestamps
-            const startDateTime = new Date(`${formData.date}T${formData.time}:00`);
-            const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // 1 hour duration default
-            const isoStart = startDateTime.toISOString();
-            const isoEnd = endDateTime.toISOString();
 
+        try {
             const { data: { session } } = await supabase.auth.getSession();
             if (!session?.user) {
-                setLoading(false);
-                alert("Sesión de usuario no encontrada.");
+                alert('Sesión de usuario no encontrada.');
                 return;
             }
 
-            // Determine effective sales_rep_id
             const targetRepId = assigneeId || session.user.id;
+            const isoStart = startDateTime.toISOString();
+            const isoEnd = endDateTime.toISOString();
 
-            // 3. Save to Supabase (Visits Table with 'scheduled' status)
-            const visitPayload = {
-                client_id: selectedClient.id,
-                sales_rep_id: targetRepId,
-                scheduled_at: isoStart,
-                check_in_time: isoStart,
-                check_out_time: null,
-                status: 'scheduled',
-                title: formData.title,
-                notes: formData.notes
-            };
+            const title = (formData.title || '').trim() || (
+                visitMode === 'existing'
+                    ? `Visita: ${selectedClient?.name || 'Cliente'}`
+                    : `Visita en frío: ${formData.clinicName.trim()}`
+            );
+
+            let visitPayload: Record<string, any>;
+            let googleDescription = '';
+            let googleLocation = '';
+
+            if (visitMode === 'existing' && selectedClient) {
+                googleDescription = [
+                    `Cliente: ${selectedClient.name}`,
+                    `Dirección: ${selectedClient.address || 'Sin dirección'}`,
+                    formData.notes ? `Notas: ${formData.notes}` : null,
+                    `Agendado por: ${session.user.email || 'usuario CRM'}`
+                ].filter(Boolean).join('\n');
+
+                googleLocation = selectedClient.address || '';
+                visitPayload = {
+                    client_id: selectedClient.id,
+                    sales_rep_id: targetRepId,
+                    scheduled_at: isoStart,
+                    check_in_time: isoStart,
+                    check_out_time: null,
+                    status: 'scheduled',
+                    title,
+                    notes: formData.notes.trim() || null,
+                    purpose: 'Visita agendada'
+                };
+            } else {
+                const clinicName = formData.clinicName.trim();
+                const address = formData.address.trim();
+                const doctorName = formData.doctorName.trim();
+                const doctorSpecialty = formData.doctorSpecialty.trim();
+
+                googleDescription = [
+                    `Visita en frío agendada`,
+                    `Clínica / Lugar: ${clinicName}`,
+                    `Doctor: ${doctorName}`,
+                    doctorSpecialty ? `Especialidad: ${doctorSpecialty}` : null,
+                    address ? `Dirección: ${address}` : null,
+                    formData.notes ? `Notas: ${formData.notes}` : null,
+                    `Agendado por: ${session.user.email || 'usuario CRM'}`
+                ].filter(Boolean).join('\n');
+
+                googleLocation = address;
+                visitPayload = {
+                    client_id: null,
+                    sales_rep_id: targetRepId,
+                    scheduled_at: isoStart,
+                    check_in_time: isoStart,
+                    check_out_time: null,
+                    status: 'scheduled',
+                    type: 'cold_visit',
+                    title,
+                    purpose: 'Visita en frío agendada',
+                    notes: formData.notes.trim() || null,
+                    doctor_name: doctorName,
+                    cold_visit_clinic_name: clinicName,
+                    cold_visit_address: address || null,
+                    cold_visit_doctor_name: doctorName,
+                    cold_visit_doctor_specialty: doctorSpecialty || null
+                };
+            }
 
             const { data: insertedVisit, error: dbError } = await (supabase
                 .from('visits') as any)
@@ -172,24 +291,21 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
 
             onSaved();
             onClose();
-            alert("Visita agendada correctamente.");
+            alert('Visita agendada correctamente.');
 
-            // Sync Google in background so UI never stays blocked.
             if (insertedVisit?.id) {
                 void syncToGoogleCalendar(
                     targetRepId,
                     isoStart,
                     isoEnd,
-                    formData.title,
-                    formData.notes,
-                    selectedClient,
-                    insertedVisit.id,
-                    session.user.email
+                    title,
+                    googleDescription,
+                    googleLocation,
+                    insertedVisit.id
                 );
             }
-
         } catch (error: any) {
-            console.error("Error scheduling visit:", error);
+            console.error('Error scheduling visit:', error);
             alert(`Error al agendar: ${error.message}`);
         } finally {
             setLoading(false);
@@ -198,55 +314,151 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
 
     return (
         <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-8 space-y-6 animate-in zoom-in duration-300">
+            <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl p-8 space-y-6 animate-in zoom-in duration-300 max-h-[92vh] overflow-y-auto">
                 <div className="flex justify-between items-center">
-                    <h3 className="text-2xl font-black text-gray-900">Agendar Visita {assigneeId ? '(Asignación)' : ''}</h3>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X size={24} /></button>
+                    <div>
+                        <h3 className="text-2xl font-black text-gray-900">Agendar Visita {assigneeId ? '(Asignación)' : ''}</h3>
+                        <p className="text-sm text-gray-400 font-medium mt-1">Puedes agendar con un cliente existente o preparar una visita en frío desde la agenda.</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                        <X size={24} />
+                    </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                    <button
+                        type="button"
+                        onClick={() => setVisitMode('existing')}
+                        className={`rounded-2xl border px-4 py-4 text-left transition-all ${visitMode === 'existing' ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-lg shadow-indigo-100' : 'border-gray-100 bg-white text-gray-500 hover:border-indigo-200'}`}
+                    >
+                        <p className="text-xs font-black uppercase tracking-widest">Cliente existente</p>
+                        <p className="text-sm font-bold mt-1">Agendar visita comercial</p>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setVisitMode('cold')}
+                        className={`rounded-2xl border px-4 py-4 text-left transition-all ${visitMode === 'cold' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-lg shadow-blue-100' : 'border-gray-100 bg-white text-gray-500 hover:border-blue-200'}`}
+                    >
+                        <p className="text-xs font-black uppercase tracking-widest">Visita en frío</p>
+                        <p className="text-sm font-bold mt-1">Agendar con datos del doctor</p>
+                    </button>
                 </div>
 
                 <div className="space-y-5">
-
-                    {/* Client Selection Section */}
-                    <div className="space-y-2">
-                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Cliente</label>
-                        {selectedClient ? (
-                            <div className="flex justify-between items-center p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
-                                <div>
-                                    <p className="font-bold text-gray-900">{selectedClient.name}</p>
-                                    <p className="text-xs text-gray-500 truncate max-w-[200px]">{selectedClient.address}</p>
-                                </div>
-                                <button onClick={() => { setSelectedClient(null); setFormData(p => ({ ...p, title: '' })); }} className="p-2 hover:bg-indigo-100 rounded-lg text-indigo-600">
-                                    <X size={16} />
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="relative">
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar cliente..."
-                                    className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
-                                    value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                    autoFocus
-                                />
-                                {searchResults.length > 0 && (
-                                    <div className="absolute top-full mt-2 left-0 right-0 bg-white shadow-xl rounded-2xl overflow-hidden z-10 border border-gray-100 max-h-48 overflow-y-auto">
-                                        {searchResults.map(c => (
-                                            <div
-                                                key={c.id}
-                                                onClick={() => { setSelectedClient(c); setSearchResults([]); setSearchTerm(''); }}
-                                                className="p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-none"
-                                            >
-                                                <p className="font-bold text-sm text-gray-800">{c.name}</p>
-                                                <p className="text-xs text-gray-400">{c.address}</p>
-                                            </div>
-                                        ))}
+                    {visitMode === 'existing' ? (
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Cliente</label>
+                            {selectedClient ? (
+                                <div className="flex justify-between items-center p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
+                                    <div>
+                                        <p className="font-bold text-gray-900">{selectedClient.name}</p>
+                                        <p className="text-xs text-gray-500 truncate max-w-[320px]">{selectedClient.address || 'Sin dirección'}</p>
                                     </div>
-                                )}
+                                    <button
+                                        onClick={() => {
+                                            setSelectedClient(null);
+                                            setFormData((prev) => ({ ...prev, title: '' }));
+                                        }}
+                                        className="p-2 hover:bg-indigo-100 rounded-lg text-indigo-600"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="relative">
+                                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                    <input
+                                        type="text"
+                                        placeholder="Buscar cliente..."
+                                        className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        autoFocus
+                                    />
+                                    {(searchResults.length > 0 || searching) && (
+                                        <div className="absolute top-full mt-2 left-0 right-0 bg-white shadow-xl rounded-2xl overflow-hidden z-10 border border-gray-100 max-h-56 overflow-y-auto">
+                                            {searching && (
+                                                <div className="p-3 text-xs font-bold text-gray-400">Buscando clientes...</div>
+                                            )}
+                                            {searchResults.map((client) => (
+                                                <button
+                                                    key={client.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSelectedClient(client);
+                                                        setSearchResults([]);
+                                                        setSearchTerm('');
+                                                    }}
+                                                    className="w-full text-left p-3 hover:bg-gray-50 border-b border-gray-50 last:border-none"
+                                                >
+                                                    <p className="font-bold text-sm text-gray-800">{client.name}</p>
+                                                    <p className="text-xs text-gray-400">{client.address || 'Sin dirección'}</p>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2 md:col-span-2">
+                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Clínica / Lugar</label>
+                                <div className="relative">
+                                    <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                    <input
+                                        type="text"
+                                        className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                        value={formData.clinicName}
+                                        onChange={(e) => setFormData((prev) => ({ ...prev, clinicName: e.target.value }))}
+                                        placeholder="Ej: Clínica Dental Norte"
+                                    />
+                                </div>
                             </div>
-                        )}
-                    </div>
+
+                            <div className="space-y-2 md:col-span-2">
+                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Dirección</label>
+                                <div className="relative">
+                                    <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                    <input
+                                        type="text"
+                                        className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                        value={formData.address}
+                                        onChange={(e) => setFormData((prev) => ({ ...prev, address: e.target.value }))}
+                                        placeholder="Ej: Av. Providencia 1234"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Doctor</label>
+                                <div className="relative">
+                                    <UserRound className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                    <input
+                                        type="text"
+                                        className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                        value={formData.doctorName}
+                                        onChange={(e) => setFormData((prev) => ({ ...prev, doctorName: e.target.value }))}
+                                        placeholder="Nombre del doctor"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Especialidad</label>
+                                <div className="relative">
+                                    <Stethoscope className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                    <input
+                                        type="text"
+                                        className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                        value={formData.doctorSpecialty}
+                                        onChange={(e) => setFormData((prev) => ({ ...prev, doctorSpecialty: e.target.value }))}
+                                        placeholder="Ej: Implantología"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="space-y-2">
                         <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Título</label>
@@ -256,13 +468,13 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                                 type="text"
                                 className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
                                 value={formData.title}
-                                onChange={e => setFormData({ ...formData, title: e.target.value })}
-                                placeholder="Ej: Visita Mensual"
+                                onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
+                                placeholder={visitMode === 'existing' ? 'Ej: Visita Comercial' : 'Ej: Presentación de productos'}
                             />
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-2">
                             <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Fecha</label>
                             <div className="relative">
@@ -271,19 +483,31 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                                     type="date"
                                     className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
                                     value={formData.date}
-                                    onChange={e => setFormData({ ...formData, date: e.target.value })}
+                                    onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
                                 />
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Hora</label>
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Desde</label>
                             <div className="relative">
                                 <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                                 <input
                                     type="time"
                                     className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
-                                    value={formData.time}
-                                    onChange={e => setFormData({ ...formData, time: e.target.value })}
+                                    value={formData.startTime}
+                                    onChange={(e) => setFormData((prev) => ({ ...prev, startTime: e.target.value }))}
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Hasta</label>
+                            <div className="relative">
+                                <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                <input
+                                    type="time"
+                                    className="w-full pl-12 pr-4 py-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-bold text-gray-700 outline-none"
+                                    value={formData.endTime}
+                                    onChange={(e) => setFormData((prev) => ({ ...prev, endTime: e.target.value }))}
                                 />
                             </div>
                         </div>
@@ -296,7 +520,7 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                             placeholder="Detalles sobre la visita..."
                             className="w-full p-4 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl transition-all font-medium text-gray-700 outline-none resize-none"
                             value={formData.notes}
-                            onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
                         />
                     </div>
                 </div>
@@ -310,7 +534,7 @@ const ScheduleVisitModal = ({ client: initialClient, assigneeId, isOpen, onClose
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={loading || !selectedClient}
+                        disabled={loading || !canSubmit}
                         className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center"
                     >
                         {loading ? 'Agendando...' : <><CheckCircle2 className="mr-2" size={20} /> Agendar</>}

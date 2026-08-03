@@ -4,8 +4,20 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import ScheduleActivityModal from '../components/modals/ScheduleActivityModal';
 import ScheduleEventDetailsModal from '../components/modals/ScheduleEventDetailsModal';
+import ScheduleVisitModal from '../components/modals/ScheduleVisitModal';
 import { googleService } from '../services/googleService';
 import { CalendarEvent, GoogleCalendarAttendee } from '../types/calendar';
+
+const DAY_START_HOUR = 8;
+const DAY_END_HOUR = 20;
+const SLOT_MINUTES = 30;
+
+type ViewMode = 'month' | 'day';
+type TimeRangeSeed = {
+    date: string;
+    startTime: string;
+    endTime: string;
+};
 
 const mapGoogleAttendees = (attendees: any[] | undefined): GoogleCalendarAttendee[] =>
     Array.isArray(attendees)
@@ -43,9 +55,42 @@ const mapGoogleEvent = (item: any, calendarId: string): CalendarEvent => {
     };
 };
 
+const toDateKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const addDays = (date: Date, days: number) => {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+};
+
+const timeToMinutes = (time: string) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return (hours * 60) + minutes;
+};
+
+const minutesToTime = (minutes: number) => {
+    const safeMinutes = Math.max(0, minutes);
+    const hours = Math.floor(safeMinutes / 60);
+    const remainder = safeMinutes % 60;
+    return `${String(hours).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+};
+
+const formatMinutesLabel = (minutes: number) =>
+    new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString('es-CL', {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
 const Schedule = () => {
     const { profile, isSupervisor, hasPermission } = useUser();
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [focusedDate, setFocusedDate] = useState(new Date());
+    const [viewMode, setViewMode] = useState<ViewMode>('month');
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [tasks, setTasks] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -53,8 +98,12 @@ const Schedule = () => {
     const [sellers, setSellers] = useState<any[]>([]);
     const [selectedSellerId, setSelectedSellerId] = useState<string>('');
     const [showAddModal, setShowAddModal] = useState(false);
+    const [showVisitModal, setShowVisitModal] = useState(false);
+    const [visitModalSeed, setVisitModalSeed] = useState<TimeRangeSeed | null>(null);
     const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
     const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
+    const [slotAnchorMinutes, setSlotAnchorMinutes] = useState<number | null>(null);
+    const [selectedRange, setSelectedRange] = useState<{ start: number; end: number } | null>(null);
     const isViewingOwnCalendar = selectedSellerId === profile?.id;
 
     const canViewSharedGoogleCalendars = hasPermission('VIEW_TEAM_CALENDARS');
@@ -76,6 +125,11 @@ const Schedule = () => {
         };
         void fetchSellers();
     }, [canSelectOtherCalendars]);
+
+    useEffect(() => {
+        setSlotAnchorMinutes(null);
+        setSelectedRange(null);
+    }, [focusedDate, selectedSellerId, viewMode]);
 
     const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
     const getFirstDayOfMonth = (year: number, month: number) => {
@@ -125,7 +179,7 @@ const Schedule = () => {
         }
 
         if (lastError) {
-            console.error("Tasks compatibility query failed:", lastError);
+            console.error('Tasks compatibility query failed:', lastError);
         }
         return [];
     };
@@ -179,7 +233,14 @@ const Schedule = () => {
         try {
             const { data: visits } = await supabase
                 .from('visits')
-                .select('*, clients(name, address)')
+                .select(`
+                    *,
+                    cold_visit_clinic_name,
+                    cold_visit_address,
+                    cold_visit_doctor_name,
+                    cold_visit_doctor_specialty,
+                    clients(name, address)
+                `)
                 .eq('sales_rep_id', selectedSellerId)
                 .eq('status', 'scheduled')
                 .gte('check_in_time', startOfMonth)
@@ -189,13 +250,21 @@ const Schedule = () => {
                 const linkedGoogleEvent = visit.google_event_id ? googleEventsById.get(visit.google_event_id) : undefined;
                 if (visit.google_event_id) knownLinkedGoogleIds.add(visit.google_event_id);
 
+                const clientName = visit.clients?.name || visit.cold_visit_clinic_name || 'Cliente';
+                const doctorLine = visit.cold_visit_doctor_name ? `Doctor: ${visit.cold_visit_doctor_name}` : '';
+                const specialtyLine = visit.cold_visit_doctor_specialty ? `Especialidad: ${visit.cold_visit_doctor_specialty}` : '';
+
                 mergedEvents.push({
                     id: `visit:${visit.id}`,
-                    summary: visit.title || visit.purpose || linkedGoogleEvent?.summary || `Visita: ${visit.clients?.name || 'Cliente'}`,
-                    description: visit.notes || linkedGoogleEvent?.description || '',
+                    summary: visit.title || visit.purpose || linkedGoogleEvent?.summary || `Visita: ${clientName}`,
+                    description: [
+                        visit.notes || linkedGoogleEvent?.description || '',
+                        doctorLine,
+                        specialtyLine
+                    ].filter(Boolean).join('\n'),
                     start: linkedGoogleEvent?.start || { dateTime: visit.check_in_time },
-                    end: linkedGoogleEvent?.end,
-                    location: visit.clients?.address || linkedGoogleEvent?.location || '',
+                    end: linkedGoogleEvent?.end || (visit.check_out_time ? { dateTime: visit.check_out_time } : undefined),
+                    location: visit.clients?.address || visit.cold_visit_address || linkedGoogleEvent?.location || '',
                     source: 'crm',
                     clientId: visit.client_id,
                     linkedEntityType: 'visit',
@@ -214,7 +283,7 @@ const Schedule = () => {
                 });
             });
         } catch (err) {
-            console.error("CRM Visits error:", err);
+            console.error('CRM Visits error:', err);
         }
 
         try {
@@ -252,7 +321,7 @@ const Schedule = () => {
                 });
             });
         } catch (err) {
-            console.error("Internal Tasks error:", err);
+            console.error('Internal Tasks error:', err);
         }
 
         const uniqueGoogleEvents = googleEvents.filter((event) => !knownLinkedGoogleIds.has(event.googleEventId || ''));
@@ -295,7 +364,7 @@ const Schedule = () => {
             if (error) throw error;
             await fetchAllEvents();
         } catch (error: any) {
-            console.error("Error deleting visit:", error);
+            console.error('Error deleting visit:', error);
             alert(`Error al eliminar la visita: ${error.message}. Verifica permisos.`);
         }
     };
@@ -305,35 +374,47 @@ const Schedule = () => {
         void fetchTasks();
     }, [currentDate, selectedSellerId]);
 
-    const handlePrevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
-    const handleNextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
-    const handleToday = () => setCurrentDate(new Date());
-
     const daysInMonth = getDaysInMonth(currentDate.getFullYear(), currentDate.getMonth());
     const firstDay = getFirstDayOfMonth(currentDate.getFullYear(), currentDate.getMonth());
     const emptySlots = Array(firstDay).fill(null);
-    const daySlots = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+    const daySlots = Array.from({ length: daysInMonth }, (_, index) => index + 1);
+    const trailingSlots = Array((7 - ((emptySlots.length + daySlots.length) % 7 || 7)) % 7).fill(null);
 
     const isToday = (day: number) => {
         const today = new Date();
         return day === today.getDate() && currentDate.getMonth() === today.getMonth() && currentDate.getFullYear() === today.getFullYear();
     };
 
-    const getEventsForDay = (day: number) =>
-        events.filter(event => {
+    const getEventsForDate = (date: Date) =>
+        events.filter((event) => {
             const eventDate = new Date(event.start.dateTime || event.start.date || '');
-            return eventDate.getDate() === day && eventDate.getMonth() === currentDate.getMonth() && eventDate.getFullYear() === currentDate.getFullYear();
+            return toDateKey(eventDate) === toDateKey(date);
         });
+
+    const getEventsForDay = (day: number) => getEventsForDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day));
 
     const formatEventTimeRange = (event: CalendarEvent) => {
         if (!event.start.dateTime) return 'Todo el día';
         const start = new Date(event.start.dateTime);
-        const startLabel = start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const startLabel = start.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
         if (!event.end?.dateTime) return startLabel;
         const end = new Date(event.end.dateTime);
-        const endLabel = end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const endLabel = end.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
         return `${startLabel} - ${endLabel}`;
     };
+
+    const timeSlots = useMemo(
+        () => Array.from(
+            { length: ((DAY_END_HOUR - DAY_START_HOUR) * 60) / SLOT_MINUTES },
+            (_, index) => (DAY_START_HOUR * 60) + (index * SLOT_MINUTES)
+        ),
+        []
+    );
+
+    const focusedDayEvents = useMemo(
+        () => [...getEventsForDate(focusedDate)].sort((a, b) => new Date(a.start.dateTime || a.start.date || '').getTime() - new Date(b.start.dateTime || b.start.date || '').getTime()),
+        [events, focusedDate]
+    );
 
     const sortedUpcomingEvents = useMemo(
         () => [...events]
@@ -350,10 +431,76 @@ const Schedule = () => {
         && (isViewingOwnCalendar || isSupervisor)
     );
 
+    const rangeLabel = selectedRange
+        ? `${formatMinutesLabel(selectedRange.start)} - ${formatMinutesLabel(selectedRange.end)}`
+        : null;
+
+    const openVisitModalFromContext = () => {
+        const defaultDate = toDateKey(viewMode === 'day' ? focusedDate : currentDate);
+        const startTime = selectedRange ? minutesToTime(selectedRange.start) : '10:00';
+        const endTime = selectedRange ? minutesToTime(selectedRange.end) : '11:00';
+
+        setVisitModalSeed({
+            date: defaultDate,
+            startTime,
+            endTime
+        });
+        setShowVisitModal(true);
+    };
+
+    const handleSlotClick = (minutes: number) => {
+        if (slotAnchorMinutes === null) {
+            setSlotAnchorMinutes(minutes);
+            setSelectedRange({ start: minutes, end: minutes + SLOT_MINUTES });
+            return;
+        }
+
+        const start = Math.min(slotAnchorMinutes, minutes);
+        const end = Math.max(slotAnchorMinutes, minutes) + SLOT_MINUTES;
+        setSelectedRange({ start, end });
+        setSlotAnchorMinutes(null);
+    };
+
+    const handlePrevPeriod = () => {
+        if (viewMode === 'month') {
+            const prevMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+            setCurrentDate(prevMonth);
+            setFocusedDate(new Date(prevMonth.getFullYear(), prevMonth.getMonth(), 1));
+            return;
+        }
+
+        const previousDay = addDays(focusedDate, -1);
+        setFocusedDate(previousDay);
+        setCurrentDate(new Date(previousDay.getFullYear(), previousDay.getMonth(), 1));
+    };
+
+    const handleNextPeriod = () => {
+        if (viewMode === 'month') {
+            const nextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1);
+            setCurrentDate(nextMonth);
+            setFocusedDate(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 1));
+            return;
+        }
+
+        const nextDay = addDays(focusedDate, 1);
+        setFocusedDate(nextDay);
+        setCurrentDate(new Date(nextDay.getFullYear(), nextDay.getMonth(), 1));
+    };
+
+    const handleToday = () => {
+        const today = new Date();
+        setCurrentDate(today);
+        setFocusedDate(today);
+    };
+
+    const headerPeriodLabel = viewMode === 'month'
+        ? currentDate.toLocaleDateString('es-CL', { month: 'long', year: 'numeric' })
+        : focusedDate.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
     return (
         <div className="flex h-full gap-8">
-            <div className="flex-1 space-y-6 flex flex-col">
-                <div className="flex items-center justify-between shrink-0">
+            <div className="flex-1 space-y-6 flex flex-col min-w-0">
+                <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 shrink-0">
                     <div>
                         <h2 className="text-4xl font-black text-gray-900">Agenda</h2>
                         {isSupervisor && <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Vista de Supervisor</p>}
@@ -372,7 +519,7 @@ const Schedule = () => {
                         )}
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-3">
                         {canSelectOtherCalendars && sellers.length > 0 && (
                             <div className="relative bg-white rounded-2xl shadow-sm border border-gray-100 flex items-center px-4 py-2 group hover:border-indigo-200 transition-colors">
                                 <Users size={16} className="text-gray-400 mr-3" />
@@ -392,12 +539,36 @@ const Schedule = () => {
                         )}
 
                         <div className="flex items-center bg-white rounded-2xl border border-gray-100 p-1.5 shadow-sm">
-                            <button onClick={handlePrevMonth} className="p-2 hover:bg-gray-50 rounded-xl"><ChevronLeft size={18} /></button>
-                            <button onClick={handleToday} className="px-6 py-2 text-sm font-bold text-dental-600 bg-dental-50 rounded-xl mx-2">
-                                {currentDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+                            <button
+                                onClick={() => setViewMode('month')}
+                                className={`px-4 py-2 rounded-xl text-sm font-black transition-colors ${viewMode === 'month' ? 'bg-dental-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
+                            >
+                                Mensual
                             </button>
-                            <button onClick={handleNextMonth} className="p-2 hover:bg-gray-50 rounded-xl"><ChevronRight size={18} /></button>
+                            <button
+                                onClick={() => setViewMode('day')}
+                                className={`px-4 py-2 rounded-xl text-sm font-black transition-colors ${viewMode === 'day' ? 'bg-dental-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
+                            >
+                                Diaria
+                            </button>
                         </div>
+
+                        <div className="flex items-center bg-white rounded-2xl border border-gray-100 p-1.5 shadow-sm">
+                            <button onClick={handlePrevPeriod} className="p-2 hover:bg-gray-50 rounded-xl"><ChevronLeft size={18} /></button>
+                            <button onClick={handleToday} className="px-4 md:px-6 py-2 text-sm font-bold text-dental-600 bg-dental-50 rounded-xl mx-2 capitalize">
+                                {headerPeriodLabel}
+                            </button>
+                            <button onClick={handleNextPeriod} className="p-2 hover:bg-gray-50 rounded-xl"><ChevronRight size={18} /></button>
+                        </div>
+
+                        <button
+                            onClick={openVisitModalFromContext}
+                            className="bg-dental-600 text-white px-5 py-4 rounded-2xl shadow-lg hover:bg-dental-700 transition-all hover:scale-105 active:scale-95 flex items-center gap-2 font-bold"
+                            title="Agendar visita"
+                        >
+                            <CalendarIcon size={20} />
+                            <span className="hidden xl:inline">Agendar visita</span>
+                        </button>
 
                         <button
                             onClick={() => setShowAddModal(true)}
@@ -410,48 +581,174 @@ const Schedule = () => {
                     </div>
                 </div>
 
-                <div className="premium-card flex-1 overflow-hidden flex flex-col p-0">
-                    <div className="grid grid-cols-7 border-b border-gray-100 py-4 bg-gray-50/50">
-                        {['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM'].map(day => (
-                            <div key={day} className="text-center text-[10px] font-black text-gray-400 tracking-widest">{day}</div>
-                        ))}
+                {viewMode === 'day' && (
+                    <div className="premium-card p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Bloque horario seleccionado</p>
+                            <h3 className="text-xl font-black text-gray-900 mt-1">
+                                {rangeLabel ? `${toDateKey(focusedDate)} · ${rangeLabel}` : 'Selecciona un rango en la agenda diaria'}
+                            </h3>
+                            <p className="text-sm text-gray-500 mt-1">
+                                Haz clic en una hora para iniciar el bloque y en otra para extenderlo. Desde ahí podrás agendar con cliente existente o visita en frío.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap gap-3">
+                            {selectedRange && (
+                                <button
+                                    onClick={() => {
+                                        setSelectedRange(null);
+                                        setSlotAnchorMinutes(null);
+                                    }}
+                                    className="px-4 py-3 rounded-2xl border border-gray-200 text-gray-500 font-bold hover:bg-gray-50 transition-colors"
+                                >
+                                    Limpiar rango
+                                </button>
+                            )}
+                            <button
+                                onClick={openVisitModalFromContext}
+                                className="px-5 py-3 rounded-2xl bg-dental-600 text-white font-black shadow-lg shadow-dental-100 hover:bg-dental-700 transition-colors"
+                            >
+                                {selectedRange ? 'Agendar en este bloque' : 'Agendar visita'}
+                            </button>
+                        </div>
                     </div>
-                    <div className="flex-1 grid grid-cols-7 grid-rows-5 auto-rows-fr">
-                        {emptySlots.map((_, i) => (
-                            <div key={`empty-${i}`} className="border-r border-b border-gray-50 p-2 bg-gray-50/30"></div>
-                        ))}
-                        {daySlots.map((day) => {
-                            const dayEvents = getEventsForDay(day);
-                            return (
-                                <div key={day} className={`border-r border-b border-gray-50 p-2 flex flex-col gap-1 transition-colors hover:bg-gray-50/50 ${isToday(day) ? 'bg-dental-50/30' : ''}`}>
-                                    <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full mb-1
-                                        ${isToday(day) ? 'bg-dental-600 text-white shadow-lg shadow-dental-200' : 'text-gray-400'}`}>
-                                        {day}
-                                    </span>
+                )}
 
-                                    <div className="space-y-1 overflow-y-auto max-h-[100px] no-scrollbar">
-                                        {dayEvents.map((event) => (
-                                            <button
-                                                key={event.id}
-                                                onClick={() => setSelectedEvent(event)}
-                                                className={`w-full text-left p-1.5 rounded-lg text-[10px] truncate cursor-pointer group relative font-bold transition-colors
-                                                ${event.source === 'crm' ? 'bg-purple-50 text-purple-700 border border-purple-100 hover:bg-purple-100' :
-                                                    event.source === 'internal' ? 'bg-orange-50 text-orange-700 border border-orange-100 hover:bg-orange-100' :
-                                                        'bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100'}`}
-                                            >
-                                                <div className="flex items-center gap-1">
-                                                    <div className={`w-1.5 h-1.5 rounded-full ${event.source === 'crm' ? 'bg-purple-500' :
-                                                        event.source === 'internal' ? 'bg-orange-500' : 'bg-blue-500'}`}></div>
-                                                    {formatEventTimeRange(event)}
-                                                </div>
-                                                <div className="truncate font-medium" title={event.summary}>{event.summary}</div>
-                                            </button>
-                                        ))}
-                                    </div>
+                <div className="premium-card flex-1 overflow-hidden flex flex-col p-0 min-h-0">
+                    {viewMode === 'month' ? (
+                        <>
+                            <div className="grid grid-cols-7 border-b border-gray-100 py-4 bg-gray-50/50">
+                                {['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM'].map((day) => (
+                                    <div key={day} className="text-center text-[10px] font-black text-gray-400 tracking-widest">{day}</div>
+                                ))}
+                            </div>
+                            <div className="flex-1 grid grid-cols-7 auto-rows-fr min-h-[640px]">
+                                {emptySlots.map((_, index) => (
+                                    <div key={`empty-${index}`} className="border-r border-b border-gray-50 p-2 bg-gray-50/30" />
+                                ))}
+                                {daySlots.map((day) => {
+                                    const dayEvents = getEventsForDay(day);
+                                    const thisDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+                                    const isFocusedDay = toDateKey(thisDate) === toDateKey(focusedDate);
+
+                                    return (
+                                        <div key={day} className={`border-r border-b border-gray-50 p-2 flex flex-col gap-2 transition-colors hover:bg-gray-50/50 ${isToday(day) ? 'bg-dental-50/30' : ''}`}>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        setFocusedDate(thisDate);
+                                                        setViewMode('day');
+                                                    }}
+                                                    className={`text-xs font-bold w-8 h-8 flex items-center justify-center rounded-full transition-colors ${isToday(day) ? 'bg-dental-600 text-white shadow-lg shadow-dental-200' : isFocusedDay ? 'bg-dental-100 text-dental-700' : 'text-gray-400 hover:bg-gray-100'}`}
+                                                >
+                                                    {day}
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setFocusedDate(thisDate);
+                                                        setViewMode('day');
+                                                    }}
+                                                    className="text-[10px] font-black uppercase tracking-widest text-dental-600 hover:text-dental-700"
+                                                >
+                                                    Ver día
+                                                </button>
+                                            </div>
+
+                                            <div className="space-y-1 overflow-y-auto max-h-[120px] no-scrollbar">
+                                                {dayEvents.map((event) => (
+                                                    <button
+                                                        key={event.id}
+                                                        onClick={() => setSelectedEvent(event)}
+                                                        className={`w-full text-left p-1.5 rounded-lg text-[10px] truncate cursor-pointer group relative font-bold transition-colors ${event.source === 'crm' ? 'bg-purple-50 text-purple-700 border border-purple-100 hover:bg-purple-100' : event.source === 'internal' ? 'bg-orange-50 text-orange-700 border border-orange-100 hover:bg-orange-100' : 'bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100'}`}
+                                                    >
+                                                        <div className="flex items-center gap-1">
+                                                            <div className={`w-1.5 h-1.5 rounded-full ${event.source === 'crm' ? 'bg-purple-500' : event.source === 'internal' ? 'bg-orange-500' : 'bg-blue-500'}`} />
+                                                            {formatEventTimeRange(event)}
+                                                        </div>
+                                                        <div className="truncate font-medium" title={event.summary}>{event.summary}</div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                {trailingSlots.map((_, index) => (
+                                    <div key={`trail-${index}`} className="border-r border-b border-gray-50 p-2 bg-gray-50/20" />
+                                ))}
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex-1 overflow-y-auto">
+                            <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-white/95 backdrop-blur">
+                                <div>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Vista diaria</p>
+                                    <h3 className="text-lg font-black text-gray-900 capitalize">
+                                        {focusedDate.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                    </h3>
                                 </div>
-                            );
-                        })}
-                    </div>
+                                <p className="text-xs font-bold text-gray-400">{focusedDayEvents.length} evento(s)</p>
+                            </div>
+
+                            <div className="divide-y divide-gray-100">
+                                {timeSlots.map((minutes) => {
+                                    const slotEvents = focusedDayEvents.filter((event) => {
+                                        if (!event.start.dateTime) return false;
+                                        const eventStart = new Date(event.start.dateTime);
+                                        return (eventStart.getHours() * 60) + eventStart.getMinutes() >= minutes
+                                            && (eventStart.getHours() * 60) + eventStart.getMinutes() < minutes + SLOT_MINUTES;
+                                    });
+
+                                    const isSelected = Boolean(selectedRange && minutes >= selectedRange.start && minutes < selectedRange.end);
+                                    const isAnchor = slotAnchorMinutes === minutes;
+
+                                    return (
+                                        <div key={minutes} className={`grid grid-cols-[92px_minmax(0,1fr)] min-h-[88px] ${isSelected ? 'bg-dental-50/40' : ''}`}>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSlotClick(minutes)}
+                                                className={`border-r border-gray-100 px-4 py-5 text-left transition-colors ${isAnchor ? 'bg-dental-100' : isSelected ? 'bg-dental-50/60' : 'hover:bg-gray-50'}`}
+                                            >
+                                                <p className="text-xs font-black text-gray-900">{formatMinutesLabel(minutes)}</p>
+                                                <p className="text-[10px] uppercase tracking-widest text-gray-400 mt-1">
+                                                    {isAnchor ? 'Inicio' : isSelected ? 'Rango' : 'Libre'}
+                                                </p>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSlotClick(minutes)}
+                                                className={`px-4 py-4 text-left transition-colors ${isSelected ? 'bg-dental-50/20' : 'hover:bg-gray-50/70'}`}
+                                            >
+                                                <div className="space-y-2">
+                                                    {slotEvents.length > 0 ? slotEvents.map((event) => (
+                                                        <div
+                                                            key={event.id}
+                                                            onClick={(eventClick) => {
+                                                                eventClick.stopPropagation();
+                                                                setSelectedEvent(event);
+                                                            }}
+                                                            className={`rounded-2xl border px-3 py-3 cursor-pointer transition-colors ${event.source === 'crm' ? 'bg-purple-50 border-purple-100 hover:bg-purple-100' : event.source === 'internal' ? 'bg-orange-50 border-orange-100 hover:bg-orange-100' : 'bg-blue-50 border-blue-100 hover:bg-blue-100'}`}
+                                                        >
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <p className={`text-sm font-black truncate ${event.source === 'crm' ? 'text-purple-700' : event.source === 'internal' ? 'text-orange-700' : 'text-blue-700'}`}>{event.summary}</p>
+                                                                <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 shrink-0">{formatEventTimeRange(event)}</span>
+                                                            </div>
+                                                            {(event.location || event.description) && (
+                                                                <p className="text-xs text-gray-500 mt-1 truncate">{event.location || event.description}</p>
+                                                            )}
+                                                        </div>
+                                                    )) : (
+                                                        <div className="rounded-2xl border border-dashed border-gray-200 px-3 py-3 text-xs font-medium text-gray-400">
+                                                            {isSelected ? 'Bloque seleccionado para agendar una visita.' : 'Sin eventos programados.'}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -465,7 +762,7 @@ const Schedule = () => {
                         <p className="text-xs text-white/30 italic py-4">Sin actividades pendientes.</p>
                     ) : (
                         <div className="space-y-4">
-                            {tasks.slice(0, 5).map(task => (
+                            {tasks.slice(0, 5).map((task) => (
                                 <div key={task.id} className="bg-white/5 border border-white/10 p-4 rounded-2xl group hover:bg-white/10 transition-all cursor-pointer">
                                     <div className="flex justify-between items-start">
                                         <p className="text-xs font-black text-white">{task.title}</p>
@@ -482,17 +779,19 @@ const Schedule = () => {
                 <div className="flex-1 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-6 space-y-6 flex flex-col">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <div className="w-2 h-8 rounded-full bg-indigo-500"></div>
+                            <div className="w-2 h-8 rounded-full bg-indigo-500" />
                             <div>
-                                <h3 className="font-bold text-gray-900 text-lg leading-none">Próximos</h3>
-                                <p className="text-[10px] uppercase font-black text-gray-400 tracking-widest">Eventos del Mes</p>
+                                <h3 className="font-bold text-gray-900 text-lg leading-none">{viewMode === 'day' ? 'Del Día' : 'Próximos'}</h3>
+                                <p className="text-[10px] uppercase font-black text-gray-400 tracking-widest">
+                                    {viewMode === 'day' ? 'Agenda seleccionada' : 'Eventos del Mes'}
+                                </p>
                             </div>
                         </div>
                         <button onClick={() => void fetchAllEvents()} className={`text-dental-500 hover:rotate-180 transition-transform duration-500 ${loading ? 'animate-spin' : ''}`}><RefreshCw size={14} /></button>
                     </div>
 
                     <div className="space-y-3 overflow-y-auto flex-1">
-                        {sortedUpcomingEvents.map((event) => {
+                        {(viewMode === 'day' ? focusedDayEvents : sortedUpcomingEvents).map((event) => {
                             const eventDate = new Date(event.start.dateTime || event.start.date || '');
                             return (
                                 <button
@@ -500,12 +799,9 @@ const Schedule = () => {
                                     onClick={() => setSelectedEvent(event)}
                                     className="w-full text-left flex items-start space-x-3 p-3 hover:bg-gray-50 rounded-2xl transition-colors cursor-pointer group"
                                 >
-                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-sm
-                                        ${event.source === 'crm' ? 'bg-purple-100 text-purple-600' :
-                                            event.source === 'internal' ? 'bg-orange-100 text-orange-600' :
-                                                'bg-blue-100 text-blue-600'}`}>
+                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${event.source === 'crm' ? 'bg-purple-100 text-purple-600' : event.source === 'internal' ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
                                         <div className="text-center">
-                                            <p className="text-[9px] font-black uppercase leading-none opacity-60">{eventDate.toLocaleDateString('es-ES', { weekday: 'short' }).slice(0, 3)}</p>
+                                            <p className="text-[9px] font-black uppercase leading-none opacity-60">{eventDate.toLocaleDateString('es-CL', { weekday: 'short' }).slice(0, 3)}</p>
                                             <p className="text-lg font-black leading-none mt-0.5">{eventDate.getDate()}</p>
                                         </div>
                                     </div>
@@ -521,10 +817,31 @@ const Schedule = () => {
                                 </button>
                             );
                         })}
-                        {events.length === 0 && !loading && <p className="text-xs text-gray-400 text-center py-4">No hay eventos próximos.</p>}
+                        {(viewMode === 'day' ? focusedDayEvents.length === 0 : events.length === 0) && !loading && (
+                            <p className="text-xs text-gray-400 text-center py-4">
+                                {viewMode === 'day' ? 'No hay eventos para este día.' : 'No hay eventos próximos.'}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>
+
+            <ScheduleVisitModal
+                assigneeId={selectedSellerId}
+                initialDate={visitModalSeed?.date}
+                initialStartTime={visitModalSeed?.startTime}
+                initialEndTime={visitModalSeed?.endTime}
+                isOpen={showVisitModal}
+                onClose={() => {
+                    setShowVisitModal(false);
+                    setVisitModalSeed(null);
+                }}
+                onSaved={() => {
+                    void fetchAllEvents();
+                    setShowVisitModal(false);
+                    setVisitModalSeed(null);
+                }}
+            />
 
             <ScheduleActivityModal
                 preSelectedAssigneeId={selectedSellerId}
