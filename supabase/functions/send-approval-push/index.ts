@@ -52,7 +52,11 @@ serve(async (req) => {
 
     const [{ data: requester }, { data: quotation }, { data: managerRecipients, error: recipientsError }] = await Promise.all([
       supabase.from("profiles").select("full_name, email").eq("id", approval.requester_id).maybeSingle(),
-      supabase.from("quotations").select("folio, clients(name)").eq("id", approval.entity_id).maybeSingle(),
+      supabase
+        .from("quotations")
+        .select("folio, seller_id, seller_email_snapshot, seller_name_snapshot, clients(name)")
+        .eq("id", approval.entity_id)
+        .maybeSingle(),
       supabase
         .from("profiles")
         .select("id")
@@ -61,9 +65,23 @@ serve(async (req) => {
     ]);
 
     if (recipientsError) throw recipientsError;
+
+    const quotationSellerId = (quotation as any)?.seller_id || null;
+    const quotationSellerEmail = String((quotation as any)?.seller_email_snapshot || "").trim().toLowerCase();
+
+    let resolvedSellerRecipientId: string | null = quotationSellerId;
+    if (!resolvedSellerRecipientId && quotationSellerEmail) {
+      const { data: sellerByEmail } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("email", quotationSellerEmail)
+        .maybeSingle();
+      resolvedSellerRecipientId = sellerByEmail?.id || null;
+    }
+
     const recipientIds = approval.status === "pending"
       ? (managerRecipients || []).map((r) => r.id)
-      : (approval.requester_id ? [approval.requester_id] : []);
+      : (resolvedSellerRecipientId ? [resolvedSellerRecipientId] : (approval.requester_id ? [approval.requester_id] : []));
 
     if (recipientIds.length === 0) {
       return new Response(JSON.stringify({ sent: 0, reason: "no_recipients" }), {

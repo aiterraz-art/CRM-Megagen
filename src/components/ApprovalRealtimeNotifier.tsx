@@ -86,11 +86,10 @@ export default function ApprovalRealtimeNotifier() {
                     const previousApproval = payload?.old;
                     if (!approval?.id) return;
                     if (approval.approval_type !== 'extra_discount') return;
-                    if (approval.requester_id !== profile.id) return;
-                    if (approval.status !== 'approved') return;
-                    if (previousApproval?.status === 'approved') return;
+                    if (!['approved', 'rejected'].includes(String(approval.status || '').toLowerCase())) return;
+                    if (previousApproval?.status === approval.status) return;
 
-                    const toastKey = `${approval.id}:approved`;
+                    const toastKey = `${approval.id}:${approval.status}`;
                     if (seenIdsRef.current.has(toastKey)) return;
 
                     seenIdsRef.current.add(toastKey);
@@ -101,24 +100,37 @@ export default function ApprovalRealtimeNotifier() {
 
                     let clientName = 'Cliente';
                     let quotationFolio: number | string = '-';
+                    let resolvedSellerId: string | null = null;
+                    let resolvedSellerEmail = '';
 
                     if (approval?.entity_id) {
                         const { data: quotation } = await supabase
                             .from('quotations')
-                            .select('folio, clients(name)')
+                            .select('folio, seller_id, seller_email_snapshot, clients(name)')
                             .eq('id', approval.entity_id)
                             .maybeSingle();
                         const joinedClient = Array.isArray(quotation?.clients) ? quotation.clients[0] : quotation?.clients;
                         clientName = joinedClient?.name || clientName;
                         quotationFolio = quotation?.folio || '-';
+                        resolvedSellerId = (quotation as any)?.seller_id || null;
+                        resolvedSellerEmail = String((quotation as any)?.seller_email_snapshot || '').trim().toLowerCase();
                     }
 
                     if (!canReceiveDiscountResolution) return;
+                    const profileEmail = String(profile?.email || '').trim().toLowerCase();
+                    const matchesSeller = Boolean(
+                        (resolvedSellerId && resolvedSellerId === profile.id)
+                        || (!resolvedSellerId && approval.requester_id === profile.id)
+                        || (resolvedSellerEmail && resolvedSellerEmail === profileEmail)
+                    );
+                    if (!matchesSeller) return;
 
                     setToasts((prev) => [{
                         id: toastKey,
-                        title: 'Descuento aprobado',
-                        message: `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue aprobada. Ya puedes generar el pedido.`,
+                        title: approval.status === 'approved' ? 'Descuento aprobado' : 'Descuento rechazado',
+                        message: approval.status === 'approved'
+                            ? `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue aprobada. Ya puedes generar el pedido.`
+                            : `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue rechazada.`,
                         targetPath: '/quotations'
                     }, ...prev].slice(0, 3));
                 }
