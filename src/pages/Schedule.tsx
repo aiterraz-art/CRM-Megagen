@@ -435,10 +435,11 @@ const Schedule = () => {
         ? `${formatMinutesLabel(selectedRange.start)} - ${formatMinutesLabel(selectedRange.end)}`
         : null;
 
-    const openVisitModalFromContext = () => {
+    const openVisitModalFromContext = (rangeOverride?: { start: number; end: number }) => {
+        const effectiveRange = rangeOverride || selectedRange;
         const defaultDate = toDateKey(viewMode === 'day' ? focusedDate : currentDate);
-        const startTime = selectedRange ? minutesToTime(selectedRange.start) : '10:00';
-        const endTime = selectedRange ? minutesToTime(selectedRange.end) : '11:00';
+        const startTime = effectiveRange ? minutesToTime(effectiveRange.start) : '10:00';
+        const endTime = effectiveRange ? minutesToTime(effectiveRange.end) : '11:00';
 
         setVisitModalSeed({
             date: defaultDate,
@@ -457,8 +458,10 @@ const Schedule = () => {
 
         const start = Math.min(slotAnchorMinutes, minutes);
         const end = Math.max(slotAnchorMinutes, minutes) + SLOT_MINUTES;
-        setSelectedRange({ start, end });
+        const completedRange = { start, end };
+        setSelectedRange(completedRange);
         setSlotAnchorMinutes(null);
+        openVisitModalFromContext(completedRange);
     };
 
     const handlePrevPeriod = () => {
@@ -562,7 +565,7 @@ const Schedule = () => {
                         </div>
 
                         <button
-                            onClick={openVisitModalFromContext}
+                            onClick={() => openVisitModalFromContext()}
                             className="bg-dental-600 text-white px-5 py-4 rounded-2xl shadow-lg hover:bg-dental-700 transition-all hover:scale-105 active:scale-95 flex items-center gap-2 font-bold"
                             title="Agendar visita"
                         >
@@ -605,7 +608,7 @@ const Schedule = () => {
                                 </button>
                             )}
                             <button
-                                onClick={openVisitModalFromContext}
+                                onClick={() => openVisitModalFromContext()}
                                 className="px-5 py-3 rounded-2xl bg-dental-600 text-white font-black shadow-lg shadow-dental-100 hover:bg-dental-700 transition-colors"
                             >
                                 {selectedRange ? 'Agendar en este bloque' : 'Agendar visita'}
