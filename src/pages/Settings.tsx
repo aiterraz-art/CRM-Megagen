@@ -70,6 +70,7 @@ const Settings: React.FC = () => {
         prospect_warning_days: 30,
         prospect_critical_days: 45,
         pool_reassignment_days: 30,
+        quotation_loss_days: 3,
         updated_at: new Date().toISOString(),
         updated_by: null
     });
@@ -611,6 +612,7 @@ const Settings: React.FC = () => {
                 prospect_warning_days: 30,
                 prospect_critical_days: 45,
                 pool_reassignment_days: 30,
+                quotation_loss_days: 3,
                 updated_at: new Date().toISOString(),
                 updated_by: null
             });
@@ -629,6 +631,7 @@ const Settings: React.FC = () => {
         const prospectWarningDays = Math.max(0, Number(clientFollowupSettings.prospect_warning_days || 0));
         const prospectCriticalDays = Math.max(0, Number(clientFollowupSettings.prospect_critical_days || 0));
         const poolReassignmentDays = Math.max(0, Number(clientFollowupSettings.pool_reassignment_days || 0));
+        const quotationLossDays = Math.max(1, Number(clientFollowupSettings.quotation_loss_days || 1));
 
         const payload: Database['public']['Tables']['client_followup_settings']['Insert'] = {
             id: 'default',
@@ -637,6 +640,7 @@ const Settings: React.FC = () => {
             prospect_warning_days: prospectWarningDays,
             prospect_critical_days: prospectCriticalDays,
             pool_reassignment_days: poolReassignmentDays,
+            quotation_loss_days: quotationLossDays,
             updated_by: profile.id
         };
 
@@ -647,6 +651,11 @@ const Settings: React.FC = () => {
 
         if (prospectCriticalDays < prospectWarningDays) {
             alert('El umbral crítico de prospectos no puede ser menor que el de riesgo.');
+            return;
+        }
+
+        if (quotationLossDays < 1) {
+            alert('La cotización perdida automática debe ser de al menos 1 día.');
             return;
         }
 
@@ -769,7 +778,7 @@ const Settings: React.FC = () => {
                         <button onClick={() => setActiveTab('integrations')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'integrations' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Integraciones</button>
                     )}
                     {canAccessClientFollowupSettings && (
-                        <button onClick={() => setActiveTab('clients')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'clients' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Clientes</button>
+                        <button onClick={() => setActiveTab('clients')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'clients' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Flujo Venta</button>
                     )}
                     {canAccessUserAdmin && (
                         <button
@@ -1090,14 +1099,32 @@ const Settings: React.FC = () => {
             ) : activeTab === 'clients' && canAccessClientFollowupSettings ? (
                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-gray-100 overflow-hidden">
                     <div className="p-8 border-b border-gray-100">
-                        <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><AlertTriangle className="text-indigo-600" /> Seguimiento Comercial</h3>
+                        <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><AlertTriangle className="text-indigo-600" /> Flujo de Venta</h3>
                         <p className="mt-2 text-sm font-medium text-gray-500">
-                            Define cuándo un prospecto o cliente activo pasa a riesgo o crítico por falta de gestión comercial.
+                            Define cuándo una cotización se pierde automáticamente y cuándo un prospecto o cliente activo pasa a riesgoso o crítico por falta de gestión comercial.
                             La actividad considera visitas, cotizaciones, pedidos, llamadas, WhatsApp y correos.
                         </p>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-8 p-8 lg:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-8 p-8 lg:grid-cols-3">
+                        <div className="space-y-4 rounded-3xl border border-rose-100 bg-rose-50/60 p-6">
+                            <h4 className="text-lg font-black text-rose-900">Cotizaciones</h4>
+                            <div>
+                                <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-rose-700">Pasa a pérdida desde (días)</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    value={clientFollowupSettings.quotation_loss_days}
+                                    onChange={(event) => setClientFollowupSettings((prev) => ({ ...prev, quotation_loss_days: Number(event.target.value) || 1 }))}
+                                    disabled={loadingClientFollowupSettings}
+                                    className="w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 font-bold text-slate-800 outline-none focus:border-rose-400"
+                                />
+                                <p className="mt-2 text-xs font-medium text-rose-800">
+                                    Si una cotización enviada sigue sin movimiento ni pedido dentro de este plazo, el embudo la pasa automáticamente a cierre perdido.
+                                </p>
+                            </div>
+                        </div>
+
                         <div className="space-y-4 rounded-3xl border border-amber-100 bg-amber-50/60 p-6">
                             <h4 className="text-lg font-black text-amber-900">Prospectos</h4>
                             <div>

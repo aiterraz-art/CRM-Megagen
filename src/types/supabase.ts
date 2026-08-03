@@ -107,6 +107,7 @@ export interface Database {
                     prospect_warning_days: number
                     prospect_critical_days: number
                     pool_reassignment_days: number
+                    quotation_loss_days: number
                     updated_at: string
                     updated_by: string | null
                 }
@@ -117,6 +118,7 @@ export interface Database {
                     prospect_warning_days?: number
                     prospect_critical_days?: number
                     pool_reassignment_days?: number
+                    quotation_loss_days?: number
                     updated_at?: string
                     updated_by?: string | null
                 }
@@ -127,6 +129,7 @@ export interface Database {
                     prospect_warning_days?: number
                     prospect_critical_days?: number
                     pool_reassignment_days?: number
+                    quotation_loss_days?: number
                     updated_at?: string
                     updated_by?: string | null
                 }

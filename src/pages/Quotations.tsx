@@ -510,7 +510,7 @@ const Quotations: React.FC = () => {
 
         try {
             try {
-                await supabase.rpc('expire_stale_sent_quotations', { p_days: 3 });
+                await supabase.rpc('expire_stale_sent_quotations', { p_days: null });
             } catch (expireError) {
                 console.warn('No se pudo ejecutar expiración automática de cotizaciones enviadas:', expireError);
             }

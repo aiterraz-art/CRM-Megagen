@@ -39,7 +39,7 @@ interface Quotation {
     folio: number;
 }
 
-const AUTO_LOST_MESSAGE = '3 dias sin respuesta negociacion perdida';
+const DEFAULT_QUOTATION_LOSS_DAYS = 3;
 const QuotationTemplate = lazy(() => import('../components/QuotationTemplate'));
 
 const normalizeStage = (stage: string | null | undefined): string => {
@@ -69,7 +69,14 @@ const statusFromStage = (stage: string): string => {
 
 const hasAutoLostNoResponse = (comments: string | null | undefined): boolean => {
     const normalized = String(comments || '').toLowerCase();
-    return normalized.includes(AUTO_LOST_MESSAGE);
+    return normalized.includes('sin respuesta negociacion perdida');
+};
+
+const extractAutoLostNoResponseMessage = (comments: string | null | undefined, fallbackDays: number): string => {
+    const normalized = String(comments || '').toLowerCase();
+    const match = normalized.match(/\((\d+)\s+dias?\s+sin\s+respuesta\s+negociacion\s+perdida\)/i);
+    if (match?.[0]) return match[0];
+    return `(${fallbackDays} dias sin respuesta negociacion perdida)`;
 };
 
 type LostReasonDialogState = {
@@ -104,7 +111,7 @@ const Pipeline = () => {
             setLoading(true);
             setFetchError(null);
             try {
-                await supabase.rpc('expire_stale_sent_quotations', { p_days: 3 });
+                await supabase.rpc('expire_stale_sent_quotations', { p_days: null });
             } catch (expireError) {
                 console.warn('No se pudo ejecutar expiración automática de cotizaciones enviadas:', expireError);
             }
@@ -580,7 +587,7 @@ const Pipeline = () => {
                                                             </div>
                                                             {normalizeStage(quote.stage) === 'lost' && quote.autoLostByNoResponse && (
                                                                 <p className="mt-1 text-[9px] font-black text-red-600 leading-tight">
-                                                                    ({AUTO_LOST_MESSAGE})
+                                                                    {extractAutoLostNoResponseMessage(quote.comments, DEFAULT_QUOTATION_LOSS_DAYS)}
                                                                 </p>
                                                             )}
                                                             {normalizeStage(quote.stage) === 'lost' && quote.lost_reason && (

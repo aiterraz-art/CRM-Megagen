@@ -33,6 +33,7 @@ const DEFAULT_CLIENT_FOLLOWUP_SETTINGS: ClientFollowupSettingsRow = {
     prospect_warning_days: 30,
     prospect_critical_days: 45,
     pool_reassignment_days: 30,
+    quotation_loss_days: 3,
     updated_at: new Date().toISOString(),
     updated_by: null
 };
