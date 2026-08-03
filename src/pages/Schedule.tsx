@@ -424,6 +424,23 @@ const Schedule = () => {
         [events]
     );
 
+    const mobileMonthRows = useMemo(
+        () => daySlots.map((day) => {
+            const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+            const dayEvents = getEventsForDay(day)
+                .sort((a, b) => new Date(a.start.dateTime || a.start.date || '').getTime() - new Date(b.start.dateTime || b.start.date || '').getTime());
+
+            return {
+                day,
+                date,
+                dayEvents,
+                isCurrentDay: isToday(day),
+                isFocusedDay: toDateKey(date) === toDateKey(focusedDate)
+            };
+        }),
+        [currentDate, daySlots, events, focusedDate]
+    );
+
     const canEditSelectedEvent = Boolean(
         selectedEvent
         && selectedEvent.linkedEntityType === 'task'
@@ -501,11 +518,11 @@ const Schedule = () => {
         : focusedDate.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
     return (
-        <div className="flex h-full gap-8">
-            <div className="flex-1 space-y-6 flex flex-col min-w-0">
+        <div className="flex flex-col xl:flex-row h-full gap-4 md:gap-8">
+            <div className="flex-1 space-y-4 md:space-y-6 flex flex-col min-w-0">
                 <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 shrink-0">
                     <div>
-                        <h2 className="text-4xl font-black text-gray-900">Agenda</h2>
+                        <h2 className="text-3xl md:text-4xl font-black text-gray-900">Agenda</h2>
                         {isSupervisor && <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Vista de Supervisor</p>}
                         {googleCalendarNotice && (
                             <div className="mt-2 flex flex-wrap items-center gap-3 max-w-2xl">
@@ -522,16 +539,16 @@ const Schedule = () => {
                         )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-3">
                         {canSelectOtherCalendars && sellers.length > 0 && (
-                            <div className="relative bg-white rounded-2xl shadow-sm border border-gray-100 flex items-center px-4 py-2 group hover:border-indigo-200 transition-colors">
+                            <div className="relative col-span-2 sm:col-span-1 bg-white rounded-2xl shadow-sm border border-gray-100 flex items-center px-4 py-2 group hover:border-indigo-200 transition-colors min-w-0">
                                 <Users size={16} className="text-gray-400 mr-3" />
-                                <div className="text-xs">
+                                <div className="text-xs min-w-0">
                                     <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest">Viendo Agenda de</p>
                                     <select
                                         value={selectedSellerId}
                                         onChange={(e) => setSelectedSellerId(e.target.value)}
-                                        className="bg-transparent border-none text-gray-800 font-bold text-sm focus:ring-0 p-0 pr-6 w-40 cursor-pointer outline-none"
+                                        className="bg-transparent border-none text-gray-800 font-bold text-sm focus:ring-0 p-0 pr-6 w-full sm:w-40 cursor-pointer outline-none"
                                     >
                                         {sellers.map((seller) => (
                                             <option key={seller.id} value={seller.id}>{seller.full_name || seller.email}</option>
@@ -541,24 +558,24 @@ const Schedule = () => {
                             </div>
                         )}
 
-                        <div className="flex items-center bg-white rounded-2xl border border-gray-100 p-1.5 shadow-sm">
+                        <div className="flex items-center justify-center bg-white rounded-2xl border border-gray-100 p-1.5 shadow-sm col-span-2 sm:col-span-1">
                             <button
                                 onClick={() => setViewMode('month')}
-                                className={`px-4 py-2 rounded-xl text-sm font-black transition-colors ${viewMode === 'month' ? 'bg-dental-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
+                                className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-sm font-black transition-colors ${viewMode === 'month' ? 'bg-dental-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
                             >
                                 Mensual
                             </button>
                             <button
                                 onClick={() => setViewMode('day')}
-                                className={`px-4 py-2 rounded-xl text-sm font-black transition-colors ${viewMode === 'day' ? 'bg-dental-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
+                                className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-sm font-black transition-colors ${viewMode === 'day' ? 'bg-dental-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
                             >
                                 Diaria
                             </button>
                         </div>
 
-                        <div className="flex items-center bg-white rounded-2xl border border-gray-100 p-1.5 shadow-sm">
+                        <div className="flex items-center justify-between bg-white rounded-2xl border border-gray-100 p-1.5 shadow-sm col-span-2 sm:col-span-1 min-w-0">
                             <button onClick={handlePrevPeriod} className="p-2 hover:bg-gray-50 rounded-xl"><ChevronLeft size={18} /></button>
-                            <button onClick={handleToday} className="px-4 md:px-6 py-2 text-sm font-bold text-dental-600 bg-dental-50 rounded-xl mx-2 capitalize">
+                            <button onClick={handleToday} className="px-3 md:px-6 py-2 text-xs sm:text-sm font-bold text-dental-600 bg-dental-50 rounded-xl mx-1 sm:mx-2 capitalize truncate min-w-0">
                                 {headerPeriodLabel}
                             </button>
                             <button onClick={handleNextPeriod} className="p-2 hover:bg-gray-50 rounded-xl"><ChevronRight size={18} /></button>
@@ -566,20 +583,20 @@ const Schedule = () => {
 
                         <button
                             onClick={() => openVisitModalFromContext()}
-                            className="bg-dental-600 text-white px-5 py-4 rounded-2xl shadow-lg hover:bg-dental-700 transition-all hover:scale-105 active:scale-95 flex items-center gap-2 font-bold"
+                            className="bg-dental-600 text-white px-4 py-4 rounded-2xl shadow-lg hover:bg-dental-700 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2 font-bold col-span-1"
                             title="Agendar visita"
                         >
                             <CalendarIcon size={20} />
-                            <span className="hidden xl:inline">Agendar visita</span>
+                            <span className="text-sm sm:text-base">Agendar</span>
                         </button>
 
                         <button
                             onClick={() => setShowAddModal(true)}
-                            className="bg-orange-500 text-white p-4 rounded-2xl shadow-lg hover:bg-orange-600 transition-all hover:scale-105 active:scale-95 flex items-center gap-2 font-bold"
+                            className="bg-orange-500 text-white px-4 py-4 rounded-2xl shadow-lg hover:bg-orange-600 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2 font-bold col-span-1"
                             title="Asignar Reunión/Actividad"
                         >
                             <Plus size={20} />
-                            <span className="hidden xl:inline">Asignar</span>
+                            <span className="text-sm sm:text-base">Actividad</span>
                         </button>
                     </div>
                 </div>
@@ -620,12 +637,12 @@ const Schedule = () => {
                 <div className="premium-card flex-1 overflow-hidden flex flex-col p-0 min-h-0">
                     {viewMode === 'month' ? (
                         <>
-                            <div className="grid grid-cols-7 border-b border-gray-100 py-4 bg-gray-50/50">
+                            <div className="hidden md:grid grid-cols-7 border-b border-gray-100 py-4 bg-gray-50/50">
                                 {['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM'].map((day) => (
                                     <div key={day} className="text-center text-[10px] font-black text-gray-400 tracking-widest">{day}</div>
                                 ))}
                             </div>
-                            <div className="flex-1 grid grid-cols-7 auto-rows-fr min-h-[640px]">
+                            <div className="hidden md:grid flex-1 grid-cols-7 auto-rows-fr min-h-[640px]">
                                 {emptySlots.map((_, index) => (
                                     <div key={`empty-${index}`} className="border-r border-b border-gray-50 p-2 bg-gray-50/30" />
                                 ))}
@@ -679,13 +696,71 @@ const Schedule = () => {
                                     <div key={`trail-${index}`} className="border-r border-b border-gray-50 p-2 bg-gray-50/20" />
                                 ))}
                             </div>
+
+                            <div className="md:hidden divide-y divide-gray-100">
+                                {mobileMonthRows.map(({ day, date, dayEvents, isCurrentDay, isFocusedDay }) => (
+                                    <button
+                                        key={day}
+                                        type="button"
+                                        onClick={() => {
+                                            setFocusedDate(date);
+                                            setViewMode('day');
+                                        }}
+                                        className={`w-full text-left px-4 py-4 transition-colors ${isFocusedDay ? 'bg-dental-50/50' : 'hover:bg-gray-50'} ${isCurrentDay ? 'border-l-4 border-dental-500' : 'border-l-4 border-transparent'}`}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-black ${isCurrentDay ? 'bg-dental-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                                                        {day}
+                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-black text-gray-900 capitalize">
+                                                            {date.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })}
+                                                        </p>
+                                                        <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">
+                                                            {dayEvents.length} evento(s)
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-dental-600 shrink-0">
+                                                Ver día
+                                            </span>
+                                        </div>
+
+                                        <div className="mt-3 space-y-2">
+                                            {dayEvents.length > 0 ? dayEvents.slice(0, 3).map((event) => (
+                                                <div
+                                                    key={event.id}
+                                                    className={`rounded-2xl border px-3 py-2 ${event.source === 'crm' ? 'bg-purple-50 border-purple-100 text-purple-700' : event.source === 'internal' ? 'bg-orange-50 border-orange-100 text-orange-700' : 'bg-blue-50 border-blue-100 text-blue-700'}`}
+                                                >
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-xs font-black truncate">{event.summary}</p>
+                                                        <span className="text-[10px] font-black shrink-0">{formatEventTimeRange(event)}</span>
+                                                    </div>
+                                                </div>
+                                            )) : (
+                                                <div className="rounded-2xl border border-dashed border-gray-200 px-3 py-3 text-xs text-gray-400 font-medium">
+                                                    Sin eventos agendados.
+                                                </div>
+                                            )}
+                                            {dayEvents.length > 3 && (
+                                                <p className="text-[11px] text-gray-400 font-bold">
+                                                    +{dayEvents.length - 3} evento(s) más
+                                                </p>
+                                            )}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
                         </>
                     ) : (
                         <div className="flex-1 overflow-y-auto">
-                            <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-white/95 backdrop-blur">
+                            <div className="sticky top-0 z-10 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-gray-100 bg-white/95 backdrop-blur">
                                 <div>
                                     <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Vista diaria</p>
-                                    <h3 className="text-lg font-black text-gray-900 capitalize">
+                                    <h3 className="text-base sm:text-lg font-black text-gray-900 capitalize">
                                         {focusedDate.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
                                     </h3>
                                 </div>
@@ -705,11 +780,11 @@ const Schedule = () => {
                                     const isAnchor = slotAnchorMinutes === minutes;
 
                                     return (
-                                        <div key={minutes} className={`grid grid-cols-[92px_minmax(0,1fr)] min-h-[88px] ${isSelected ? 'bg-dental-50/40' : ''}`}>
+                                        <div key={minutes} className={`grid grid-cols-[76px_minmax(0,1fr)] sm:grid-cols-[92px_minmax(0,1fr)] min-h-[88px] ${isSelected ? 'bg-dental-50/40' : ''}`}>
                                             <button
                                                 type="button"
                                                 onClick={() => handleSlotClick(minutes)}
-                                                className={`border-r border-gray-100 px-4 py-5 text-left transition-colors ${isAnchor ? 'bg-dental-100' : isSelected ? 'bg-dental-50/60' : 'hover:bg-gray-50'}`}
+                                                className={`border-r border-gray-100 px-2 sm:px-4 py-5 text-left transition-colors ${isAnchor ? 'bg-dental-100' : isSelected ? 'bg-dental-50/60' : 'hover:bg-gray-50'}`}
                                             >
                                                 <p className="text-xs font-black text-gray-900">{formatMinutesLabel(minutes)}</p>
                                                 <p className="text-[10px] uppercase tracking-widest text-gray-400 mt-1">
@@ -719,7 +794,7 @@ const Schedule = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleSlotClick(minutes)}
-                                                className={`px-4 py-4 text-left transition-colors ${isSelected ? 'bg-dental-50/20' : 'hover:bg-gray-50/70'}`}
+                                                className={`px-3 sm:px-4 py-4 text-left transition-colors ${isSelected ? 'bg-dental-50/20' : 'hover:bg-gray-50/70'}`}
                                             >
                                                 <div className="space-y-2">
                                                     {slotEvents.length > 0 ? slotEvents.map((event) => (
@@ -731,7 +806,7 @@ const Schedule = () => {
                                                             }}
                                                             className={`rounded-2xl border px-3 py-3 cursor-pointer transition-colors ${event.source === 'crm' ? 'bg-purple-50 border-purple-100 hover:bg-purple-100' : event.source === 'internal' ? 'bg-orange-50 border-orange-100 hover:bg-orange-100' : 'bg-blue-50 border-blue-100 hover:bg-blue-100'}`}
                                                         >
-                                                            <div className="flex items-center justify-between gap-3">
+                                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
                                                                 <p className={`text-sm font-black truncate ${event.source === 'crm' ? 'text-purple-700' : event.source === 'internal' ? 'text-orange-700' : 'text-blue-700'}`}>{event.summary}</p>
                                                                 <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 shrink-0">{formatEventTimeRange(event)}</span>
                                                             </div>
@@ -755,8 +830,8 @@ const Schedule = () => {
                 </div>
             </div>
 
-            <div className="w-80 flex flex-col space-y-6 shrink-0">
-                <div className="premium-card p-6 bg-gray-900 text-white space-y-4">
+            <div className="w-full xl:w-80 flex flex-col lg:grid lg:grid-cols-2 xl:flex space-y-4 md:space-y-6 lg:space-y-0 lg:gap-6 xl:gap-0 shrink-0">
+                <div className="premium-card p-5 md:p-6 bg-gray-900 text-white space-y-4">
                     <div className="flex justify-between items-center text-white/40">
                         <span className="text-[10px] font-black uppercase tracking-widest">Actividades Pendientes</span>
                         <Bell size={14} className="animate-pulse" />
@@ -779,7 +854,7 @@ const Schedule = () => {
                     )}
                 </div>
 
-                <div className="flex-1 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-6 space-y-6 flex flex-col">
+                <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 p-5 md:p-6 space-y-6 flex flex-col min-h-[320px] xl:flex-1">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <div className="w-2 h-8 rounded-full bg-indigo-500" />
@@ -793,7 +868,7 @@ const Schedule = () => {
                         <button onClick={() => void fetchAllEvents()} className={`text-dental-500 hover:rotate-180 transition-transform duration-500 ${loading ? 'animate-spin' : ''}`}><RefreshCw size={14} /></button>
                     </div>
 
-                    <div className="space-y-3 overflow-y-auto flex-1">
+                    <div className="space-y-3 overflow-y-auto flex-1 max-h-[420px] xl:max-h-none">
                         {(viewMode === 'day' ? focusedDayEvents : sortedUpcomingEvents).map((event) => {
                             const eventDate = new Date(event.start.dateTime || event.start.date || '');
                             return (
