@@ -30,6 +30,7 @@ type MonthMetrics = {
     billedSales: number;
     averageDailySales: number;
     goal: number;
+    commissionRate: number;
     dailyVisitsGoal: number;
 };
 
@@ -79,6 +80,23 @@ const formatCurrency = (value: number) => `$${Math.round(value || 0).toLocaleStr
 const isBillableOrderStatus = (status: string | null | undefined) =>
     String(status || '').toLowerCase() !== 'cancelled';
 
+const countBusinessDaysInclusive = (from: Date, to: Date) => {
+    if (from > to) return 0;
+    const cursor = new Date(from);
+    cursor.setHours(0, 0, 0, 0);
+    const end = new Date(to);
+    end.setHours(0, 0, 0, 0);
+
+    let count = 0;
+    while (cursor <= end) {
+        const day = cursor.getDay();
+        if (day !== 0 && day !== 6) count += 1;
+        cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return count;
+};
+
 const SellerDashboard = () => {
     const navigate = useNavigate();
     const { profile } = useUser();
@@ -103,6 +121,7 @@ const SellerDashboard = () => {
         billedSales: 0,
         averageDailySales: 0,
         goal: 0,
+        commissionRate: 0,
         dailyVisitsGoal: DEFAULT_DAILY_VISITS_GOAL,
     });
     const [pendingVisits, setPendingVisits] = useState<PendingVisitItem[]>([]);
@@ -194,7 +213,7 @@ const SellerDashboard = () => {
                     .lte('created_at', todayEnd.toISOString()),
                 supabase
                     .from('goals')
-                    .select('target_amount, daily_visits_goal')
+                    .select('target_amount, commission_rate, daily_visits_goal')
                     .eq('user_id', profile.id)
                     .eq('month', now.getMonth() + 1)
                     .eq('year', now.getFullYear())
@@ -274,6 +293,7 @@ const SellerDashboard = () => {
                 billedSales: monthBilledSales,
                 averageDailySales: daysElapsedInMonth > 0 ? monthBilledSales / daysElapsedInMonth : 0,
                 goal: Number(goalRow?.target_amount) || 0,
+                commissionRate: Number(goalRow?.commission_rate) || 0,
                 dailyVisitsGoal: Number(goalRow?.daily_visits_goal) || DEFAULT_DAILY_VISITS_GOAL,
             });
 
@@ -372,6 +392,16 @@ const SellerDashboard = () => {
     const salesGoalPct = monthMetrics.goal > 0
         ? Math.round((monthMetrics.billedSales / monthMetrics.goal) * 100)
         : 0;
+    const today = new Date();
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const remainingToGoal = Math.max(monthMetrics.goal - monthMetrics.billedSales, 0);
+    const exceededGoalBy = Math.max(monthMetrics.billedSales - monthMetrics.goal, 0);
+    const remainingBusinessDays = countBusinessDaysInclusive(today, monthEnd);
+    const requiredDailySales = remainingToGoal > 0 && remainingBusinessDays > 0
+        ? remainingToGoal / remainingBusinessDays
+        : 0;
+    const estimatedCommission = monthMetrics.billedSales * Math.max(monthMetrics.commissionRate, 0);
+    const visitsRemainingToday = Math.max(monthMetrics.dailyVisitsGoal - todayMetrics.visits, 0);
 
     const limitedPendingVisits = useMemo(() => pendingVisits.slice(0, 5), [pendingVisits]);
     const limitedPendingQuotations = useMemo(() => pendingQuotations.slice(0, 5), [pendingQuotations]);
@@ -408,6 +438,123 @@ const SellerDashboard = () => {
                 <KPICard title="Visitas Ayer sin Cotizar" value={pendingVisits.length} icon={ClipboardList} color="indigo" trend="Pendiente actual" trendUp={pendingVisits.length === 0} />
                 <KPICard title="Cotizaciones Ayer sin Pedido" value={pendingQuotations.length} icon={ShoppingBag} color="rose" trend="Estados sent o approved" trendUp={pendingQuotations.length === 0} />
                 <KPICard title="Facturado Acumulado Mes" value={formatCurrency(monthMetrics.billedSales)} icon={Calendar} color="indigo" trend={monthMetrics.goal > 0 ? `${salesGoalPct}% de meta` : 'Sin meta cargada'} trendUp={monthMetrics.goal > 0 && monthMetrics.billedSales >= monthMetrics.goal} />
+            </div>
+
+            <div className="premium-card overflow-hidden">
+                <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-indigo-50 via-white to-emerald-50">
+                    <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                        <div>
+                            <p className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.28em]">Metas del Mes</p>
+                            <h3 className="mt-2 text-2xl font-black text-gray-900">Tu avance comercial del mes actual</h3>
+                            <p className="mt-2 text-sm text-gray-500 font-medium">
+                                Visualiza tu facturación neta, cuánto falta para llegar y el ritmo que necesitas sostener.
+                            </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 lg:min-w-[340px]">
+                            <div className="rounded-2xl bg-white border border-indigo-100 p-4 shadow-sm">
+                                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Meta mensual</p>
+                                <p className="mt-2 text-xl font-black text-gray-900">{formatCurrency(monthMetrics.goal)}</p>
+                                <p className="mt-1 text-xs font-bold text-gray-500">
+                                    {monthMetrics.goal > 0 ? `${salesGoalPct}% cumplido` : 'Sin meta configurada'}
+                                </p>
+                            </div>
+                            <div className="rounded-2xl bg-white border border-emerald-100 p-4 shadow-sm">
+                                <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Comisión estimada</p>
+                                <p className="mt-2 text-xl font-black text-gray-900">{formatCurrency(estimatedCommission)}</p>
+                                <p className="mt-1 text-xs font-bold text-gray-500">
+                                    {monthMetrics.commissionRate > 0
+                                        ? `${(monthMetrics.commissionRate * 100).toFixed(1)}% sobre facturado`
+                                        : 'Sin porcentaje cargado'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-6 grid grid-cols-1 xl:grid-cols-[340px,1fr] gap-6">
+                    <div className="premium-card p-5 border border-gray-50">
+                        <h4 className="font-black text-gray-900 mb-2">Meta de Facturación</h4>
+                        <GoalProgressChart current={monthMetrics.billedSales} target={monthMetrics.goal || 1} />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                        <div className="rounded-3xl border border-emerald-100 bg-emerald-50/70 p-5">
+                            <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Facturado neto</p>
+                            <p className="mt-3 text-2xl font-black text-gray-900">{formatCurrency(monthMetrics.billedSales)}</p>
+                            <p className="mt-2 text-xs font-bold text-emerald-700">Tomado directamente desde pedidos convertidos.</p>
+                        </div>
+
+                        <div className="rounded-3xl border border-amber-100 bg-amber-50/80 p-5">
+                            <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Por facturar</p>
+                            <p className="mt-3 text-2xl font-black text-gray-900">
+                                {monthMetrics.goal > 0 ? formatCurrency(remainingToGoal) : 'Sin meta'}
+                            </p>
+                            <p className="mt-2 text-xs font-bold text-amber-700">
+                                {monthMetrics.goal > 0
+                                    ? remainingToGoal > 0
+                                        ? 'Monto que aún falta para cumplir la meta.'
+                                        : `Vas sobre meta por ${formatCurrency(exceededGoalBy)}.`
+                                    : 'Carga tu meta con jefatura para empezar a medir cumplimiento.'}
+                            </p>
+                        </div>
+
+                        <div className="rounded-3xl border border-indigo-100 bg-indigo-50/70 p-5">
+                            <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Ritmo necesario</p>
+                            <p className="mt-3 text-2xl font-black text-gray-900">
+                                {monthMetrics.goal > 0 && remainingToGoal > 0
+                                    ? formatCurrency(requiredDailySales)
+                                    : formatCurrency(0)}
+                            </p>
+                            <p className="mt-2 text-xs font-bold text-indigo-700">
+                                {monthMetrics.goal > 0 && remainingToGoal > 0
+                                    ? `${remainingBusinessDays} día(s) hábil(es) restantes en el mes.`
+                                    : monthMetrics.goal > 0
+                                        ? 'Meta ya cumplida para este mes.'
+                                        : 'Disponible cuando exista una meta mensual.'}
+                            </p>
+                        </div>
+
+                        <div className="rounded-3xl border border-rose-100 bg-rose-50/70 p-5">
+                            <p className="text-[10px] font-black text-rose-600 uppercase tracking-widest">Visitas hoy</p>
+                            <p className="mt-3 text-2xl font-black text-gray-900">
+                                {todayMetrics.visits}/{monthMetrics.dailyVisitsGoal}
+                            </p>
+                            <p className="mt-2 text-xs font-bold text-rose-700">
+                                {visitsRemainingToday > 0
+                                    ? `Te faltan ${visitsRemainingToday} visita(s) para tu meta diaria.`
+                                    : 'Meta diaria de visitas cumplida hoy.'}
+                            </p>
+                        </div>
+
+                        <div className="md:col-span-2 xl:col-span-4 rounded-3xl border border-gray-100 bg-white p-5">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div>
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Lectura rápida</p>
+                                    <h4 className="mt-2 text-lg font-black text-gray-900">
+                                        {monthMetrics.goal > 0
+                                            ? remainingToGoal > 0
+                                                ? 'Todavía estás a tiempo de cerrar el mes cumpliendo la meta.'
+                                                : 'Ya cumpliste la meta mensual y ahora estás generando sobrecumplimiento.'
+                                            : 'Aún no tienes una meta mensual cargada para este período.'}
+                                    </h4>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    <span className="rounded-full bg-gray-100 px-4 py-2 text-xs font-black text-gray-700">
+                                        Promedio mes: {formatCurrency(monthMetrics.averageDailySales)}
+                                    </span>
+                                    <span className="rounded-full bg-indigo-100 px-4 py-2 text-xs font-black text-indigo-700">
+                                        Meta visitas: {monthMetrics.dailyVisitsGoal}/día
+                                    </span>
+                                    {monthMetrics.commissionRate > 0 && (
+                                        <span className="rounded-full bg-emerald-100 px-4 py-2 text-xs font-black text-emerald-700">
+                                            Comisión: {(monthMetrics.commissionRate * 100).toFixed(1)}%
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -520,8 +667,7 @@ const SellerDashboard = () => {
                     </div>
 
                     <div className="premium-card p-5 border border-gray-50">
-                        <h4 className="font-black text-gray-900 mb-2">Meta de Facturación</h4>
-                        <GoalProgressChart current={monthMetrics.billedSales} target={monthMetrics.goal || 1} />
+                        <h4 className="font-black text-gray-900 mb-2">Meta de Visitas</h4>
                         <div className="mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
                             <p className="text-[10px] font-black text-emerald-600 uppercase tracking-wider">Meta diaria visitas</p>
                             <div className="mt-2 flex items-center gap-2">

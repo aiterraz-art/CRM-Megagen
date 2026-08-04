@@ -110,6 +110,8 @@ const TeamStats = () => {
         dayEnd.setHours(23, 59, 59, 999);
         const monthStart = new Date(selected.getFullYear(), selected.getMonth(), 1, 0, 0, 0, 0);
         const monthEnd = new Date(selected.getFullYear(), selected.getMonth() + 1, 0, 23, 59, 59, 999);
+        const goalMonth = monthStart.getMonth() + 1;
+        const goalYear = monthStart.getFullYear();
 
         let query = supabase.from('profiles').select('*');
         const canViewAllTeam = normalizedCurrentRole === 'admin' || normalizedCurrentRole === 'jefe';
@@ -187,6 +189,13 @@ const TeamStats = () => {
             .gte('created_at', monthStart.toISOString())
             .lte('created_at', monthEnd.toISOString());
 
+        const { data: monthGoalsData } = await supabase
+            .from('goals')
+            .select('user_id, target_amount, commission_rate, daily_visits_goal')
+            .in('user_id', subordinatesIds)
+            .eq('month', goalMonth)
+            .eq('year', goalYear);
+
         const visitsByRep = new Map<string, any[]>();
         (dayVisitsData || []).forEach((visit: any) => {
             if (!visitsByRep.has(visit.sales_rep_id)) visitsByRep.set(visit.sales_rep_id, []);
@@ -196,6 +205,15 @@ const TeamStats = () => {
         const activeRepSet = new Set((activeVisitsData || []).map((visit: any) => visit.sales_rep_id));
         const monthSalesByRep = new Map<string, number>();
         const pendingOrdersByRep = new Map<string, number>();
+        const goalsByRep = new Map<string, { targetAmount: number; commissionRate: number; dailyVisitsGoal: number }>();
+
+        (monthGoalsData || []).forEach((goal: any) => {
+            goalsByRep.set(goal.user_id, {
+                targetAmount: Number(goal.target_amount) || 0,
+                commissionRate: Number(goal.commission_rate) || 0,
+                dailyVisitsGoal: Number(goal.daily_visits_goal) || 0,
+            });
+        });
 
         (monthOrdersData || []).forEach((order: any) => {
             const repId = order.user_id;
@@ -210,14 +228,26 @@ const TeamStats = () => {
             }
         });
 
-        const fullTeamData = profilesData.map((rep: any) => ({
-            ...rep,
-            visits: visitsByRep.get(rep.id) || [],
-            tasks: taskMap.get(rep.id) || [],
-            monthSales: monthSalesByRep.get(rep.id) || 0,
-            pendingOrders: pendingOrdersByRep.get(rep.id) || 0,
-            isActive: activeRepSet.has(rep.id)
-        }));
+        const fullTeamData = profilesData.map((rep: any) => {
+            const monthSales = monthSalesByRep.get(rep.id) || 0;
+            const goalData = goalsByRep.get(rep.id) || { targetAmount: 0, commissionRate: 0, dailyVisitsGoal: 0 };
+            const goalProgressPct = goalData.targetAmount > 0
+                ? Math.min(100, Math.round((monthSales / goalData.targetAmount) * 100))
+                : 0;
+
+            return {
+                ...rep,
+                visits: visitsByRep.get(rep.id) || [],
+                tasks: taskMap.get(rep.id) || [],
+                monthSales,
+                monthlyGoal: goalData.targetAmount,
+                commissionRate: goalData.commissionRate,
+                dailyVisitsGoal: goalData.dailyVisitsGoal,
+                goalProgressPct,
+                pendingOrders: pendingOrdersByRep.get(rep.id) || 0,
+                isActive: activeRepSet.has(rep.id)
+            };
+        });
 
         setTeamData(fullTeamData);
 
@@ -1023,6 +1053,46 @@ const TeamStats = () => {
                                             </p>
                                         </div>
                                     </div>
+
+                                    {hasPermission('VIEW_METAS') && (
+                                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 space-y-3">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">Meta mensual</p>
+                                                    <p className="mt-1 text-lg font-black text-gray-900">
+                                                        {rep.monthlyGoal > 0 ? `$${rep.monthlyGoal.toLocaleString()}` : 'Sin meta'}
+                                                    </p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Cumplimiento</p>
+                                                    <p className="mt-1 text-lg font-black text-emerald-700">
+                                                        {rep.monthlyGoal > 0 ? `${rep.goalProgressPct}%` : '--'}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="h-2 rounded-full bg-white/90 overflow-hidden">
+                                                <div
+                                                    className="h-full rounded-full bg-emerald-500 transition-all"
+                                                    style={{ width: `${rep.monthlyGoal > 0 ? rep.goalProgressPct : 0}%` }}
+                                                />
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-2 text-[10px] font-black">
+                                                <span className="rounded-full bg-white px-3 py-1.5 text-emerald-700 border border-emerald-100">
+                                                    Facturado: ${(rep.monthSales || 0).toLocaleString()}
+                                                </span>
+                                                <span className="rounded-full bg-white px-3 py-1.5 text-amber-700 border border-amber-100">
+                                                    Falta: ${Math.max((rep.monthlyGoal || 0) - (rep.monthSales || 0), 0).toLocaleString()}
+                                                </span>
+                                                {rep.dailyVisitsGoal > 0 && (
+                                                    <span className="rounded-full bg-white px-3 py-1.5 text-indigo-700 border border-indigo-100">
+                                                        Visitas meta: {rep.dailyVisitsGoal}/día
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {/* ... live path ... */}
                                     <div className="pt-2">
