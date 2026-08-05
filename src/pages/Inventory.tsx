@@ -68,6 +68,8 @@ const Inventory = () => {
     const [rotationCategoryFilter, setRotationCategoryFilter] = useState<'all' | string>('all');
     const [rotationSupplierFilter, setRotationSupplierFilter] = useState<'all' | 'none' | string>('all');
     const [rotationRequestFilter, setRotationRequestFilter] = useState<'all' | 'with_request' | 'without_request'>('all');
+    const [rotationSalesFilter, setRotationSalesFilter] = useState<'all' | 'with_sales' | 'without_sales'>('all');
+    const [rotationPurchaseFilter, setRotationPurchaseFilter] = useState<'all' | 'to_order' | 'covered'>('all');
     const [supplierPlanCoverageDays, setSupplierPlanCoverageDays] = useState('30');
     const [supplierPlanLeadTimeDays, setSupplierPlanLeadTimeDays] = useState('0');
     const [supplierPlanSafetyDays, setSupplierPlanSafetyDays] = useState('0');
@@ -1102,9 +1104,20 @@ const Inventory = () => {
             if (rotationSupplierFilter !== 'all' && rotationSupplierFilter !== 'none' && (item?.supplier_id || '') !== rotationSupplierFilter) return false;
             if (rotationRequestFilter === 'with_request' && !metric.has_open_request) return false;
             if (rotationRequestFilter === 'without_request' && metric.has_open_request) return false;
+            if (rotationSalesFilter === 'with_sales' && Number(metric.units_sold_window || 0) <= 0) return false;
+            if (rotationSalesFilter === 'without_sales' && Number(metric.units_sold_window || 0) > 0) return false;
             return true;
         });
-    }, [inventoryById, rotationAlertFilter, rotationCategoryFilter, rotationMetrics, rotationRequestFilter, rotationSearch, rotationSupplierFilter]);
+    }, [
+        inventoryById,
+        rotationAlertFilter,
+        rotationCategoryFilter,
+        rotationMetrics,
+        rotationRequestFilter,
+        rotationSalesFilter,
+        rotationSearch,
+        rotationSupplierFilter
+    ]);
 
     const selectedRotationSupplier = useMemo(
         () => (rotationSupplierFilter !== 'all' && rotationSupplierFilter !== 'none'
@@ -1119,7 +1132,7 @@ const Inventory = () => {
     const supplierPlanningEnabled = Boolean(selectedRotationSupplier);
 
     const rotationDisplayRows = useMemo(() => {
-        return filteredRotationMetrics.map((metric) => {
+        const mappedRows = filteredRotationMetrics.map((metric) => {
             const item = inventoryById.get(metric.inventory_id) || null;
             const supplier = supplierMap.get(item?.supplier_id || '') || null;
             const avgDailySales = Math.max(Number(metric.avg_daily_sales || 0), 0);
@@ -1152,9 +1165,16 @@ const Inventory = () => {
                 estimatedLineCost: displayedSuggestedQty * Math.max(0, Number(item?.price || 0))
             };
         });
+
+        return mappedRows.filter((row) => {
+            if (rotationPurchaseFilter === 'to_order' && row.displayedSuggestedQty <= 0) return false;
+            if (rotationPurchaseFilter === 'covered' && row.displayedSuggestedQty > 0) return false;
+            return true;
+        });
     }, [
         filteredRotationMetrics,
         inventoryById,
+        rotationPurchaseFilter,
         supplierMap,
         supplierPlanCoverageValue,
         supplierPlanLeadTimeValue,
@@ -1361,12 +1381,12 @@ const Inventory = () => {
 
     const lowStockCount = items.filter((item) => (item.stock_qty || 0) <= (item.min_stock_alert || 5)).length;
     const totalUnits = items.reduce((accumulator, item) => accumulator + (item.stock_qty || 0), 0);
-    const criticalCount = filteredRotationMetrics.filter((item) => item.alert_level === 'critical').length;
-    const warningCount = filteredRotationMetrics.filter((item) => item.alert_level === 'warning').length;
-    const totalUnitsSold30d = filteredRotationMetrics.reduce((accumulator, item) => accumulator + (item.units_sold_window || 0), 0);
-    const averageCoverage = filteredRotationMetrics
-        .filter((item) => typeof item.days_of_coverage === 'number')
-        .reduce((accumulator, item, _, list) => accumulator + Number(item.days_of_coverage || 0) / list.length, 0);
+    const criticalCount = rotationDisplayRows.filter((row) => row.metric.alert_level === 'critical').length;
+    const warningCount = rotationDisplayRows.filter((row) => row.metric.alert_level === 'warning').length;
+    const totalUnitsSold30d = rotationDisplayRows.reduce((accumulator, row) => accumulator + (row.metric.units_sold_window || 0), 0);
+    const averageCoverage = rotationDisplayRows
+        .filter((row) => typeof row.metric.days_of_coverage === 'number')
+        .reduce((accumulator, row, _, list) => accumulator + Number(row.metric.days_of_coverage || 0) / list.length, 0);
     const movementTypes = Array.from(new Set(movements.map((movement) => movement.movement_type))).sort();
     const movementOrigins = Array.from(new Set(movements.map((movement) => getMovementOriginLabel(movement)))).sort();
     const movementUsers = Array.from(new Set(movements.map((movement) => getMovementUserLabel(movement)))).sort();
@@ -1774,7 +1794,7 @@ const Inventory = () => {
                         </div>
                         <div className="premium-card border-l-4 border-l-amber-500 p-6">
                             <p className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-400">Bajo mínimo</p>
-                            <h3 className="text-3xl font-black text-gray-900">{filteredRotationMetrics.filter((item) => item.alert_level === 'low').length}</h3>
+                            <h3 className="text-3xl font-black text-gray-900">{rotationDisplayRows.filter((row) => row.metric.alert_level === 'low').length}</h3>
                         </div>
                         <div className="premium-card border-l-4 border-l-indigo-500 p-6">
                             <p className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-400">Cobertura promedio</p>
@@ -1786,7 +1806,7 @@ const Inventory = () => {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-6">
+                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-8">
                         <div className="relative xl:col-span-2">
                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                             <input
@@ -1818,6 +1838,15 @@ const Inventory = () => {
                             ))}
                         </select>
                         <select
+                            value={rotationSalesFilter}
+                            onChange={(event) => setRotationSalesFilter(event.target.value as typeof rotationSalesFilter)}
+                            className="rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-700 outline-none focus:border-indigo-300"
+                        >
+                            <option value="all">Con y sin ventas</option>
+                            <option value="with_sales">Solo con ventas</option>
+                            <option value="without_sales">Solo sin ventas</option>
+                        </select>
+                        <select
                             value={rotationSupplierFilter}
                             onChange={(event) => setRotationSupplierFilter(event.target.value)}
                             className="rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-700 outline-none focus:border-indigo-300"
@@ -1837,6 +1866,38 @@ const Inventory = () => {
                             <option value="with_request">Con solicitud abierta</option>
                             <option value="without_request">Sin solicitud abierta</option>
                         </select>
+                        <select
+                            value={rotationPurchaseFilter}
+                            onChange={(event) => setRotationPurchaseFilter(event.target.value as typeof rotationPurchaseFilter)}
+                            className="rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-700 outline-none focus:border-indigo-300"
+                        >
+                            <option value="all">Todos para compra</option>
+                            <option value="to_order">Solo incluir en pedido</option>
+                            <option value="covered">Solo ya cubiertos</option>
+                        </select>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                        {rotationSalesFilter === 'with_sales' && (
+                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+                                Solo productos con ventas en la ventana analizada
+                            </span>
+                        )}
+                        {rotationPurchaseFilter === 'to_order' && (
+                            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-700">
+                                Solo productos que hoy entrarían al pedido sugerido
+                            </span>
+                        )}
+                        {rotationRequestFilter === 'without_request' && (
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-black text-amber-700">
+                                Solo productos sin solicitud abierta
+                            </span>
+                        )}
+                        {supplierPlanningEnabled && (
+                            <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-700">
+                                Sugerido recalculado con cobertura, lead time y seguridad
+                            </span>
+                        )}
                     </div>
 
                     {supplierPlanningEnabled ? (
@@ -2095,11 +2156,11 @@ const Inventory = () => {
                                     })}
                                 </tbody>
                             </table>
-                            {filteredRotationMetrics.length === 0 && (
+                            {rotationDisplayRows.length === 0 && (
                                 <div className="p-10 text-center">
                                     <AlertTriangle className="mx-auto mb-4 text-slate-300" size={36} />
                                     <h3 className="mb-2 text-xl font-black text-slate-900">No hay productos para los filtros actuales</h3>
-                                    <p className="font-medium text-slate-500">Prueba cambiando la búsqueda o mostrando todos los niveles de alerta.</p>
+                                    <p className="font-medium text-slate-500">Prueba cambiando la búsqueda, mostrando productos con ventas o quitando el filtro de compra.</p>
                                 </div>
                             )}
                         </div>
