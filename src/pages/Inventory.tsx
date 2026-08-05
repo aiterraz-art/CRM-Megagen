@@ -61,6 +61,7 @@ const Inventory = () => {
     const [rotationMetrics, setRotationMetrics] = useState<RotationMetric[]>([]);
     const [activeTab, setActiveTab] = useState<InventoryTab>('stock');
     const [search, setSearch] = useState('');
+    const [stockSupplierFilter, setStockSupplierFilter] = useState<'all' | 'none' | string>('all');
     const [rotationSearch, setRotationSearch] = useState('');
     const [movementSearch, setMovementSearch] = useState('');
     const [rotationOnlyAlerts, setRotationOnlyAlerts] = useState(false);
@@ -1086,12 +1087,17 @@ const Inventory = () => {
 
     const filteredItems = useMemo(() => {
         const term = search.trim().toLowerCase();
-        if (!term) return items;
-        return items.filter((item) =>
-            (item.name?.toLowerCase() || '').includes(term) ||
-            (item.sku?.toLowerCase() || '').includes(term)
-        );
-    }, [items, search]);
+        return items.filter((item) => {
+            if (stockSupplierFilter === 'none' && item.supplier_id) return false;
+            if (stockSupplierFilter !== 'all' && stockSupplierFilter !== 'none' && (item.supplier_id || '') !== stockSupplierFilter) return false;
+            if (!term) return true;
+
+            return (
+                (item.name?.toLowerCase() || '').includes(term) ||
+                (item.sku?.toLowerCase() || '').includes(term)
+            );
+        });
+    }, [items, search, stockSupplierFilter]);
 
     const filteredRotationMetrics = useMemo(() => {
         return rotationMetrics.filter((metric) => {
@@ -1510,16 +1516,38 @@ const Inventory = () => {
             {activeTab === 'stock' && (
                 <div className="space-y-4">
                     <div className="space-y-4">
-                        <div className="relative w-full md:max-w-4xl">
-                            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                            <input
-                                type="text"
-                                placeholder="Buscar por SKU o Nombre de producto..."
-                                className="min-h-[64px] w-full rounded-[1.75rem] border border-transparent bg-white py-4 pl-14 pr-5 text-base font-medium shadow-sm outline-none transition-all focus:ring-2 focus:ring-indigo-500"
-                                value={search}
-                                onChange={(event) => setSearch(event.target.value)}
-                            />
+                        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr),320px]">
+                            <div className="relative w-full">
+                                <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                                <input
+                                    type="text"
+                                    placeholder="Buscar por SKU o Nombre de producto..."
+                                    className="min-h-[64px] w-full rounded-[1.75rem] border border-transparent bg-white py-4 pl-14 pr-5 text-base font-medium shadow-sm outline-none transition-all focus:ring-2 focus:ring-indigo-500"
+                                    value={search}
+                                    onChange={(event) => setSearch(event.target.value)}
+                                />
+                            </div>
+                            <select
+                                value={stockSupplierFilter}
+                                onChange={(event) => setStockSupplierFilter(event.target.value)}
+                                className="min-h-[64px] rounded-[1.75rem] border border-slate-200 bg-white px-5 py-4 text-base font-bold text-slate-700 shadow-sm outline-none transition-all focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                            >
+                                <option value="all">Todos los proveedores</option>
+                                <option value="none">Sin proveedor</option>
+                                {activeSuppliers.map((supplier) => (
+                                    <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                                ))}
+                            </select>
                         </div>
+                        {stockSupplierFilter !== 'all' && (
+                            <div className="flex flex-wrap gap-2">
+                                <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-700">
+                                    {stockSupplierFilter === 'none'
+                                        ? 'Viendo solo productos sin proveedor'
+                                        : `Proveedor: ${supplierMap.get(stockSupplierFilter)?.name || 'Proveedor seleccionado'}`}
+                                </span>
+                            </div>
+                        )}
                         <div className="flex flex-wrap items-center gap-3">
                             {canDownloadCatalog && (
                                 <button
@@ -1780,6 +1808,13 @@ const Inventory = () => {
                                     ))}
                                 </tbody>
                             </table>
+                            {filteredItems.length === 0 && (
+                                <div className="p-10 text-center">
+                                    <AlertTriangle className="mx-auto mb-4 text-slate-300" size={36} />
+                                    <h3 className="mb-2 text-xl font-black text-slate-900">No hay productos para los filtros actuales</h3>
+                                    <p className="font-medium text-slate-500">Prueba cambiando la búsqueda o seleccionando otro proveedor.</p>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
