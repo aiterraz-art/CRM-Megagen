@@ -205,7 +205,8 @@ const Dashboard = () => {
         averageDailyMonthSales: 0,
         pendingVisitsNoQuote: 0,
         pendingQuotesNoOrder: 0,
-        monthSalesNet: 0
+        monthSalesNet: 0,
+        previousMonthToDateSalesNet: 0
     });
     const [selectedVisitForEvidence, setSelectedVisitForEvidence] = useState<any | null>(null);
     const [neglectedClients, setNeglectedClients] = useState<any[]>([]);
@@ -748,7 +749,8 @@ const Dashboard = () => {
                         averageDailyMonthSales: 0,
                         pendingVisitsNoQuote: 0,
                         pendingQuotesNoOrder: 0,
-                        monthSalesNet: 0
+                        monthSalesNet: 0,
+                        previousMonthToDateSalesNet: 0
                     });
                     setStats({
                         todayVisits: 0,
@@ -764,6 +766,10 @@ const Dashboard = () => {
                     const teamCurrentYear = teamNow.getFullYear();
                     const teamFirstDayOfMonth = new Date(Date.UTC(teamNow.getFullYear(), teamNow.getMonth(), 1, 0, 0, 0, 0)).toISOString();
                     const teamLastDayOfMonth = new Date(Date.UTC(teamNow.getFullYear(), teamNow.getMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
+                    const previousMonthLastDay = new Date(teamNow.getFullYear(), teamNow.getMonth(), 0).getDate();
+                    const previousMonthComparableDay = Math.min(teamNow.getDate(), previousMonthLastDay);
+                    const previousMonthStart = new Date(Date.UTC(teamNow.getFullYear(), teamNow.getMonth() - 1, 1, 0, 0, 0, 0)).toISOString();
+                    const previousMonthComparableEnd = new Date(Date.UTC(teamNow.getFullYear(), teamNow.getMonth() - 1, previousMonthComparableDay, 23, 59, 59, 999)).toISOString();
                     const startOfToday = new Date(selectedDate);
                     startOfToday.setHours(0, 0, 0, 0);
                     const endOfToday = new Date(selectedDate);
@@ -826,6 +832,14 @@ const Dashboard = () => {
                             .not('quotation_id', 'is', null)
                             .gte('created_at', teamFirstDayOfMonth)
                             .lte('created_at', teamLastDayOfMonth)).data || [];
+
+                    const previousMonthOrdersRows = (await supabase
+                        .from('orders')
+                        .select('id, user_id, total_amount, status, quotation_id, created_at')
+                        .in('user_id', sellerIds)
+                        .not('quotation_id', 'is', null)
+                        .gte('created_at', previousMonthStart)
+                        .lte('created_at', previousMonthComparableEnd)).data || [];
 
                     const yesterdayVisitsRows = preloadedYesterdayVisitsRows.length > 0
                         ? preloadedYesterdayVisitsRows
@@ -937,7 +951,10 @@ const Dashboard = () => {
                         averageDailyMonthSales: summary.reduce((sum, seller) => sum + (seller.averageDailyMonthSales || 0), 0),
                         pendingVisitsNoQuote: summary.reduce((sum, seller) => sum + (seller.pendingVisitsNoQuote || 0), 0),
                         pendingQuotesNoOrder: summary.reduce((sum, seller) => sum + (seller.pendingQuotesNoOrder || 0), 0),
-                        monthSalesNet: summary.reduce((sum, seller) => sum + (seller.monthSalesNet || 0), 0)
+                        monthSalesNet: summary.reduce((sum, seller) => sum + (seller.monthSalesNet || 0), 0),
+                        previousMonthToDateSalesNet: ((previousMonthOrdersRows || []) as any[])
+                            .filter((order: any) => isBillableOrderStatus(order.status))
+                            .reduce((sum: number, order: any) => sum + grossToNet(order.total_amount), 0)
                     };
                     setTeamDashboardTotals(totals);
                     setWeeklyActivity(buildWeeklyActivitySeries(
@@ -1257,8 +1274,9 @@ const Dashboard = () => {
                         value={`$${Math.round(teamDashboardTotals.monthSalesNet).toLocaleString()}`}
                         icon={CalendarIcon}
                         color="indigo"
-                        trend="Monto facturado mensual del equipo"
-                        trendUp={teamDashboardTotals.monthSalesNet > 0}
+                        trend={`$${Math.round(Math.abs(teamDashboardTotals.monthSalesNet - teamDashboardTotals.previousMonthToDateSalesNet)).toLocaleString()}`}
+                        trendLabel="vs mismo día del mes anterior"
+                        trendUp={teamDashboardTotals.monthSalesNet >= teamDashboardTotals.previousMonthToDateSalesNet}
                     />
                 </div>
             ) : (
