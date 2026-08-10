@@ -309,6 +309,7 @@ const ClientsContent = () => {
     const [viewMode, setViewMode] = useState<'all' | 'mine'>('all'); // For Admins
     const [portfolioTab, setPortfolioTab] = useState<'portfolio' | 'pool'>('portfolio');
     const [clientTypeFilter, setClientTypeFilter] = useState<'all' | 'active' | 'prospect'>('all');
+    const [sellerFilter, setSellerFilter] = useState<string>('all');
     const [poolAssigneeId, setPoolAssigneeId] = useState<string>('');
     const isSellerRole = effectiveRole === 'seller';
     const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
@@ -1607,17 +1608,25 @@ const ClientsContent = () => {
             const passesTypeFilter = clientTypeFilter === 'all'
                 || (clientTypeFilter === 'active' && !isProspect)
                 || (clientTypeFilter === 'prospect' && isProspect);
+            const passesSellerFilter = !canViewAll
+                || sellerFilter === 'all'
+                || (sellerFilter === '__unassigned__'
+                    ? !c.created_by
+                    : c.created_by === sellerFilter);
 
             if (portfolioTab === 'pool') {
-                return matchesSearch && isProspect && (neglectedData[c.id] || 0) >= clientFollowupSettings.pool_reassignment_days;
+                return matchesSearch
+                    && isProspect
+                    && passesSellerFilter
+                    && (neglectedData[c.id] || 0) >= clientFollowupSettings.pool_reassignment_days;
             }
 
             if (canViewAll) {
-                return (viewMode === 'all' || isOwner) && matchesSearch && passesNeglect && passesTypeFilter;
+                return (viewMode === 'all' || isOwner) && matchesSearch && passesNeglect && passesTypeFilter && passesSellerFilter;
             }
             return isOwner && matchesSearch && passesNeglect && passesTypeFilter;
         });
-    }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode, clientTypeFilter, portfolioTab, clientFollowupSettings]);
+    }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode, clientTypeFilter, portfolioTab, clientFollowupSettings, sellerFilter]);
 
     const duplicateGroups = useMemo(
         () => computeDuplicateClientGroups(clients),
@@ -2170,6 +2179,24 @@ const ClientsContent = () => {
                         Solo Prospectos
                     </button>
                 </div>
+                {canViewAll && (
+                    <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-100 rounded-2xl p-3">
+                        <span className="text-[10px] uppercase tracking-widest text-gray-400 font-black">Vendedor:</span>
+                        <select
+                            value={sellerFilter}
+                            onChange={(e) => setSellerFilter(e.target.value)}
+                            className="min-w-[220px] px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm font-bold text-gray-700"
+                        >
+                            <option value="all">Todos los vendedores</option>
+                            <option value="__unassigned__">Sin asignar</option>
+                            {sellerOptions.map((seller) => (
+                                <option key={seller.id} value={seller.id}>
+                                    {seller.full_name || seller.email}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
                 {portfolioTab === 'pool' && canReassignPoolLead && (
                     <div className="flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-100 rounded-2xl p-3">
                         <span className="text-[10px] uppercase tracking-widest text-amber-700 font-black">Reasignar a:</span>
