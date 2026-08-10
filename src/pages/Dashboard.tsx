@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { ShoppingCart, Users, AlertCircle, Calendar as CalendarIcon, ChevronRight, Search, Bell, Plus, Package, MapPin, Clock, CheckCircle2, TrendingUp, User, Target, BarChart2, PieChart as PieIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -241,6 +241,17 @@ const Dashboard = () => {
     }, [profile, selectedDate]);
 
     const [monthlyStats, setMonthlyStats] = useState({ goal: 0, currentSales: 0, commissionRate: 0 });
+
+    const teamSalesRanking = useMemo(
+        () => [...adminSummary].sort((a, b) => {
+            const monthDiff = Number(b.monthSalesNet || 0) - Number(a.monthSalesNet || 0);
+            if (monthDiff !== 0) return monthDiff;
+            const todayDiff = Number(b.todaySalesNet || 0) - Number(a.todaySalesNet || 0);
+            if (todayDiff !== 0) return todayDiff;
+            return Number(b.todayVisits || 0) - Number(a.todayVisits || 0);
+        }),
+        [adminSummary]
+    );
 
     const formatDateInput = (date: Date) => {
         const y = date.getFullYear();
@@ -906,7 +917,15 @@ const Dashboard = () => {
                         };
                     });
 
-                    setAdminSummary(summary);
+                    setAdminSummary(
+                        [...summary].sort((a, b) => {
+                            const monthDiff = Number(b.monthSalesNet || 0) - Number(a.monthSalesNet || 0);
+                            if (monthDiff !== 0) return monthDiff;
+                            const todayDiff = Number(b.todaySalesNet || 0) - Number(a.todaySalesNet || 0);
+                            if (todayDiff !== 0) return todayDiff;
+                            return Number(b.todayVisits || 0) - Number(a.todayVisits || 0);
+                        })
+                    );
 
                     const totals = {
                         todayVisits: summary.reduce((sum, seller) => sum + (seller.todayVisits || 0), 0),
@@ -1345,40 +1364,171 @@ const Dashboard = () => {
 
                 {/* Admin Summary Table (Only for Admins) */}
                 {hasPermission('VIEW_TEAM_STATS') && (
-                    <div className="premium-card overflow-hidden">
-                        <div className="p-6 border-b border-gray-100 bg-gray-50/50">
-                            <h3 className="text-xl font-bold text-gray-900 flex items-center">
-                                <Users size={20} className="mr-3 text-indigo-600" />
-                                Resumen Comercial del Equipo
-                            </h3>
+                    <div className="space-y-8">
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                            <div className="xl:col-span-2 premium-card overflow-hidden">
+                                <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+                                    <h3 className="text-xl font-bold text-gray-900 flex items-center">
+                                        <TrendingUp size={20} className="mr-3 text-emerald-600" />
+                                        Ventas Ordenadas por Vendedor
+                                    </h3>
+                                    <p className="text-sm text-gray-500 font-medium mt-1">
+                                        Ranking mensual del equipo según pedidos facturados.
+                                    </p>
+                                </div>
+                                <div className="divide-y divide-gray-50">
+                                    {teamSalesRanking.length === 0 ? (
+                                        <div className="p-8 text-center text-gray-400 italic">
+                                            Aún no hay ventas facturadas para ordenar.
+                                        </div>
+                                    ) : (
+                                        teamSalesRanking.map((seller, index) => {
+                                            const goal = Number(seller.monthlyGoal || 0);
+                                            const progress = goal > 0 ? Math.round((Number(seller.monthSalesNet || 0) / goal) * 100) : 0;
+                                            return (
+                                                <div key={seller.id} className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-sm font-black ${
+                                                            index === 0
+                                                                ? 'bg-amber-100 text-amber-700'
+                                                                : index === 1
+                                                                    ? 'bg-slate-100 text-slate-700'
+                                                                    : index === 2
+                                                                        ? 'bg-orange-100 text-orange-700'
+                                                                        : 'bg-indigo-50 text-indigo-600'
+                                                        }`}>
+                                                            #{index + 1}
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-black text-gray-900">{seller.name}</p>
+                                                            <p className="text-xs text-gray-500 font-bold uppercase tracking-wide">
+                                                                {seller.todayVisits} visitas hoy · ${Math.round(seller.todaySalesNet || 0).toLocaleString()} facturado hoy
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col md:items-end">
+                                                        <p className="text-xl font-black text-emerald-600">
+                                                            ${Math.round(seller.monthSalesNet || 0).toLocaleString()}
+                                                        </p>
+                                                        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                                                            Meta {goal > 0 ? `$${Math.round(goal).toLocaleString()}` : 'Sin meta'} · {goal > 0 ? `${progress}% cumplido` : 'Sin objetivo'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="premium-card p-6">
+                                <h3 className="text-xl font-bold text-gray-900 flex items-center">
+                                    <Users size={20} className="mr-3 text-indigo-600" />
+                                    Lectura Comercial
+                                </h3>
+                                <div className="space-y-4 mt-6">
+                                    <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-4">
+                                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 mb-2">Líder del mes</p>
+                                        <p className="text-lg font-black text-gray-900">
+                                            {teamSalesRanking[0]?.name || 'Sin datos'}
+                                        </p>
+                                        <p className="text-sm font-bold text-indigo-700 mt-1">
+                                            {teamSalesRanking[0] ? `$${Math.round(teamSalesRanking[0].monthSalesNet || 0).toLocaleString()}` : 'Sin ventas'}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-4">
+                                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 mb-2">Vendedores con ventas</p>
+                                        <p className="text-2xl font-black text-gray-900">
+                                            {teamSalesRanking.filter((seller) => Number(seller.monthSalesNet || 0) > 0).length}
+                                        </p>
+                                        <p className="text-xs font-bold text-gray-500 mt-1">
+                                            De {teamSalesRanking.length} vendedor(es) en el panel.
+                                        </p>
+                                    </div>
+                                    <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4">
+                                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-600 mb-2">Mayor cumplimiento</p>
+                                        {(() => {
+                                            const bestGoalProgress = [...teamSalesRanking]
+                                                .filter((seller) => Number(seller.monthlyGoal || 0) > 0)
+                                                .sort((a, b) => (Number(b.monthSalesNet || 0) / Number(b.monthlyGoal || 1)) - (Number(a.monthSalesNet || 0) / Number(a.monthlyGoal || 1)))[0];
+
+                                            if (!bestGoalProgress) {
+                                                return <p className="text-sm font-bold text-gray-500">No hay metas configuradas.</p>;
+                                            }
+
+                                            const bestProgressPct = Math.round((Number(bestGoalProgress.monthSalesNet || 0) / Number(bestGoalProgress.monthlyGoal || 1)) * 100);
+
+                                            return (
+                                                <>
+                                                    <p className="text-lg font-black text-gray-900">{bestGoalProgress.name}</p>
+                                                    <p className="text-sm font-bold text-amber-700 mt-1">{bestProgressPct}% de su meta mensual</p>
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left">
-                                <thead className="bg-white border-b border-gray-50">
-                                    <tr>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Vendedor</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas Hoy</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Facturado Hoy</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Prom. Diario Mes</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas Ayer sin Cotizar</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Cotizaciones Ayer sin Pedido</th>
-                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Facturado Acum. Mes</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {adminSummary.map(seller => (
-                                        <tr key={seller.id} className="hover:bg-gray-50 border-b border-gray-50 last:border-0">
-                                            <td className="px-6 py-4 font-bold text-gray-900">{seller.name}</td>
-                                            <td className="px-6 py-4 text-center font-bold">{seller.todayVisits}</td>
-                                            <td className="px-6 py-4 text-right font-bold text-emerald-600">${Math.round(seller.todaySalesNet || 0).toLocaleString()}</td>
-                                            <td className="px-6 py-4 text-right font-bold text-amber-600">${Math.round(seller.averageDailyMonthSales || 0).toLocaleString()}</td>
-                                            <td className="px-6 py-4 text-center font-bold">{seller.pendingVisitsNoQuote}</td>
-                                            <td className="px-6 py-4 text-center font-bold">{seller.pendingQuotesNoOrder}</td>
-                                            <td className="px-6 py-4 text-right font-bold text-indigo-600">${Math.round(seller.monthSalesNet || 0).toLocaleString()}</td>
+
+                        <div className="premium-card overflow-hidden">
+                            <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+                                <h3 className="text-xl font-bold text-gray-900 flex items-center">
+                                    <Users size={20} className="mr-3 text-indigo-600" />
+                                    Resumen Comercial del Equipo
+                                </h3>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left">
+                                    <thead className="bg-white border-b border-gray-50">
+                                        <tr>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Ranking</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Vendedor</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas Hoy</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Facturado Hoy</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Prom. Diario Mes</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Visitas Ayer sin Cotizar</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Cotizaciones Ayer sin Pedido</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Meta Mes</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Cumplimiento</th>
+                                            <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Facturado Acum. Mes</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        {teamSalesRanking.map((seller, index) => {
+                                            const goal = Number(seller.monthlyGoal || 0);
+                                            const progress = goal > 0 ? Math.round((Number(seller.monthSalesNet || 0) / goal) * 100) : 0;
+                                            return (
+                                                <tr key={seller.id} className="hover:bg-gray-50 border-b border-gray-50 last:border-0">
+                                                    <td className="px-6 py-4 font-black text-indigo-600">#{index + 1}</td>
+                                                    <td className="px-6 py-4 font-bold text-gray-900">{seller.name}</td>
+                                                    <td className="px-6 py-4 text-center font-bold">{seller.todayVisits}</td>
+                                                    <td className="px-6 py-4 text-right font-bold text-emerald-600">${Math.round(seller.todaySalesNet || 0).toLocaleString()}</td>
+                                                    <td className="px-6 py-4 text-right font-bold text-amber-600">${Math.round(seller.averageDailyMonthSales || 0).toLocaleString()}</td>
+                                                    <td className="px-6 py-4 text-center font-bold">{seller.pendingVisitsNoQuote}</td>
+                                                    <td className="px-6 py-4 text-center font-bold">{seller.pendingQuotesNoOrder}</td>
+                                                    <td className="px-6 py-4 text-right font-bold text-slate-600">
+                                                        {goal > 0 ? `$${Math.round(goal).toLocaleString()}` : 'Sin meta'}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wide ${
+                                                            goal <= 0
+                                                                ? 'bg-gray-100 text-gray-500'
+                                                                : progress >= 100
+                                                                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-100'
+                                                                    : progress >= 70
+                                                                        ? 'bg-amber-50 text-amber-600 border border-amber-100'
+                                                                        : 'bg-rose-50 text-rose-600 border border-rose-100'
+                                                        }`}>
+                                                            {goal > 0 ? `${progress}%` : 'N/A'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right font-bold text-indigo-600">${Math.round(seller.monthSalesNet || 0).toLocaleString()}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 )}
