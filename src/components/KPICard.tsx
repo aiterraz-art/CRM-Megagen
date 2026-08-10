@@ -4,13 +4,14 @@ interface KPICardProps {
     title: string;
     value: string | number;
     icon: LucideIcon;
+    detail?: string;
     trend?: string;
     trendLabel?: string;
     trendUp?: boolean;
     color: 'indigo' | 'emerald' | 'amber' | 'blue' | 'rose';
 }
 
-const KPICard = ({ title, value, icon: Icon, trend, trendLabel = 'vs mes anterior', trendUp, color }: KPICardProps) => {
+const KPICard = ({ title, value, icon: Icon, detail, trend, trendLabel = 'vs mes anterior', trendUp, color }: KPICardProps) => {
     const colorStyles = {
         indigo: 'text-indigo-600 bg-indigo-50 border-indigo-100',
         emerald: 'text-emerald-600 bg-emerald-50 border-emerald-100',
@@ -43,10 +44,18 @@ const KPICard = ({ title, value, icon: Icon, trend, trendLabel = 'vs mes anterio
                 </div>
             </div>
 
+            {detail && (
+                <div className="mt-4 text-xs font-bold text-gray-500">
+                    {detail}
+                </div>
+            )}
+
             {trend && (
-                <div className={`mt-4 flex items-center text-xs font-bold ${trendUp ? 'text-emerald-600' : 'text-rose-500'}`}>
+                <div className={`mt-2 flex items-center text-xs font-bold ${trendUp ? 'text-emerald-600' : 'text-rose-500'}`}>
                     {trendUp ? '↑' : '↓'} {trend}
-                    <span className="text-gray-400 font-medium ml-2 uppercase tracking-wide">{trendLabel}</span>
+                    {trendLabel ? (
+                        <span className="text-gray-400 font-medium ml-2 uppercase tracking-wide">{trendLabel}</span>
+                    ) : null}
                 </div>
             )}
         </div>

@@ -1274,8 +1274,9 @@ const Dashboard = () => {
                         value={`$${Math.round(teamDashboardTotals.monthSalesNet).toLocaleString()}`}
                         icon={CalendarIcon}
                         color="indigo"
-                        trend={`$${Math.round(Math.abs(teamDashboardTotals.monthSalesNet - teamDashboardTotals.previousMonthToDateSalesNet)).toLocaleString()}`}
-                        trendLabel="vs mismo día del mes anterior"
+                        detail={`Mes anterior a esta fecha: $${Math.round(teamDashboardTotals.previousMonthToDateSalesNet).toLocaleString()}`}
+                        trend={`Variación: ${teamDashboardTotals.monthSalesNet >= teamDashboardTotals.previousMonthToDateSalesNet ? '+' : '-'}$${Math.round(Math.abs(teamDashboardTotals.monthSalesNet - teamDashboardTotals.previousMonthToDateSalesNet)).toLocaleString()}`}
+                        trendLabel=""
                         trendUp={teamDashboardTotals.monthSalesNet >= teamDashboardTotals.previousMonthToDateSalesNet}
                     />
                 </div>
