@@ -154,6 +154,23 @@ const SellerDashboard = () => {
         void fetchData();
     }, [profile?.id, fromDate, toDate]);
 
+    useEffect(() => {
+        if (!profile?.id) return;
+
+        const subscription = supabase
+            .channel(`seller-dashboard-goals-${profile.id}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'goals' }, (payload) => {
+                const changedRow = payload.new || payload.old;
+                if (changedRow && 'user_id' in changedRow && changedRow.user_id !== profile.id) return;
+                void fetchData();
+            })
+            .subscribe();
+
+        return () => {
+            subscription.unsubscribe();
+        };
+    }, [profile?.id, fromDate, toDate]);
+
     const fetchData = async () => {
         if (!profile?.id) return;
         setLoading(true);

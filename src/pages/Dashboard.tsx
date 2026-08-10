@@ -233,6 +233,9 @@ const Dashboard = () => {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'visits' }, () => {
                 fetchDashboardData();
             })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'goals' }, () => {
+                fetchDashboardData();
+            })
             .subscribe();
 
         return () => {
