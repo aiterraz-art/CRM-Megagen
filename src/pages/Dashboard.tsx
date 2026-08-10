@@ -14,6 +14,7 @@ import ActivityChart from '../components/charts/ActivityChart';
 import ZoneDistributionChart from '../components/charts/ZoneDistributionChart';
 import KPICard from '../components/KPICard';
 import { getPreviousBusinessDay } from '../utils/businessDate';
+import { grossToNet } from '../utils/amounts';
 
 const gpsComunaCache = new Map<string, string>();
 
@@ -53,7 +54,7 @@ const buildMonthlySalesTrend = (
         if (!order.created_at) return;
 
         const day = new Date(order.created_at).getDate();
-        salesByDay.set(day, (salesByDay.get(day) || 0) + Number(order.total_amount || 0));
+        salesByDay.set(day, (salesByDay.get(day) || 0) + grossToNet(order.total_amount));
     });
 
     const trendData: Array<{ name: string; sales: number }> = [];
@@ -311,7 +312,7 @@ const Dashboard = () => {
 
                 monthOrders?.forEach(o => {
                     if (isBillableOrderStatus(o.status)) {
-                        monthSales += Number(o.total_amount || 0);
+                        monthSales += grossToNet(o.total_amount);
                         activeOrdersCount++;
                     }
                 });
@@ -903,8 +904,8 @@ const Dashboard = () => {
                         }).length;
 
                         const pendingQuotesNoOrder = sellerYesterdayQuotes.filter((quote: any) => !convertedQuoteIds.has(quote.id)).length;
-                        const todaySalesNet = sellerTodayOrders.reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
-                        const monthSalesNet = sellerMonthOrders.reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
+                        const todaySalesNet = sellerTodayOrders.reduce((sum: number, order: any) => sum + grossToNet(order.total_amount), 0);
+                        const monthSalesNet = sellerMonthOrders.reduce((sum: number, order: any) => sum + grossToNet(order.total_amount), 0);
 
                         return {
                             id: seller.id,

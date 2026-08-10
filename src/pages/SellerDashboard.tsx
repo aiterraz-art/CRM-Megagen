@@ -288,7 +288,7 @@ const SellerDashboard = () => {
                 (order: any) => isBillableOrderStatus(order.status)
             );
             const todayBilledSales = sanitizedTodayOrders.reduce(
-                (sum: number, order: any) => sum + Number(order.total_amount || 0),
+                (sum: number, order: any) => sum + grossToNet(order.total_amount),
                 0
             );
 
@@ -296,7 +296,7 @@ const SellerDashboard = () => {
                 (order: any) => isBillableOrderStatus(order.status)
             );
             const monthBilledSales = sanitizedMonthOrders.reduce(
-                (sum: number, order: any) => sum + Number(order.total_amount || 0),
+                (sum: number, order: any) => sum + grossToNet(order.total_amount),
                 0
             );
 
