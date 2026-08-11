@@ -47,9 +47,8 @@ const DeliveryNoteTemplate: React.FC<Props> = ({ data, onClose }) => {
 
     const companyName = normalizeCompanyValue(import.meta.env.VITE_COMPANY_NAME) || 'Mi Empresa';
     const companyLogo = import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png';
-    const is3DentalCompany = companyName.toLowerCase().includes('3dental');
-    const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
-    const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || (is3DentalCompany ? 'Americo Vespucio 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
+    const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || 'RUT por configurar';
+    const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || 'Avenida Americo Vespucio 2880 of 1403, CONCHALI';
 
     const handlePrint = () => {
         window.print();

@@ -36,12 +36,11 @@ type OrderDocumentViewModel = {
 const buildOrderDocumentViewModel = (data: OrderPdfData): OrderDocumentViewModel => {
     const companyName = normalizeCompanyValue(import.meta.env.VITE_COMPANY_NAME) || 'MEGAGEN IMPLANT';
     const companyLogo = import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png';
-    const is3DentalCompany = companyName.toLowerCase().includes('3dental');
     const companyGiro = normalizeCompanyValue(import.meta.env.VITE_COMPANY_GIRO) || 'Venta insumos dentales';
-    const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || (is3DentalCompany ? 'Americo Vespucio 2880 of 1403, Conchali' : 'Avenida Americo Vespucio 2880 of 1403, CONCHALI');
+    const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || 'Avenida Americo Vespucio 2880 of 1403, CONCHALI';
     const companyPhone = normalizeCompanyValue(import.meta.env.VITE_COMPANY_PHONE) || '961183899';
     const companyEmail = normalizeCompanyValue(import.meta.env.VITE_COMPANY_EMAIL) || normalizeCompanyValue(import.meta.env.VITE_OWNER_EMAIL) || 'aterraza@imegagen.cl';
-    const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || (is3DentalCompany ? '76.921-029-6' : '76.921.029-6');
+    const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || 'RUT por configurar';
     const sellerEmail = normalizeCompanyValue(data.sellerEmail) || companyEmail;
 
     const items = Array.isArray(data.items) ? data.items : [];

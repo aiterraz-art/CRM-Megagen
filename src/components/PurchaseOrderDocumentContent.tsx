@@ -33,7 +33,7 @@ const PurchaseOrderDocumentContent: React.FC<{ data: PurchaseOrderPdfData }> = (
     const companyGiro = normalizeCompanyValue(import.meta.env.VITE_COMPANY_GIRO) || 'Gestión logística y abastecimiento';
     const companyAddress = normalizeCompanyValue(import.meta.env.VITE_COMPANY_ADDRESS) || 'Avenida Americo Vespucio 2880 of 1403, Conchali';
     const companyPhone = normalizeCompanyValue(import.meta.env.VITE_COMPANY_PHONE) || '961183899';
-    const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || '76.921.029-6';
+    const companyRut = normalizeCompanyValue(import.meta.env.VITE_COMPANY_RUT) || 'RUT por configurar';
     const companyEmail = normalizeCompanyValue(import.meta.env.VITE_COMPANY_EMAIL) || normalizeCompanyValue(import.meta.env.VITE_OWNER_EMAIL) || 'aterraza@imegagen.cl';
 
     return (
