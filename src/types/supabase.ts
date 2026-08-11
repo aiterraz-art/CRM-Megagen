@@ -367,6 +367,7 @@ export interface Database {
                     origin_country: string
                     status: string
                     supplier_name: string
+                    tracking_number: string | null
                     transport_mode: string
                     updated_at: string
                 }
@@ -381,6 +382,7 @@ export interface Database {
                     origin_country: string
                     status?: string
                     supplier_name: string
+                    tracking_number?: string | null
                     transport_mode: string
                     updated_at?: string
                 }
@@ -395,6 +397,7 @@ export interface Database {
                     origin_country?: string
                     status?: string
                     supplier_name?: string
+                    tracking_number?: string | null
                     transport_mode?: string
                     updated_at?: string
                 }

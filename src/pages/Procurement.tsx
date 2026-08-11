@@ -143,6 +143,7 @@ const createEmptyShipmentForm = () => ({
     supplierName: '',
     originCountry: '',
     originCity: '',
+    trackingNumber: '',
     transportMode: 'sea' as ShipmentMode,
     departureDate: '',
     etaDate: '',
@@ -171,6 +172,7 @@ const normalizeShipmentForm = (value?: Partial<ShipmentFormState>): ShipmentForm
     supplierName: value?.supplierName || '',
     originCountry: value?.originCountry || '',
     originCity: value?.originCity || '',
+    trackingNumber: value?.trackingNumber || '',
     transportMode: value?.transportMode === 'air' ? 'air' : 'sea',
     departureDate: value?.departureDate || '',
     etaDate: value?.etaDate || '',
@@ -585,6 +587,7 @@ const Procurement: React.FC = () => {
                 supplierName: shipment.supplier_name,
                 originCountry: shipment.origin_country,
                 originCity: shipment.origin_city,
+                trackingNumber: shipment.tracking_number || '',
                 transportMode: shipment.transport_mode as ShipmentMode,
                 departureDate: shipment.departure_date || '',
                 etaDate: shipment.eta_date || '',
@@ -825,6 +828,7 @@ const Procurement: React.FC = () => {
                 supplier_name: shipmentForm.supplierName.trim(),
                 origin_country: shipmentForm.originCountry.trim(),
                 origin_city: shipmentForm.originCity.trim(),
+                tracking_number: shipmentForm.trackingNumber.trim() || null,
                 transport_mode: shipmentForm.transportMode,
                 departure_date: shipmentForm.departureDate || null,
                 eta_date: shipmentForm.etaDate || null,
@@ -1480,6 +1484,10 @@ const Procurement: React.FC = () => {
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Productos</p>
                                                         <p className="mt-1 font-bold text-slate-900">{relatedItemsCount}</p>
                                                     </div>
+                                                    <div className="col-span-2 rounded-2xl bg-slate-50 p-4">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Seguimiento</p>
+                                                        <p className="mt-1 font-bold text-slate-900">{shipment.tracking_number?.trim() || 'Sin seguimiento'}</p>
+                                                    </div>
                                                 </div>
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex flex-wrap items-center gap-2">
@@ -1811,7 +1819,31 @@ const Procurement: React.FC = () => {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                    <div>
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">N° seguimiento</label>
+                                        <input
+                                            value={shipmentForm.trackingNumber}
+                                            onChange={(event) => setShipmentForm((current) => ({ ...current, trackingNumber: event.target.value }))}
+                                            placeholder="Ej. 1234567890"
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Estado</label>
+                                        <select
+                                            value={shipmentForm.status}
+                                            onChange={(event) => setShipmentForm((current) => ({ ...current, status: event.target.value as ShipmentStatus }))}
+                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
+                                        >
+                                            {Object.entries(SHIPMENT_STATUS_LABELS).map(([value, label]) => (
+                                                <option key={value} value={value}>{label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                                     <div>
                                         <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Salida</label>
                                         <input
@@ -1829,18 +1861,6 @@ const Procurement: React.FC = () => {
                                             onChange={(event) => setShipmentForm((current) => ({ ...current, etaDate: event.target.value }))}
                                             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
                                         />
-                                    </div>
-                                    <div>
-                                        <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">Estado</label>
-                                        <select
-                                            value={shipmentForm.status}
-                                            onChange={(event) => setShipmentForm((current) => ({ ...current, status: event.target.value as ShipmentStatus }))}
-                                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 font-bold text-slate-800 outline-none focus:border-indigo-300"
-                                        >
-                                            {Object.entries(SHIPMENT_STATUS_LABELS).map(([value, label]) => (
-                                                <option key={value} value={value}>{label}</option>
-                                            ))}
-                                        </select>
                                     </div>
                                 </div>
 
@@ -2037,6 +2057,10 @@ const Procurement: React.FC = () => {
                                         <div className="rounded-2xl bg-slate-50 p-4">
                                             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">ETA</p>
                                             <p className="mt-1 font-bold text-slate-900">{formatDate(selectedShipment.eta_date)}</p>
+                                        </div>
+                                        <div className="col-span-2 rounded-2xl bg-slate-50 p-4">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">N° seguimiento</p>
+                                            <p className="mt-1 font-bold text-slate-900">{selectedShipment.tracking_number?.trim() || 'Sin seguimiento'}</p>
                                         </div>
                                     </div>
                                     <div className="rounded-2xl bg-white border border-slate-200 p-4">
