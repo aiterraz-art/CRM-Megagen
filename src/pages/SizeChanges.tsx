@@ -91,7 +91,7 @@ const SizeChanges: React.FC = () => {
     }, [profiles]);
 
     const sellerOptions = useMemo(
-        () => profiles.filter((row) => row.role === 'seller' && row.status === 'active'),
+        () => profiles.filter((row) => ['seller', 'jefe'].includes(String(row.role || '').toLowerCase()) && row.status === 'active'),
         [profiles]
     );
 
@@ -344,6 +344,7 @@ const SizeChanges: React.FC = () => {
     const canEditRequest = (request: EnrichedRequest) => {
         if (request.status !== 'requested') return false;
         if (effectiveRole === 'admin') return true;
+        if (effectiveRole === 'jefe') return true;
         return effectiveRole === 'seller' && request.seller_id === profile?.id;
     };
 
