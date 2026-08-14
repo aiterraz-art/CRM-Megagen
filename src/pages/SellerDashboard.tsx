@@ -7,6 +7,7 @@ import KPICard from '../components/KPICard';
 import GoalProgressChart from '../components/charts/GoalProgressChart';
 import { grossToNet } from '../utils/amounts';
 import { getPreviousBusinessDay } from '../utils/businessDate';
+import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
 
 type VisitRow = {
     id: string;
@@ -155,7 +156,7 @@ const SellerDashboard = () => {
     }, [profile?.id, fromDate, toDate]);
 
     useEffect(() => {
-        if (!profile?.id) return;
+        if (!profile?.id || !AUTO_REFRESH_ENABLED) return;
 
         const subscription = supabase
             .channel(`seller-dashboard-goals-${profile.id}`)

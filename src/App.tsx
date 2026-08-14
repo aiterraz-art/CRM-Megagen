@@ -11,6 +11,7 @@ import { VisitProvider } from './contexts/VisitContext';
 import { startLocationQueueWorker } from './services/locationQueue';
 import { lazyRetry } from './utils/lazyRetry';
 import { checkForAppUpdate } from './utils/appVersion';
+import { AUTO_REFRESH_ENABLED } from './utils/runtimeFlags';
 
 const loadable = <T extends React.ComponentType<any>>(importer: () => Promise<{ default: T }>) =>
     lazy(() => lazyRetry(importer));
@@ -124,6 +125,8 @@ function App() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (!AUTO_REFRESH_ENABLED) return;
+
         let cancelled = false;
 
         const verifyFreshBuild = async () => {

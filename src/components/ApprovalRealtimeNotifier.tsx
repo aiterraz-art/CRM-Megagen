@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BellRing } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
 
 type ApprovalToast = {
     id: string;
@@ -22,7 +23,7 @@ export default function ApprovalRealtimeNotifier() {
     const canReceive = canReceivePendingRequests || canReceiveDiscountResolution;
 
     useEffect(() => {
-        if (!canReceive || !profile?.id) return;
+        if (!canReceive || !profile?.id || !AUTO_REFRESH_ENABLED) return;
 
         const channel = supabase
             .channel(`approval-realtime-${profile.id}`)

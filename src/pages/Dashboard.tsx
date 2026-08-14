@@ -15,6 +15,7 @@ import ZoneDistributionChart from '../components/charts/ZoneDistributionChart';
 import KPICard from '../components/KPICard';
 import { getPreviousBusinessDay } from '../utils/businessDate';
 import { grossToNet } from '../utils/amounts';
+import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
 
 const gpsComunaCache = new Map<string, string>();
 
@@ -228,6 +229,10 @@ const Dashboard = () => {
             return () => clearTimeout(timeout);
         }
         fetchDashboardData();
+
+        if (!AUTO_REFRESH_ENABLED) {
+            return;
+        }
 
         // Realtime subscription to update visits list automatically
         const subscription = supabase

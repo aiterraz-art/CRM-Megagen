@@ -7,6 +7,7 @@ import GlobalVisitTimer from './GlobalVisitTimer';
 import ApprovalRealtimeNotifier from './ApprovalRealtimeNotifier';
 import PushSubscriptionManager from './PushSubscriptionManager';
 import { countPendingLostReasons, LOST_REASON_REFRESH_EVENT } from '../utils/lostReason';
+import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
 
 interface LayoutProps {
     children?: React.ReactNode;
@@ -394,7 +395,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     }, [loadPendingLostReasonCount]);
 
     useEffect(() => {
-        if (!shouldTrackPendingLostReasons) return;
+        if (!shouldTrackPendingLostReasons || !AUTO_REFRESH_ENABLED) return;
 
         const handleRefresh = () => {
             void loadPendingLostReasonCount();

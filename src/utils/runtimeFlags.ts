@@ -1,0 +1,2 @@
+export const MANUAL_REFRESH_ONLY = true;
+export const AUTO_REFRESH_ENABLED = !MANUAL_REFRESH_ONLY;

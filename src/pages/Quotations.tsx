@@ -26,6 +26,7 @@ import {
     fetchCollectionsDebtSnapshotByRut,
     type CollectionsDebtSnapshot,
 } from '../utils/collectionsLinking';
+import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
 import QuotationOrderConversionHistoryModal from '../components/modals/QuotationOrderConversionHistoryModal';
 import { Database } from '../types/supabase';
 
@@ -848,6 +849,8 @@ const Quotations: React.FC = () => {
     }, [fetchAvailableSellers, fetchQuotations, fetchClientsForModal, permissions]);
 
     useEffect(() => {
+        if (!AUTO_REFRESH_ENABLED) return;
+
         const refreshProductsOnResume = () => {
             if (document.visibilityState === 'visible') {
                 void fetchProducts();

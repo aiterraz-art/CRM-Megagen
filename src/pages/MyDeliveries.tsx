@@ -3,6 +3,7 @@ import { APIProvider, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { Truck, MapPin, Clock3, CheckCircle2, Navigation } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
 
 type OrderRow = {
     id: string;
@@ -128,6 +129,7 @@ const StatusContent: React.FC = () => {
 
     useEffect(() => {
         fetchData();
+        if (!AUTO_REFRESH_ENABLED) return;
         const id = window.setInterval(fetchData, 60000);
         return () => window.clearInterval(id);
     }, [profile?.id]);

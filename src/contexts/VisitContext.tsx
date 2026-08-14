@@ -4,6 +4,7 @@ import { checkGPSConnection } from '../utils/gps';
 import { Database } from '../types/supabase';
 import { useUser } from './UserContext';
 import { queueVisitCheckoutLocation } from '../services/locationQueue';
+import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
 
 type Visit = Database['public']['Tables']['visits']['Row'];
 
@@ -58,7 +59,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         fetchActiveVisit();
 
         // REALTIME SYNC: Listen for changes in the visits table for this rep
-        if (!profile?.id) return;
+        if (!profile?.id || !AUTO_REFRESH_ENABLED) return;
 
         const channel = supabase
             .channel(`active-visit-${profile.id}`)

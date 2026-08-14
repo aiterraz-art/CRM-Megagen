@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
 
 const FALLBACK_VAPID_PUBLIC_KEY = 'BDWGbkdR0Pri6FW4pzYeM1T3NOwKBwN87c4gpgx7Us-X1LnIBBk0e1z1Px9tQA5LRGEi5EIFuCprleT2DQOvl2o';
 const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined) || FALLBACK_VAPID_PUBLIC_KEY;
@@ -155,7 +156,7 @@ export default function PushSubscriptionManager() {
     }, [canReceivePush, profile?.id]);
 
     useEffect(() => {
-        if (!canReceivePush || !profile?.id) return;
+        if (!canReceivePush || !profile?.id || !AUTO_REFRESH_ENABLED) return;
 
         const handleVisibilityChange = () => {
             if (!document.hidden) {
