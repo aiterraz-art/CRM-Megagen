@@ -32,7 +32,6 @@ type InventoryTab = 'stock' | 'rotation' | 'movements';
 type ImportableShipment = Pick<Database['public']['Tables']['inbound_shipments']['Row'], 'id' | 'supplier_name' | 'status' | 'eta_date'>;
 type ImportableShipmentItem = Pick<Database['public']['Tables']['inbound_shipment_items']['Row'], 'id' | 'shipment_id' | 'product_id' | 'product_name_snapshot' | 'sku_snapshot' | 'qty'>;
 const MOVEMENTS_PAGE_SIZE = 100;
-const MOVEMENTS_FETCH_BATCH_SIZE = 1000;
 
 const MOVEMENT_REASON_OPTIONS = [
     { value: 'stock_count', label: 'Conteo de stock' },
@@ -65,6 +64,7 @@ const Inventory = () => {
     const [stockSupplierFilter, setStockSupplierFilter] = useState<'all' | 'none' | string>('all');
     const [rotationSearch, setRotationSearch] = useState('');
     const [movementSearch, setMovementSearch] = useState('');
+    const [debouncedMovementSearch, setDebouncedMovementSearch] = useState('');
     const [rotationOnlyAlerts, setRotationOnlyAlerts] = useState(false);
     const [rotationAlertFilter, setRotationAlertFilter] = useState<'all' | 'critical' | 'low' | 'warning' | 'healthy'>('all');
     const [rotationCategoryFilter, setRotationCategoryFilter] = useState<'all' | string>('all');
@@ -86,6 +86,7 @@ const Inventory = () => {
     const [movementsError, setMovementsError] = useState('');
     const [clearingDormantMinimums, setClearingDormantMinimums] = useState(false);
     const [movementPage, setMovementPage] = useState(1);
+    const [movementTotalCount, setMovementTotalCount] = useState(0);
     const [movementLoadedOnce, setMovementLoadedOnce] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const [importType, setImportType] = useState<ImportType | null>(null);
@@ -252,6 +253,12 @@ const Inventory = () => {
         return 'Sistema';
     };
 
+    const getProfileMovementLabel = (profileRow: { full_name?: string | null; email?: string | null }) => {
+        if (profileRow.full_name?.trim()) return profileRow.full_name.trim();
+        if (profileRow.email) return profileRow.email.split('@')[0];
+        return 'Sistema';
+    };
+
     const inventoryCategories = useMemo(
         () => Array.from(new Set(items.map((item) => item.category || 'General'))).sort(),
         [items]
@@ -373,44 +380,112 @@ const Inventory = () => {
         }
     };
 
-    const fetchMovements = async () => {
+    const fetchMovements = async (page = 1) => {
         if (!canViewAnalytics) return;
 
         setMovementsLoading(true);
         setMovementsError('');
         try {
-            const movementRows: InventoryMovement[] = [];
-            let from = 0;
+            const searchTerm = debouncedMovementSearch.trim();
+            let inventoryIdsForSearch: string[] = [];
+            let profileIdsForSearch: string[] = [];
+            let selectedUserProfileIds: string[] = [];
 
-            while (true) {
-                let query = (supabase.from('inventory_movements') as any)
-                    .select('id, inventory_id, movement_type, direction, qty, stock_before, stock_after, unit_price_snapshot, reason_code, reason_note, source_table, source_id, shipment_id, order_id, order_item_id, performed_by, created_at')
-                    .order('created_at', { ascending: false })
-                    .range(from, from + MOVEMENTS_FETCH_BATCH_SIZE - 1);
+            if (searchTerm) {
+                const [inventorySearchRes, profileSearchRes] = await Promise.all([
+                    (supabase.from('inventory') as any)
+                        .select('id')
+                        .or(`sku.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%`)
+                        .limit(500),
+                    supabase
+                        .from('profiles')
+                        .select('id, full_name, email')
+                        .or(`full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
+                        .limit(200)
+                ]);
 
-                if (movementTypeFilter !== 'all') {
-                    query = query.eq('movement_type', movementTypeFilter);
-                }
-                if (movementDateFrom) {
-                    query = query.gte('created_at', `${movementDateFrom}T00:00:00`);
-                }
-                if (movementDateTo) {
-                    query = query.lte('created_at', `${movementDateTo}T23:59:59.999`);
-                }
+                if (inventorySearchRes.error) throw inventorySearchRes.error;
+                if (profileSearchRes.error) throw profileSearchRes.error;
 
-                const { data, error } = await query;
-                if (error) throw error;
-
-                const batchRows = (data || []) as InventoryMovement[];
-                movementRows.push(...batchRows);
-
-                if (batchRows.length < MOVEMENTS_FETCH_BATCH_SIZE) {
-                    break;
-                }
-
-                from += MOVEMENTS_FETCH_BATCH_SIZE;
+                inventoryIdsForSearch = ((inventorySearchRes.data || []) as Array<{ id: string }>).map((item) => item.id);
+                profileIdsForSearch = (profileSearchRes.data || []).map((item) => item.id);
             }
 
+            if (movementUserFilter !== 'all' && movementUserFilter !== 'Sistema') {
+                const { data: userProfiles, error: userProfilesError } = await supabase
+                    .from('profiles')
+                    .select('id, full_name, email');
+
+                if (userProfilesError) throw userProfilesError;
+
+                selectedUserProfileIds = (userProfiles || [])
+                    .filter((item) => getProfileMovementLabel(item) === movementUserFilter)
+                    .map((item) => item.id);
+
+                if (selectedUserProfileIds.length === 0) {
+                    setMovements([]);
+                    setMovementTotalCount(0);
+                    setMovementLoadedOnce(true);
+                    return;
+                }
+            }
+
+            let query = (supabase.from('inventory_movements') as any)
+                .select('id, inventory_id, movement_type, direction, qty, stock_before, stock_after, unit_price_snapshot, reason_code, reason_note, source_table, source_id, shipment_id, order_id, order_item_id, performed_by, created_at', { count: 'exact' })
+                .order('created_at', { ascending: false });
+
+            if (movementTypeFilter !== 'all') {
+                query = query.eq('movement_type', movementTypeFilter);
+            }
+            if (movementDateFrom) {
+                query = query.gte('created_at', `${movementDateFrom}T00:00:00`);
+            }
+            if (movementDateTo) {
+                query = query.lte('created_at', `${movementDateTo}T23:59:59.999`);
+            }
+            if (movementOriginFilter === 'Embarque') {
+                query = query.not('shipment_id', 'is', null);
+            } else if (movementOriginFilter === 'Venta') {
+                query = query.not('order_id', 'is', null);
+            } else if (movementOriginFilter === 'Importación masiva') {
+                query = query.eq('source_table', 'inventory_stock_import');
+            } else if (movementOriginFilter === 'Ingreso manual') {
+                query = query.eq('source_table', 'inventory_manual_receipt');
+            } else if (movementOriginFilter === 'Ajuste') {
+                query = query
+                    .is('shipment_id', null)
+                    .is('order_id', null)
+                    .or('source_table.is.null,source_table.not.in.(inventory_stock_import,inventory_manual_receipt)');
+            }
+            if (movementUserFilter === 'Sistema') {
+                query = query.is('performed_by', null);
+            } else if (selectedUserProfileIds.length > 0) {
+                query = query.in('performed_by', selectedUserProfileIds);
+            }
+            if (searchTerm) {
+                const searchClauses = [
+                    `reason_note.ilike.%${searchTerm}%`,
+                    `reason_code.ilike.%${searchTerm}%`,
+                    `movement_type.ilike.%${searchTerm}%`
+                ];
+
+                if (inventoryIdsForSearch.length > 0) {
+                    searchClauses.push(`inventory_id.in.(${inventoryIdsForSearch.join(',')})`);
+                }
+                if (profileIdsForSearch.length > 0) {
+                    searchClauses.push(`performed_by.in.(${profileIdsForSearch.join(',')})`);
+                }
+
+                query = query.or(searchClauses.join(','));
+            }
+
+            const from = (page - 1) * MOVEMENTS_PAGE_SIZE;
+            const to = from + MOVEMENTS_PAGE_SIZE - 1;
+            const { data, error, count } = await query.range(from, to);
+
+            if (error) throw error;
+
+            const movementRows = (data || []) as InventoryMovement[];
             const inventoryIds = Array.from(new Set(movementRows.map((movement) => movement.inventory_id).filter(Boolean)));
             const profileIds = Array.from(new Set(movementRows.map((movement) => movement.performed_by).filter(Boolean)));
 
@@ -436,6 +511,7 @@ const Inventory = () => {
                 inventory: inventoryById.get(movement.inventory_id) || null,
                 profile: movement.performed_by ? profilesById.get(movement.performed_by) || null : null
             })));
+            setMovementTotalCount(count || 0);
             setMovementLoadedOnce(true);
         } catch (error: any) {
             if (!isMissingBackendFeatureError(error)) {
@@ -443,6 +519,7 @@ const Inventory = () => {
                 setMovementsError(error.message || 'No se pudieron cargar los movimientos.');
             }
             setMovements([]);
+            setMovementTotalCount(0);
         } finally {
             setMovementsLoading(false);
         }
@@ -457,9 +534,17 @@ const Inventory = () => {
     }, [canViewAnalytics]);
 
     useEffect(() => {
+        const timeoutId = window.setTimeout(() => {
+            setDebouncedMovementSearch(movementSearch.trim());
+        }, 300);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [movementSearch]);
+
+    useEffect(() => {
         if (!canViewAnalytics || activeTab !== 'movements') return;
-        void fetchMovements();
-    }, [activeTab, canViewAnalytics, movementTypeFilter, movementDateFrom, movementDateTo]);
+        void fetchMovements(movementPage);
+    }, [activeTab, canViewAnalytics, debouncedMovementSearch, movementDateFrom, movementDateTo, movementOriginFilter, movementPage, movementTypeFilter, movementUserFilter]);
 
     const fetchHistory = async (item: InventoryItem) => {
         setSelectedHistoryItem(item);
@@ -576,7 +661,7 @@ const Inventory = () => {
         if (canViewAnalytics) {
             await fetchRotationMetrics();
             if (activeTab === 'movements' || movementLoadedOnce) {
-                await fetchMovements();
+                await fetchMovements(movementPage);
             }
         }
     };
@@ -1381,38 +1466,13 @@ const Inventory = () => {
         }
     };
 
-    const filteredMovements = useMemo(() => {
-        return movements.filter((movement) => {
-            const haystack = [
-                movement.inventory?.sku,
-                movement.inventory?.name,
-                movement.reason_note,
-                movement.reason_code,
-                movement.movement_type,
-                getMovementUserLabel(movement),
-                getMovementOriginLabel(movement)
-            ]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase();
-
-            if (movementSearch.trim() && !haystack.includes(movementSearch.trim().toLowerCase())) return false;
-            if (movementOriginFilter !== 'all' && getMovementOriginLabel(movement) !== movementOriginFilter) return false;
-            if (movementUserFilter !== 'all' && getMovementUserLabel(movement) !== movementUserFilter) return false;
-            return true;
-        });
-    }, [movementOriginFilter, movementSearch, movementUserFilter, movements]);
-
     useEffect(() => {
         setMovementPage(1);
     }, [movementSearch, movementTypeFilter, movementOriginFilter, movementUserFilter, movementDateFrom, movementDateTo]);
 
-    const paginatedMovements = useMemo(() => {
-        const startIndex = (movementPage - 1) * MOVEMENTS_PAGE_SIZE;
-        return filteredMovements.slice(startIndex, startIndex + MOVEMENTS_PAGE_SIZE);
-    }, [filteredMovements, movementPage]);
-
-    const movementHasMore = movementPage * MOVEMENTS_PAGE_SIZE < filteredMovements.length;
+    const filteredMovements = movements;
+    const paginatedMovements = movements;
+    const movementHasMore = movementPage * MOVEMENTS_PAGE_SIZE < movementTotalCount;
 
     const lowStockCount = items.filter((item) => (item.stock_qty || 0) <= (item.min_stock_alert || 5)).length;
     const totalUnits = items.reduce((accumulator, item) => accumulator + (item.stock_qty || 0), 0);
@@ -2334,7 +2394,7 @@ const Inventory = () => {
                                     ))}
                                 </tbody>
                             </table>
-                            {filteredMovements.length === 0 && (
+                            {paginatedMovements.length === 0 && (
                                 <div className="p-10 text-center">
                                     <History className="mx-auto mb-4 text-slate-300" size={36} />
                                     <h3 className="mb-2 text-xl font-black text-slate-900">No hay movimientos para los filtros actuales</h3>
@@ -2346,7 +2406,7 @@ const Inventory = () => {
                     {!movementsLoading && !movementsError && (
                         <div className="flex items-center justify-between">
                             <p className="text-sm font-bold text-slate-500">
-                                Página {movementPage} · mostrando {paginatedMovements.length} de {filteredMovements.length} movimientos
+                                Página {movementPage} · mostrando {paginatedMovements.length} de {movementTotalCount} movimientos
                             </p>
                             <div className="flex gap-3">
                                 <button
