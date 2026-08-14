@@ -111,9 +111,9 @@ const getDefaultFilters = (): VisitFilters => {
         from: today,
         to: today,
         seller: 'all',
-        type: 'cold_visit',
+        type: 'all',
         status: 'all',
-        conversion: 'pending',
+        conversion: 'all',
         q: ''
     };
 };
@@ -217,6 +217,7 @@ const getVisitTypeLabel = (visit: VisitHistoryItem) => {
     if (normalizedStatus === 'scheduled' || normalizedStatus === 'pending' || normalizedStatus === 'rescheduled') {
         return 'Agendada';
     }
+    if (visit.client_id) return 'Cliente';
     return 'Visita';
 };
 
@@ -472,6 +473,7 @@ const VisitHistory = () => {
                         lng,
                         check_out_lat,
                         check_out_lng,
+                        client_id,
                         sales_rep_id,
                         type,
                         cold_visit_clinic_name,
@@ -847,8 +849,8 @@ const VisitHistory = () => {
             <div className="space-y-8 animate-in fade-in duration-700">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
-                        <h1 className="text-4xl font-black text-gray-900 tracking-tight mb-2">Visitas en Frío</h1>
-                        <p className="text-gray-500 font-medium">Cada vendedor ve sus visitas y puede convertirlas en venta desde el botón Vender.</p>
+                        <h1 className="text-4xl font-black text-gray-900 tracking-tight mb-2">Historial de Visitas</h1>
+                        <p className="text-gray-500 font-medium">Aquí se muestran visitas a clientes y visitas en frío. Desde este módulo también puedes convertir una visita en frío en venta.</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
                         <button
