@@ -32,6 +32,7 @@ type InventoryTab = 'stock' | 'rotation' | 'movements';
 type ImportableShipment = Pick<Database['public']['Tables']['inbound_shipments']['Row'], 'id' | 'supplier_name' | 'status' | 'eta_date'>;
 type ImportableShipmentItem = Pick<Database['public']['Tables']['inbound_shipment_items']['Row'], 'id' | 'shipment_id' | 'product_id' | 'product_name_snapshot' | 'sku_snapshot' | 'qty'>;
 const MOVEMENTS_PAGE_SIZE = 100;
+const MOVEMENTS_FETCH_BATCH_SIZE = 1000;
 
 const MOVEMENT_REASON_OPTIONS = [
     { value: 'stock_count', label: 'Conteo de stock' },
@@ -85,7 +86,6 @@ const Inventory = () => {
     const [movementsError, setMovementsError] = useState('');
     const [clearingDormantMinimums, setClearingDormantMinimums] = useState(false);
     const [movementPage, setMovementPage] = useState(1);
-    const [movementHasMore, setMovementHasMore] = useState(false);
     const [movementLoadedOnce, setMovementLoadedOnce] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const [importType, setImportType] = useState<ImportType | null>(null);
@@ -373,21 +373,44 @@ const Inventory = () => {
         }
     };
 
-    const fetchMovements = async (page = 1) => {
+    const fetchMovements = async () => {
         if (!canViewAnalytics) return;
 
         setMovementsLoading(true);
         setMovementsError('');
         try {
-            const { data, error } = await (supabase.from('inventory_movements') as any)
-                .select('id, inventory_id, movement_type, direction, qty, stock_before, stock_after, unit_price_snapshot, reason_code, reason_note, source_table, source_id, shipment_id, order_id, order_item_id, performed_by, created_at')
-                .order('created_at', { ascending: false })
-                .range((page - 1) * MOVEMENTS_PAGE_SIZE, (page * MOVEMENTS_PAGE_SIZE));
+            const movementRows: InventoryMovement[] = [];
+            let from = 0;
 
-            if (error) throw error;
+            while (true) {
+                let query = (supabase.from('inventory_movements') as any)
+                    .select('id, inventory_id, movement_type, direction, qty, stock_before, stock_after, unit_price_snapshot, reason_code, reason_note, source_table, source_id, shipment_id, order_id, order_item_id, performed_by, created_at')
+                    .order('created_at', { ascending: false })
+                    .range(from, from + MOVEMENTS_FETCH_BATCH_SIZE - 1);
 
-            const fetchedRows = (data || []) as InventoryMovement[];
-            const movementRows = fetchedRows.slice(0, MOVEMENTS_PAGE_SIZE);
+                if (movementTypeFilter !== 'all') {
+                    query = query.eq('movement_type', movementTypeFilter);
+                }
+                if (movementDateFrom) {
+                    query = query.gte('created_at', `${movementDateFrom}T00:00:00`);
+                }
+                if (movementDateTo) {
+                    query = query.lte('created_at', `${movementDateTo}T23:59:59.999`);
+                }
+
+                const { data, error } = await query;
+                if (error) throw error;
+
+                const batchRows = (data || []) as InventoryMovement[];
+                movementRows.push(...batchRows);
+
+                if (batchRows.length < MOVEMENTS_FETCH_BATCH_SIZE) {
+                    break;
+                }
+
+                from += MOVEMENTS_FETCH_BATCH_SIZE;
+            }
+
             const inventoryIds = Array.from(new Set(movementRows.map((movement) => movement.inventory_id).filter(Boolean)));
             const profileIds = Array.from(new Set(movementRows.map((movement) => movement.performed_by).filter(Boolean)));
 
@@ -413,7 +436,6 @@ const Inventory = () => {
                 inventory: inventoryById.get(movement.inventory_id) || null,
                 profile: movement.performed_by ? profilesById.get(movement.performed_by) || null : null
             })));
-            setMovementHasMore(fetchedRows.length > MOVEMENTS_PAGE_SIZE);
             setMovementLoadedOnce(true);
         } catch (error: any) {
             if (!isMissingBackendFeatureError(error)) {
@@ -421,7 +443,6 @@ const Inventory = () => {
                 setMovementsError(error.message || 'No se pudieron cargar los movimientos.');
             }
             setMovements([]);
-            setMovementHasMore(false);
         } finally {
             setMovementsLoading(false);
         }
@@ -437,8 +458,8 @@ const Inventory = () => {
 
     useEffect(() => {
         if (!canViewAnalytics || activeTab !== 'movements') return;
-        void fetchMovements(movementPage);
-    }, [activeTab, canViewAnalytics, movementPage]);
+        void fetchMovements();
+    }, [activeTab, canViewAnalytics, movementTypeFilter, movementDateFrom, movementDateTo]);
 
     const fetchHistory = async (item: InventoryItem) => {
         setSelectedHistoryItem(item);
@@ -555,7 +576,7 @@ const Inventory = () => {
         if (canViewAnalytics) {
             await fetchRotationMetrics();
             if (activeTab === 'movements' || movementLoadedOnce) {
-                await fetchMovements(movementPage);
+                await fetchMovements();
             }
         }
     };
@@ -1376,14 +1397,22 @@ const Inventory = () => {
                 .toLowerCase();
 
             if (movementSearch.trim() && !haystack.includes(movementSearch.trim().toLowerCase())) return false;
-            if (movementTypeFilter !== 'all' && movement.movement_type !== movementTypeFilter) return false;
             if (movementOriginFilter !== 'all' && getMovementOriginLabel(movement) !== movementOriginFilter) return false;
             if (movementUserFilter !== 'all' && getMovementUserLabel(movement) !== movementUserFilter) return false;
-            if (movementDateFrom && movement.created_at.slice(0, 10) < movementDateFrom) return false;
-            if (movementDateTo && movement.created_at.slice(0, 10) > movementDateTo) return false;
             return true;
         });
-    }, [movementDateFrom, movementDateTo, movementOriginFilter, movementSearch, movementTypeFilter, movementUserFilter, movements]);
+    }, [movementOriginFilter, movementSearch, movementUserFilter, movements]);
+
+    useEffect(() => {
+        setMovementPage(1);
+    }, [movementSearch, movementTypeFilter, movementOriginFilter, movementUserFilter, movementDateFrom, movementDateTo]);
+
+    const paginatedMovements = useMemo(() => {
+        const startIndex = (movementPage - 1) * MOVEMENTS_PAGE_SIZE;
+        return filteredMovements.slice(startIndex, startIndex + MOVEMENTS_PAGE_SIZE);
+    }, [filteredMovements, movementPage]);
+
+    const movementHasMore = movementPage * MOVEMENTS_PAGE_SIZE < filteredMovements.length;
 
     const lowStockCount = items.filter((item) => (item.stock_qty || 0) <= (item.min_stock_alert || 5)).length;
     const totalUnits = items.reduce((accumulator, item) => accumulator + (item.stock_qty || 0), 0);
@@ -2282,7 +2311,7 @@ const Inventory = () => {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {filteredMovements.map((movement) => (
+                                    {paginatedMovements.map((movement) => (
                                         <tr key={movement.id} className="transition-colors hover:bg-slate-50/60">
                                             <td className="px-6 py-5 text-sm font-bold text-slate-800">{formatDateTime(movement.created_at)}</td>
                                             <td className="px-6 py-5">
@@ -2317,7 +2346,7 @@ const Inventory = () => {
                     {!movementsLoading && !movementsError && (
                         <div className="flex items-center justify-between">
                             <p className="text-sm font-bold text-slate-500">
-                                Página {movementPage} · mostrando hasta {MOVEMENTS_PAGE_SIZE} movimientos por carga
+                                Página {movementPage} · mostrando {paginatedMovements.length} de {filteredMovements.length} movimientos
                             </p>
                             <div className="flex gap-3">
                                 <button
