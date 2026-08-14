@@ -300,14 +300,12 @@ const GlobalVisitTimer = () => {
                 />
             )}
 
-            {showScheduleModal && (
-                <ScheduleVisitModal
-                    isOpen={showScheduleModal}
-                    onClose={() => setShowScheduleModal(false)}
-                    client={activeVisit ? { id: activeVisit.client_id, name: 'Cargando...' } as any : null}
-                    onSaved={() => setShowScheduleModal(false)}
-                />
-            )}
+            <ScheduleVisitModal
+                isOpen={showScheduleModal}
+                onClose={() => setShowScheduleModal(false)}
+                client={activeVisit ? { id: activeVisit.client_id, name: 'Cargando...' } as any : null}
+                onSaved={() => setShowScheduleModal(false)}
+            />
 
             {/* Spacer to prevent content from being hidden behind bar on mobile if needed, but 'pb' on main layout usually handles it */}
         </div>

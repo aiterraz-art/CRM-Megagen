@@ -353,12 +353,13 @@ const VisitLog = () => {
                 />
 
                 {/* Client Completion Modal */}
-                {showClientForm && client && (
+                {client && (
                     <ClientFormModal
                         isOpen={showClientForm}
                         onClose={() => setShowClientForm(false)}
                         initialData={client}
                         title="Completar Ficha Cliente"
+                        persistenceKey={`visitlog-complete-client:${client.id}`}
                         onSave={async (updatedData) => {
                             const wasProspect = isProspectStatus(client.status);
                             const { error } = await supabase

@@ -45,6 +45,7 @@ const formatMoney = (value: number | null | undefined) => `$${Number(value || 0)
 const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL') : '-';
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
 const ORDER_ITEMS_PREVIEW_STORAGE_KEY = 'orders.activeItemsPreviewOrderId';
+const COURIER_MODAL_DRAFT_STORAGE_KEY = 'orders.courierModalDraft';
 const CHUNK_SIZE = 50;
 const PAGE_SIZE = 10;
 const isBillingBackofficeRole = (role: string | null | undefined) =>
@@ -221,6 +222,19 @@ const Orders = () => {
     const [trackingNumber, setTrackingNumber] = useState('');
     const [courierModalError, setCourierModalError] = useState<string | null>(null);
     const [savingCourierOrderId, setSavingCourierOrderId] = useState<string | null>(null);
+    const [pendingCourierModalRestoreId, setPendingCourierModalRestoreId] = useState<string | null>(() => {
+        if (typeof window === 'undefined') return null;
+
+        try {
+            const rawDraft = sessionStorage.getItem(COURIER_MODAL_DRAFT_STORAGE_KEY);
+            if (!rawDraft) return null;
+            const parsedDraft = JSON.parse(rawDraft) as { orderId?: string };
+            return parsedDraft?.orderId || null;
+        } catch {
+            sessionStorage.removeItem(COURIER_MODAL_DRAFT_STORAGE_KEY);
+            return null;
+        }
+    });
 
     const isSellerRole = effectiveRole === 'seller';
     const canViewAll = useMemo(
@@ -835,6 +849,9 @@ const Orders = () => {
         setCourierProvider('chileexpress');
         setTrackingNumber('');
         setCourierModalError(null);
+        if (typeof window !== 'undefined') {
+            sessionStorage.removeItem(COURIER_MODAL_DRAFT_STORAGE_KEY);
+        }
     }, []);
 
     const openCourierModal = useCallback((order: EnrichedOrder) => {
@@ -844,6 +861,54 @@ const Orders = () => {
         setTrackingNumber(String(order.tracking_number || '').trim());
         setCourierModalError(null);
     }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        if (!courierModalOrder) {
+            return;
+        }
+
+        sessionStorage.setItem(
+            COURIER_MODAL_DRAFT_STORAGE_KEY,
+            JSON.stringify({
+                orderId: courierModalOrder.id,
+                courierProvider,
+                trackingNumber
+            })
+        );
+    }, [courierModalOrder, courierProvider, trackingNumber]);
+
+    useEffect(() => {
+        if (loading || !pendingCourierModalRestoreId || courierModalOrder) return;
+
+        const restoredOrder = orders.find((order) => order.id === pendingCourierModalRestoreId);
+        if (!restoredOrder) {
+            if (typeof window !== 'undefined') {
+                sessionStorage.removeItem(COURIER_MODAL_DRAFT_STORAGE_KEY);
+            }
+            setPendingCourierModalRestoreId(null);
+            return;
+        }
+
+        try {
+            const rawDraft = typeof window !== 'undefined'
+                ? sessionStorage.getItem(COURIER_MODAL_DRAFT_STORAGE_KEY)
+                : null;
+            const parsedDraft = rawDraft
+                ? (JSON.parse(rawDraft) as { courierProvider?: CourierProvider; trackingNumber?: string })
+                : null;
+
+            setCourierModalOrder(restoredOrder);
+            setCourierProvider(parsedDraft?.courierProvider === 'fedex' ? 'fedex' : 'chileexpress');
+            setTrackingNumber(String(parsedDraft?.trackingNumber || restoredOrder.tracking_number || '').trim());
+            setCourierModalError(null);
+        } catch {
+            openCourierModal(restoredOrder);
+        } finally {
+            setPendingCourierModalRestoreId(null);
+        }
+    }, [courierModalOrder, loading, openCourierModal, orders, pendingCourierModalRestoreId]);
 
     const handleSaveCourierShipment = useCallback(async () => {
         if (!courierModalOrder) return;

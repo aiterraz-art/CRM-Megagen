@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Calendar, Clock, AlertCircle, Search, User } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../utils/modalDrafts';
 
 interface TaskModalProps {
     isOpen: boolean;
@@ -10,39 +11,69 @@ interface TaskModalProps {
     prefilledClientId?: string;
 }
 
+const buildDefaultTaskDraft = () => ({
+    title: '',
+    description: '',
+    dueDate: new Date().toISOString().split('T')[0],
+    dueTime: '09:00',
+    priority: 'medium',
+    clientSearch: '',
+    selectedClient: null as any | null
+});
+
 const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onTaskAdded, prefilledClientId }) => {
     const { profile } = useUser();
+    const storageKey = `task-modal:${prefilledClientId || 'general'}`;
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [dueDate, setDueDate] = useState('');
     const [dueTime, setDueTime] = useState('09:00');
     const [priority, setPriority] = useState('medium');
     const [loading, setLoading] = useState(false);
+    const [restoredOpen, setRestoredOpen] = useState(false);
 
-    // Client Selection State
     const [clientSearch, setClientSearch] = useState('');
     const [clients, setClients] = useState<any[]>([]);
     const [selectedClient, setSelectedClient] = useState<any | null>(null);
     const [showClientResults, setShowClientResults] = useState(false);
+    const effectiveOpen = isOpen || restoredOpen;
 
     useEffect(() => {
-        if (isOpen) {
-            // Reset form
-            setTitle('');
-            setDescription('');
-            setPriority('medium');
-            setClientSearch('');
-            setSelectedClient(null);
+        if (!effectiveOpen) return;
 
-            // Default to tomorrow 9am if not set (or today?)
-            const now = new Date();
-            setDueDate(now.toISOString().split('T')[0]);
+        const savedDraft = loadPersistedModalDraft<ReturnType<typeof buildDefaultTaskDraft>>(storageKey);
+        const nextDraft = savedDraft?.data || buildDefaultTaskDraft();
+
+        setTitle(nextDraft.title);
+        setDescription(nextDraft.description);
+        setDueDate(nextDraft.dueDate);
+        setDueTime(nextDraft.dueTime);
+        setPriority(nextDraft.priority);
+        setClientSearch(nextDraft.clientSearch);
+        setSelectedClient(nextDraft.selectedClient);
+        setShowClientResults(false);
+
+        if (!isOpen && savedDraft?.isOpen !== false) {
+            setRestoredOpen(true);
         }
-    }, [isOpen]);
+    }, [effectiveOpen, isOpen, storageKey]);
 
-    // Search Clients
+    useEffect(() => {
+        if (!effectiveOpen) return;
+        savePersistedModalDraft(storageKey, {
+            title,
+            description,
+            dueDate,
+            dueTime,
+            priority,
+            clientSearch,
+            selectedClient
+        }, true);
+    }, [clientSearch, description, dueDate, dueTime, effectiveOpen, priority, selectedClient, storageKey, title]);
+
     useEffect(() => {
         const searchClients = async () => {
+            if (!effectiveOpen) return;
             if (clientSearch.length < 2) {
                 setClients([]);
                 return;
@@ -60,7 +91,13 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onTaskAdded, pre
 
         const timeoutId = setTimeout(searchClients, 300);
         return () => clearTimeout(timeoutId);
-    }, [clientSearch]);
+    }, [clientSearch, effectiveOpen]);
+
+    const handleClose = () => {
+        clearPersistedModalDraft(storageKey);
+        setRestoredOpen(false);
+        onClose();
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -107,6 +144,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onTaskAdded, pre
             if (error) throw error;
 
             onTaskAdded();
+            clearPersistedModalDraft(storageKey);
+            setRestoredOpen(false);
             onClose();
         } catch (error: any) {
             console.error('Error creating task:', error);
@@ -116,7 +155,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onTaskAdded, pre
         }
     };
 
-    if (!isOpen) return null;
+    if (!effectiveOpen) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -126,7 +165,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onTaskAdded, pre
                         <Calendar className="mr-2 text-indigo-600" size={20} />
                         Nueva Tarea
                     </h3>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                    <button onClick={handleClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
                         <X size={20} className="text-gray-500" />
                     </button>
                 </div>

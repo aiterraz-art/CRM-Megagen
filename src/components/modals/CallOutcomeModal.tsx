@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Phone, PhoneOff, Voicemail, HelpCircle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { Database } from '../../types/supabase';
 import { useUser } from '../../contexts/UserContext';
+import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
 
 type CallStatus = 'contestada' | 'no_contesto' | 'ocupado' | 'equivocado' | 'buzon';
 
@@ -17,9 +18,35 @@ const CallOutcomeModal = ({ client, isOpen, onClose, onSaved }: CallOutcomeModal
     const [status, setStatus] = useState<CallStatus | null>(null);
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
+    const [restoredOpen, setRestoredOpen] = useState(false);
     const { profile } = useUser();
+    const storageKey = `call-outcome:${client.id}`;
+    const effectiveOpen = isOpen || restoredOpen;
 
-    if (!isOpen) return null;
+    useEffect(() => {
+        if (!effectiveOpen) return;
+
+        const savedDraft = loadPersistedModalDraft<{ status: CallStatus | null; notes: string }>(storageKey);
+        setStatus(savedDraft?.data?.status || null);
+        setNotes(savedDraft?.data?.notes || '');
+
+        if (!isOpen && savedDraft?.isOpen !== false) {
+            setRestoredOpen(true);
+        }
+    }, [effectiveOpen, isOpen, storageKey]);
+
+    useEffect(() => {
+        if (!effectiveOpen) return;
+        savePersistedModalDraft(storageKey, { status, notes }, true);
+    }, [effectiveOpen, notes, status, storageKey]);
+
+    const handleClose = () => {
+        clearPersistedModalDraft(storageKey);
+        setRestoredOpen(false);
+        onClose();
+    };
+
+    if (!effectiveOpen) return null;
 
     const handleSave = async () => {
         if (!status) return;
@@ -40,6 +67,8 @@ const CallOutcomeModal = ({ client, isOpen, onClose, onSaved }: CallOutcomeModal
 
             if (error) throw error;
             onSaved();
+            clearPersistedModalDraft(storageKey);
+            setRestoredOpen(false);
             onClose();
         } catch (error: any) {
             console.error('Error saving call log:', error);
@@ -65,7 +94,7 @@ const CallOutcomeModal = ({ client, isOpen, onClose, onSaved }: CallOutcomeModal
                         <h3 className="text-xl font-black text-gray-900">Resultado de la Llamada</h3>
                         <p className="text-sm text-gray-500">Cliente: {client.name}</p>
                     </div>
-                    <button onClick={onClose} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
+                    <button onClick={handleClose} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
                         <X size={20} />
                     </button>
                 </div>

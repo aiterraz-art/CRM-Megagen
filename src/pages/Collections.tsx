@@ -1632,25 +1632,23 @@ const Collections = () => {
             </div>
         </div>
 
-        {clientCreationContext && (
-            <ClientFormModal
-                isOpen={Boolean(clientCreationContext)}
-                onClose={() => setClientCreationContext(null)}
-                title="Crear cliente desde cobranza"
-                persistenceKey="collections-create-client"
-                initialData={{
-                    name: clientCreationContext.row.client_name || '',
-                    rut: clientCreationContext.row.client_rut || '',
-                    phone: '',
-                    email: '',
-                    address: '',
-                    office: '',
-                    comuna: '',
-                    notes: 'Creado desde módulo de cobranzas'
-                }}
-                onSave={handleCreateClientFromCollection}
-            />
-        )}
+        <ClientFormModal
+            isOpen={Boolean(clientCreationContext)}
+            onClose={() => setClientCreationContext(null)}
+            title="Crear cliente desde cobranza"
+            persistenceKey="collections-create-client"
+            initialData={clientCreationContext ? {
+                name: clientCreationContext.row.client_name || '',
+                rut: clientCreationContext.row.client_rut || '',
+                phone: '',
+                email: '',
+                address: '',
+                office: '',
+                comuna: '',
+                notes: 'Creado desde módulo de cobranzas'
+            } : null}
+            onSave={handleCreateClientFromCollection}
+        />
         {proofViewerRow && (
             <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center">
                 <div className="w-full max-w-2xl bg-white rounded-3xl border shadow-2xl overflow-hidden">

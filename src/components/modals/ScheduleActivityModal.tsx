@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Calendar, Clock, FileText, CheckCircle2, User } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { googleService } from '../../services/googleService';
+import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
 
 interface Profile {
     id: string;
@@ -26,10 +27,14 @@ interface ScheduleActivityModalProps {
     } | null;
 }
 
+const SCHEDULE_ACTIVITY_MODAL_STORAGE_KEY = 'schedule-activity-modal';
+
 const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId, editingEvent }: ScheduleActivityModalProps) => {
     const [loading, setLoading] = useState(false);
     const [sellers, setSellers] = useState<Profile[]>([]);
     const [inviteAll, setInviteAll] = useState(false);
+    const [restoredOpen, setRestoredOpen] = useState(false);
+    const hasInitializedRef = useRef(false);
     const isEditMode = Boolean(editingEvent?.linkedEntityId);
 
     const getDefaultEndTime = (time: string) => {
@@ -48,6 +53,8 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
         title: '',
         notes: ''
     });
+    const effectiveOpen = isOpen || restoredOpen;
+    const storageKey = `${SCHEDULE_ACTIVITY_MODAL_STORAGE_KEY}:${editingEvent?.linkedEntityId || 'new'}:${preSelectedAssigneeId || 'all'}`;
 
     const roleLabel = (role?: string | null) => {
         const normalizedRole = (role || '').trim().toLowerCase();
@@ -71,34 +78,72 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
 
     // Reset selection when opening from a specific calendar view
     useEffect(() => {
-        if (!isOpen) return;
-        setInviteAll(false);
-        if (editingEvent) {
-            const startValue = editingEvent.start?.dateTime || editingEvent.start?.date || '';
-            const endValue = editingEvent.end?.dateTime || editingEvent.end?.date || '';
-            const startDate = startValue ? new Date(startValue) : new Date();
-            const endDate = endValue ? new Date(endValue) : new Date(startDate.getTime() + 60 * 60 * 1000);
-
-            setFormData({
-                assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [],
-                date: startDate.toISOString().split('T')[0],
-                time: `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`,
-                endTime: `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`,
-                title: editingEvent.summary || '',
-                notes: editingEvent.description || ''
-            });
+        if (!effectiveOpen) {
+            hasInitializedRef.current = false;
             return;
         }
 
-        setFormData(prev => ({
-            ...prev,
-            assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [],
-            title: '',
-            notes: '',
-            time: '09:00',
-            endTime: '10:00'
-        }));
-    }, [editingEvent, isOpen, preSelectedAssigneeId]);
+        if (hasInitializedRef.current) return;
+        hasInitializedRef.current = true;
+
+        const buildBaseDraft = () => {
+            if (editingEvent) {
+                const startValue = editingEvent.start?.dateTime || editingEvent.start?.date || '';
+                const endValue = editingEvent.end?.dateTime || editingEvent.end?.date || '';
+                const startDate = startValue ? new Date(startValue) : new Date();
+                const endDate = endValue ? new Date(endValue) : new Date(startDate.getTime() + 60 * 60 * 1000);
+
+                return {
+                    inviteAll: false,
+                    formData: {
+                        assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [],
+                        date: startDate.toISOString().split('T')[0],
+                        time: `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`,
+                        endTime: `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`,
+                        title: editingEvent.summary || '',
+                        notes: editingEvent.description || ''
+                    }
+                };
+            }
+
+            return {
+                inviteAll: false,
+                formData: {
+                    assigneeIds: preSelectedAssigneeId ? [preSelectedAssigneeId] : [],
+                    date: new Date().toISOString().split('T')[0],
+                    time: '09:00',
+                    endTime: '10:00',
+                    title: '',
+                    notes: ''
+                }
+            };
+        };
+
+        const baseDraft = buildBaseDraft();
+        const savedDraft = loadPersistedModalDraft<typeof baseDraft>(storageKey);
+        const nextDraft = savedDraft?.data
+            ? {
+                ...baseDraft,
+                ...savedDraft.data,
+                formData: {
+                    ...baseDraft.formData,
+                    ...savedDraft.data.formData
+                }
+            }
+            : baseDraft;
+
+        setInviteAll(nextDraft.inviteAll);
+        setFormData(nextDraft.formData);
+
+        if (!isOpen && savedDraft?.isOpen !== false) {
+            setRestoredOpen(true);
+        }
+    }, [editingEvent, effectiveOpen, isOpen, preSelectedAssigneeId, storageKey]);
+
+    useEffect(() => {
+        if (!effectiveOpen) return;
+        savePersistedModalDraft(storageKey, { inviteAll, formData }, true);
+    }, [effectiveOpen, formData, inviteAll, storageKey]);
 
     const toggleAssignee = (sellerId: string) => {
         setInviteAll(false);
@@ -123,7 +168,14 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
             ? 'Sin participantes seleccionados'
             : `${selectedRecipients.length} participante${selectedRecipients.length === 1 ? '' : 's'} seleccionado${selectedRecipients.length === 1 ? '' : 's'}`;
 
-    if (!isOpen) return null;
+    const handleClose = () => {
+        clearPersistedModalDraft(storageKey);
+        hasInitializedRef.current = false;
+        setRestoredOpen(false);
+        onClose();
+    };
+
+    if (!effectiveOpen) return null;
 
     const handleSave = async () => {
         if (!isEditMode && !inviteAll && formData.assigneeIds.length === 0) {
@@ -317,6 +369,9 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
             }
 
             onSaved();
+            clearPersistedModalDraft(storageKey);
+            hasInitializedRef.current = false;
+            setRestoredOpen(false);
             onClose();
             // Reset crucial fields
             setInviteAll(false);
@@ -334,14 +389,14 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
     };
 
     return (
-        <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+        <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={handleClose}>
             <div
                 className="bg-white w-full max-w-md max-h-[92vh] rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in duration-300 flex flex-col"
                 onClick={(event) => event.stopPropagation()}
             >
                 <div className="flex justify-between items-center px-8 py-6 border-b border-gray-100 bg-white">
                     <h3 className="text-2xl font-black text-gray-900">{isEditMode ? 'Editar Reunión' : 'Asignar Reunión'}</h3>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X size={24} /></button>
+                    <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X size={24} /></button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-8 py-6 space-y-5">
@@ -478,7 +533,7 @@ const ScheduleActivityModal = ({ isOpen, onClose, onSaved, preSelectedAssigneeId
 
                 <div className="border-t border-gray-100 px-8 py-4 flex gap-4 bg-white">
                     <button
-                        onClick={onClose}
+                        onClick={handleClose}
                         className="flex-1 py-4 font-bold text-gray-400 hover:text-gray-600 transition-colors"
                     >
                         Cerrar

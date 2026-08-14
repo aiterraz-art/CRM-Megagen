@@ -126,34 +126,7 @@ function App() {
 
     useEffect(() => {
         if (!AUTO_REFRESH_ENABLED) return;
-
-        let cancelled = false;
-
-        const verifyFreshBuild = async () => {
-            if (cancelled || document.visibilityState === 'hidden') return;
-            await checkForAppUpdate();
-        };
-
-        void verifyFreshBuild();
-
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') {
-                void verifyFreshBuild();
-            }
-        };
-
-        const handleFocus = () => {
-            void verifyFreshBuild();
-        };
-
-        window.addEventListener('focus', handleFocus);
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        return () => {
-            cancelled = true;
-            window.removeEventListener('focus', handleFocus);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
+        void checkForAppUpdate();
     }, []);
 
     useEffect(() => {

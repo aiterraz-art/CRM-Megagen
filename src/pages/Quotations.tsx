@@ -849,28 +849,6 @@ const Quotations: React.FC = () => {
     }, [fetchAvailableSellers, fetchQuotations, fetchClientsForModal, permissions]);
 
     useEffect(() => {
-        if (!AUTO_REFRESH_ENABLED) return;
-
-        const refreshProductsOnResume = () => {
-            if (document.visibilityState === 'visible') {
-                void fetchProducts();
-            }
-        };
-
-        const refreshProductsOnFocus = () => {
-            void fetchProducts();
-        };
-
-        document.addEventListener('visibilitychange', refreshProductsOnResume);
-        window.addEventListener('focus', refreshProductsOnFocus);
-
-        return () => {
-            document.removeEventListener('visibilitychange', refreshProductsOnResume);
-            window.removeEventListener('focus', refreshProductsOnFocus);
-        };
-    }, [fetchProducts]);
-
-    useEffect(() => {
         if (!isItemModalOpen) return;
         void fetchProducts();
     }, [fetchProducts, isItemModalOpen]);

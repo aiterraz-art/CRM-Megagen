@@ -395,17 +395,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     }, [loadPendingLostReasonCount]);
 
     useEffect(() => {
-        if (!shouldTrackPendingLostReasons || !AUTO_REFRESH_ENABLED) return;
+        if (!shouldTrackPendingLostReasons) return;
 
         const handleRefresh = () => {
             void loadPendingLostReasonCount();
         };
 
-        window.addEventListener('focus', handleRefresh);
         window.addEventListener(LOST_REASON_REFRESH_EVENT, handleRefresh as EventListener);
 
         return () => {
-            window.removeEventListener('focus', handleRefresh);
             window.removeEventListener(LOST_REASON_REFRESH_EVENT, handleRefresh as EventListener);
         };
     }, [loadPendingLostReasonCount, shouldTrackPendingLostReasons]);

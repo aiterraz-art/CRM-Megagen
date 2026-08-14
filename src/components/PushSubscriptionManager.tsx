@@ -155,28 +155,6 @@ export default function PushSubscriptionManager() {
         void syncSubscription(false);
     }, [canReceivePush, profile?.id]);
 
-    useEffect(() => {
-        if (!canReceivePush || !profile?.id || !AUTO_REFRESH_ENABLED) return;
-
-        const handleVisibilityChange = () => {
-            if (!document.hidden) {
-                void syncSubscription(false);
-            }
-        };
-
-        const handleFocus = () => {
-            void syncSubscription(false);
-        };
-
-        window.addEventListener('focus', handleFocus);
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        return () => {
-            window.removeEventListener('focus', handleFocus);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, [canReceivePush, profile?.id, environmentState.supported]);
-
     if (!canReceivePush || !profile?.id || pushState === 'ready' || pushState === 'idle') {
         return null;
     }

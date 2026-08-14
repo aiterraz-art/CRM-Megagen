@@ -4,6 +4,7 @@ import { X, Building2, User, Phone, Mail, MapPin, FileText, CheckCircle2 } from 
 import { Database } from '../../types/supabase';
 import { useMapsLibrary } from '@vis.gl/react-google-maps';
 import { is3DentalCompany } from '../../utils/companyConfig';
+import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -17,76 +18,85 @@ interface ClientFormModalProps {
     persistenceKey?: string; // Optional key for localStorage persistence
 }
 
+const DEFAULT_FORM_DATA = {
+    name: '',
+    purchase_contact: '',
+    rut: '',
+    phone: '',
+    email: '',
+    address: '',
+    office: '',
+    lat: 0,
+    lng: 0,
+    notes: '',
+    giro: '',
+    comuna: '',
+    doctor_specialty: '',
+    scanner_type: '',
+    printer_type: '',
+    implant_systems: '',
+    laboratory_partner: ''
+};
+
+const buildClientFormData = (initialData?: Partial<Client> | null) => ({
+    ...DEFAULT_FORM_DATA,
+    name: initialData?.name || '',
+    purchase_contact: initialData?.purchase_contact || '',
+    rut: initialData?.rut || '',
+    phone: initialData?.phone || '',
+    email: initialData?.email || '',
+    address: initialData?.address || '',
+    office: initialData?.office || '',
+    lat: initialData?.lat || 0,
+    lng: initialData?.lng || 0,
+    notes: initialData?.notes || '',
+    giro: initialData?.giro || '',
+    comuna: initialData?.comuna || '',
+    doctor_specialty: initialData?.doctor_specialty || '',
+    scanner_type: initialData?.scanner_type || '',
+    printer_type: initialData?.printer_type || '',
+    implant_systems: initialData?.implant_systems || '',
+    laboratory_partner: initialData?.laboratory_partner || ''
+});
+
 const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSave, initialData, title, persistenceKey }) => {
-    const [formData, setFormData] = useState({
-        name: '',
-        purchase_contact: '', // purchase_contact in DB, often used as "Doctor/Contact"
-        rut: '',
-        phone: '',
-        email: '',
-        address: '',
-        office: '',
-        lat: 0,
-        lng: 0,
-        notes: '',
-        giro: '',
-        comuna: '',
-        doctor_specialty: '',
-        scanner_type: '',
-        printer_type: '',
-        implant_systems: '',
-        laboratory_partner: ''
-    });
+    const [formData, setFormData] = useState(() => buildClientFormData(initialData));
     const [loading, setLoading] = useState(false);
+    const [restoredOpen, setRestoredOpen] = useState(false);
     const placesLib = useMapsLibrary('places');
     const inputRef = useRef<HTMLInputElement>(null);
+    const hasInitializedRef = useRef(false);
     const show3DentalClientFields = is3DentalCompany();
+    const effectiveOpen = isOpen || restoredOpen;
 
     useEffect(() => {
-        if (initialData) {
-            setFormData({
-                name: initialData.name || '',
-                purchase_contact: initialData.purchase_contact || '',
-                rut: initialData.rut || '',
-                phone: initialData.phone || '',
-                email: initialData.email || '',
-                address: initialData.address || '',
-                office: initialData.office || '',
-                lat: initialData.lat || 0,
-                lng: initialData.lng || 0,
-                notes: initialData.notes || '',
-                giro: initialData.giro || '',
-                comuna: initialData.comuna || '',
-                doctor_specialty: initialData.doctor_specialty || '',
-                scanner_type: initialData.scanner_type || '',
-                printer_type: initialData.printer_type || '',
-                implant_systems: initialData.implant_systems || '',
-                laboratory_partner: initialData.laboratory_partner || ''
-            });
+        if (!effectiveOpen) {
+            hasInitializedRef.current = false;
+            return;
+        }
 
-        } else if (persistenceKey) {
-            // Restore from localStorage if no initialData provided (new client scenario)
-            const saved = localStorage.getItem(persistenceKey);
-            if (saved) {
-                try {
-                    setFormData(JSON.parse(saved));
-                } catch (e) {
-                    console.error("Failed to parse saved form data", e);
-                }
+        if (hasInitializedRef.current) return;
+        hasInitializedRef.current = true;
+
+        const savedDraft = persistenceKey ? loadPersistedModalDraft<typeof DEFAULT_FORM_DATA>(persistenceKey) : null;
+        if (savedDraft?.data) {
+            setFormData({ ...buildClientFormData(initialData), ...savedDraft.data });
+            if (!isOpen && savedDraft.isOpen !== false) {
+                setRestoredOpen(true);
             }
+            return;
         }
-    }, [initialData, isOpen, persistenceKey]);
 
-    // Persist to LocalStorage on change
-    useEffect(() => {
-        if (persistenceKey && isOpen) {
-            localStorage.setItem(persistenceKey, JSON.stringify(formData));
-        }
-    }, [formData, persistenceKey, isOpen]);
+        setFormData(buildClientFormData(initialData));
+    }, [effectiveOpen, initialData, isOpen, persistenceKey]);
 
-    // Google Places Autocomplete
     useEffect(() => {
-        if (!placesLib || !inputRef.current || !isOpen) return;
+        if (!persistenceKey || !effectiveOpen) return;
+        savePersistedModalDraft(persistenceKey, formData, true);
+    }, [effectiveOpen, formData, persistenceKey]);
+
+    useEffect(() => {
+        if (!placesLib || !inputRef.current || !effectiveOpen) return;
 
         const autocomplete = new placesLib.Autocomplete(inputRef.current, {
             fields: ['geometry', 'formatted_address', 'address_components'],
@@ -111,7 +121,16 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
                 setFormData(prev => ({ ...prev, address, lat, lng, comuna: comuna || prev.comuna }));
             }
         });
-    }, [placesLib, isOpen]);
+    }, [effectiveOpen, placesLib]);
+
+    const handleClose = () => {
+        if (persistenceKey) {
+            clearPersistedModalDraft(persistenceKey);
+        }
+        hasInitializedRef.current = false;
+        setRestoredOpen(false);
+        onClose();
+    };
 
     const handleChange = (field: string, value: any) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -122,7 +141,9 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
         setLoading(true);
         try {
             await onSave(formData);
-            if (persistenceKey) localStorage.removeItem(persistenceKey); // Clear draft on success
+            if (persistenceKey) clearPersistedModalDraft(persistenceKey);
+            hasInitializedRef.current = false;
+            setRestoredOpen(false);
             onClose();
         } catch (error) {
             console.error("Error saving client:", error);
@@ -132,7 +153,7 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
         }
     };
 
-    if (!isOpen) return null;
+    if (!effectiveOpen) return null;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -142,10 +163,7 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
                         <h3 className="text-2xl font-black text-gray-900">{title || 'Datos del Cliente'}</h3>
                         <p className="text-gray-400 font-bold text-xs uppercase tracking-wider mt-1">Completa la ficha técnica</p>
                     </div>
-                    <button onClick={() => {
-                        if (persistenceKey) localStorage.removeItem(persistenceKey); // Optional: clear on manual close? Or keep as draft? Keeping as draft is safer for accidental closes.
-                        onClose();
-                    }} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                    <button onClick={handleClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
                         <X size={24} className="text-gray-400" />
                     </button>
                 </div>
@@ -348,7 +366,7 @@ const ClientFormModal: React.FC<ClientFormModalProps> = ({ isOpen, onClose, onSa
 
                 <div className="p-8 border-t border-gray-100 bg-gray-50/50 rounded-b-[2.5rem] flex items-center justify-end space-x-4">
                     <button
-                        onClick={onClose}
+                        onClick={handleClose}
                         className="px-6 py-4 rounded-xl font-black text-gray-500 hover:bg-gray-200 transition-all uppercase text-xs tracking-widest"
                         disabled={loading}
                     >

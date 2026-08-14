@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Calendar, Clock, FileText, CheckCircle2, Search, Building2, UserRound, MapPin, Stethoscope } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { googleService } from '../../services/googleService';
 import { Database } from '../../types/supabase';
+import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 type VisitMode = 'existing' | 'cold';
@@ -20,6 +21,7 @@ interface ScheduleVisitModalProps {
 
 const DEFAULT_START_TIME = '10:00';
 const DEFAULT_END_TIME = '11:00';
+const SCHEDULE_VISIT_MODAL_STORAGE_KEY = 'schedule-visit-modal';
 
 const addHourToTime = (time: string) => {
     const [hours, minutes] = time.split(':').map(Number);
@@ -30,6 +32,28 @@ const addHourToTime = (time: string) => {
 };
 
 const buildIsoFromDateTime = (date: string, time: string) => new Date(`${date}T${time}:00`);
+
+const buildScheduleVisitDraft = (
+    initialClient: Client | null | undefined,
+    initialDateValue: string,
+    initialStartValue: string,
+    initialEndValue: string
+) => ({
+    visitMode: 'existing' as VisitMode,
+    selectedClient: initialClient || null,
+    searchTerm: '',
+    formData: {
+        date: initialDateValue,
+        startTime: initialStartValue,
+        endTime: initialEndValue,
+        title: initialClient ? `Visita: ${initialClient.name}` : '',
+        notes: '',
+        clinicName: '',
+        address: '',
+        doctorName: '',
+        doctorSpecialty: ''
+    }
+});
 
 const ScheduleVisitModal = ({
     client: initialClient,
@@ -47,41 +71,58 @@ const ScheduleVisitModal = ({
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState<Client[]>([]);
     const [searching, setSearching] = useState(false);
-    const [formData, setFormData] = useState({
-        date: new Date().toISOString().split('T')[0],
-        startTime: DEFAULT_START_TIME,
-        endTime: DEFAULT_END_TIME,
-        title: '',
-        notes: '',
-        clinicName: '',
-        address: '',
-        doctorName: '',
-        doctorSpecialty: ''
-    });
+    const [restoredOpen, setRestoredOpen] = useState(false);
+    const [formData, setFormData] = useState(() => buildScheduleVisitDraft(initialClient, new Date().toISOString().split('T')[0], DEFAULT_START_TIME, DEFAULT_END_TIME).formData);
+    const hasInitializedRef = useRef(false);
 
     const effectiveDate = initialDate || new Date().toISOString().split('T')[0];
     const effectiveStartTime = initialStartTime || DEFAULT_START_TIME;
     const effectiveEndTime = initialEndTime || addHourToTime(effectiveStartTime) || DEFAULT_END_TIME;
+    const effectiveOpen = isOpen || restoredOpen;
+    const storageKey = `${SCHEDULE_VISIT_MODAL_STORAGE_KEY}:${initialClient?.id || 'cold'}:${assigneeId || 'self'}`;
 
     useEffect(() => {
-        if (!isOpen) return;
+        if (!effectiveOpen) {
+            hasInitializedRef.current = false;
+            return;
+        }
 
-        setVisitMode(initialClient ? 'existing' : 'existing');
-        setSelectedClient(initialClient || null);
-        setSearchTerm('');
+        if (hasInitializedRef.current) return;
+        hasInitializedRef.current = true;
+
+        const baseDraft = buildScheduleVisitDraft(initialClient, effectiveDate, effectiveStartTime, effectiveEndTime);
+        const savedDraft = loadPersistedModalDraft<typeof baseDraft>(storageKey);
+        const nextDraft = savedDraft?.data
+            ? {
+                ...baseDraft,
+                ...savedDraft.data,
+                formData: {
+                    ...baseDraft.formData,
+                    ...savedDraft.data.formData
+                }
+            }
+            : baseDraft;
+
+        setVisitMode(nextDraft.visitMode);
+        setSelectedClient(nextDraft.selectedClient);
+        setSearchTerm(nextDraft.searchTerm);
         setSearchResults([]);
-        setFormData({
-            date: effectiveDate,
-            startTime: effectiveStartTime,
-            endTime: effectiveEndTime,
-            title: initialClient ? `Visita: ${initialClient.name}` : '',
-            notes: '',
-            clinicName: '',
-            address: '',
-            doctorName: '',
-            doctorSpecialty: ''
-        });
-    }, [isOpen, initialClient, effectiveDate, effectiveStartTime, effectiveEndTime]);
+        setFormData(nextDraft.formData);
+
+        if (!isOpen && savedDraft?.isOpen !== false) {
+            setRestoredOpen(true);
+        }
+    }, [effectiveDate, effectiveEndTime, effectiveOpen, effectiveStartTime, initialClient, isOpen, storageKey]);
+
+    useEffect(() => {
+        if (!effectiveOpen) return;
+        savePersistedModalDraft(storageKey, {
+            visitMode,
+            selectedClient,
+            searchTerm,
+            formData
+        }, true);
+    }, [effectiveOpen, formData, searchTerm, selectedClient, storageKey, visitMode]);
 
     useEffect(() => {
         if (selectedClient && visitMode === 'existing' && !formData.title) {
@@ -91,6 +132,7 @@ const ScheduleVisitModal = ({
 
     useEffect(() => {
         const searchClients = async () => {
+            if (!effectiveOpen) return;
             if (visitMode !== 'existing' || searchTerm.trim().length < 2) {
                 setSearchResults([]);
                 return;
@@ -113,7 +155,7 @@ const ScheduleVisitModal = ({
 
         const timeoutId = setTimeout(searchClients, 300);
         return () => clearTimeout(timeoutId);
-    }, [searchTerm, visitMode]);
+    }, [effectiveOpen, searchTerm, visitMode]);
 
     const canSubmit = useMemo(() => {
         if (visitMode === 'existing') {
@@ -128,7 +170,14 @@ const ScheduleVisitModal = ({
         );
     }, [visitMode, selectedClient, formData]);
 
-    if (!isOpen) return null;
+    const handleClose = () => {
+        clearPersistedModalDraft(storageKey);
+        hasInitializedRef.current = false;
+        setRestoredOpen(false);
+        onClose();
+    };
+
+    if (!effectiveOpen) return null;
 
     const syncToGoogleCalendar = async (
         targetRepId: string,
@@ -290,6 +339,9 @@ const ScheduleVisitModal = ({
             if (dbError) throw dbError;
 
             onSaved();
+            clearPersistedModalDraft(storageKey);
+            hasInitializedRef.current = false;
+            setRestoredOpen(false);
             onClose();
             alert('Visita agendada correctamente.');
 
@@ -320,7 +372,7 @@ const ScheduleVisitModal = ({
                         <h3 className="text-2xl font-black text-gray-900">Agendar Visita {assigneeId ? '(Asignación)' : ''}</h3>
                         <p className="text-sm text-gray-400 font-medium mt-1">Puedes agendar con un cliente existente o preparar una visita en frío desde la agenda.</p>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                         <X size={24} />
                     </button>
                 </div>
