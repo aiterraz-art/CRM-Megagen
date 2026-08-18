@@ -6,6 +6,7 @@ const HEIC_MIME_TYPES = new Set([
 ]);
 
 const HEIC_EXTENSIONS = new Set(['heic', 'heif']);
+const HEIC_CONVERSION_TIMEOUT_MS = 15_000;
 
 const getFileExtension = (fileName: string) => {
     const parts = String(fileName || '').split('.');
@@ -46,11 +47,19 @@ export const convertHeicToJpeg = async (file: File) => {
     if (!isHeicLikeFile(file)) return file;
 
     const { default: heic2any } = await import('heic2any');
-    const conversionResult = await heic2any({
-        blob: file,
-        toType: 'image/jpeg',
-        quality: 0.92
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        window.setTimeout(() => {
+            reject(new Error('La conversion HEIC tardó demasiado en este dispositivo. Intenta con JPG/PNG o vuelve a elegir la imagen.'));
+        }, HEIC_CONVERSION_TIMEOUT_MS);
     });
+    const conversionResult = await Promise.race([
+        heic2any({
+            blob: file,
+            toType: 'image/jpeg',
+            quality: 0.92
+        }),
+        timeoutPromise
+    ]);
 
     const convertedBlob = Array.isArray(conversionResult) ? conversionResult[0] : conversionResult;
     if (!(convertedBlob instanceof Blob)) {

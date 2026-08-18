@@ -15,7 +15,7 @@ import {
     SELLER_MAX_DISCOUNT_PCT,
     getQuotationMaxDiscountPct,
 } from '../utils/quotationDiscountApprovalFlow';
-import { convertHeicToJpeg, isHeicLikeFile, materializeBrowserFile } from '../utils/heic';
+import { isHeicLikeFile, prepareBrowserImageUpload } from '../utils/heic';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
 import { sendQuotationEmail } from '../utils/quotationEmail';
 import { generateQuotationPdfFile } from '../utils/quotationPdf';
@@ -1253,21 +1253,18 @@ const Quotations: React.FC = () => {
         setPaymentProofError(null);
 
         try {
-            const inMemoryFile = await materializeBrowserFile(selectedFile);
-            const normalizedFile = await convertHeicToJpeg(inMemoryFile);
-            const validationError = validatePaymentProofFile(normalizedFile);
+            const preparedFile = await prepareBrowserImageUpload(selectedFile, {
+                fallbackToOriginalOnFailure: isAndroidDevice,
+            });
+            const validationError = validatePaymentProofFile(preparedFile.file);
             if (validationError) {
                 setPaymentProofFile(null);
                 setPaymentProofError(validationError);
                 return;
             }
 
-            setPaymentProofFile(normalizedFile);
-            if (isHeicLikeFile(selectedFile)) {
-                setPaymentProofError('Archivo HEIC convertido automáticamente a JPG para compatibilidad.');
-            } else {
-                setPaymentProofError(null);
-            }
+            setPaymentProofFile(preparedFile.file);
+            setPaymentProofError(preparedFile.message);
         } catch (error: any) {
             setPaymentProofFile(null);
             setPaymentProofError(error?.message || 'No se pudo procesar el comprobante seleccionado.');
@@ -1715,8 +1712,7 @@ const Quotations: React.FC = () => {
         if (requiresProof && proofFile) {
             try {
                 setPaymentProofPreparing(true);
-                setOrderConversionStage(isHeicLikeFile(proofFile) ? 'Convirtiendo comprobante HEIC a JPG...' : 'Validando comprobante de pago...');
-                normalizedProofFile = await convertHeicToJpeg(proofFile);
+                setOrderConversionStage(isHeicLikeFile(proofFile) ? 'Validando comprobante HEIC...' : 'Validando comprobante de pago...');
                 const validationError = validatePaymentProofFile(normalizedProofFile);
                 if (validationError) {
                     setPaymentProofFile(null);
@@ -1737,7 +1733,7 @@ const Quotations: React.FC = () => {
                     return;
                 }
                 setPaymentProofFile(normalizedProofFile);
-                setPaymentProofError(isHeicLikeFile(proofFile) ? 'Archivo HEIC convertido automáticamente a JPG para compatibilidad.' : null);
+                setPaymentProofError((currentMessage) => currentMessage);
             } catch (proofPreparationError: any) {
                 const message = proofPreparationError?.message || 'No se pudo procesar el comprobante seleccionado.';
                 setPaymentProofFile(null);
