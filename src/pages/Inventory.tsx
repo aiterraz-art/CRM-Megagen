@@ -143,7 +143,11 @@ const Inventory = () => {
             .replace(/[\u0300-\u036f]/g, '')
             .replace(/[^a-z0-9]/g, '');
 
-    const normalizeSku = (value: unknown) => String(value || '').trim().toUpperCase();
+    const normalizeSku = (value: unknown) =>
+        String(value || '')
+            .trim()
+            .replace(/^'+/, '')
+            .toUpperCase();
 
     const parseImportedPrice = (value: unknown) => {
         if (typeof value === 'number') {
