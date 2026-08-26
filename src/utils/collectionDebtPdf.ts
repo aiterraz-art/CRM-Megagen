@@ -1,3 +1,4 @@
+import jsPDF from 'jspdf';
 import { CollectionInvoiceSummary } from './collectionsLinking';
 
 export type CollectionDebtPdfData = {
@@ -24,8 +25,6 @@ const sanitizeFileName = (value: string) =>
         .replace(/[^a-zA-Z0-9._-]+/g, '_');
 
 export const generateCollectionDebtPdfFile = async (data: CollectionDebtPdfData): Promise<File> => {
-    const { default: jsPDF } = await import('jspdf');
-
     const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',

@@ -1,6 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 import PurchaseOrderDocumentContent from '../components/PurchaseOrderDocumentContent';
 
 export type PurchaseOrderPdfItem = {
@@ -55,10 +57,6 @@ const waitForImages = async (container: HTMLElement) => {
 };
 
 export const generatePurchaseOrderPdfBlob = async (data: PurchaseOrderPdfData): Promise<Blob | null> => {
-    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
-        import('html2canvas'),
-        import('jspdf'),
-    ]);
     const renderScale = Math.min(Math.max(window.devicePixelRatio || 1, 3), 4);
 
     const sandbox = document.createElement('div');
