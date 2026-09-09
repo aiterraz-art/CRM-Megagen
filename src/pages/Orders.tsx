@@ -12,7 +12,7 @@ import type { OrderNotificationLog } from '../utils/orderNotification';
 import OrderItemsPreviewModal, { type OrderItemsPreviewItem } from '../components/modals/OrderItemsPreviewModal';
 import OrderPdfPreviewModal from '../components/modals/OrderPdfPreviewModal';
 
-type OrderStatusFilter = 'all' | 'completed' | 'cancelled';
+type OrderStatusFilter = 'active' | 'completed' | 'cancelled';
 type DeliveryStatusFilter = 'all' | 'pending' | 'assigned' | 'out_for_delivery' | 'delivered' | 'courier_shipped';
 type ViewMode = 'all' | 'mine';
 type CourierProvider = 'chileexpress' | 'fedex';
@@ -182,7 +182,7 @@ const Orders = () => {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
     const [search, setSearch] = useState('');
-    const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('all');
+    const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('active');
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<DeliveryStatusFilter>('all');
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
@@ -966,7 +966,10 @@ const Orders = () => {
                 || String(order.folio || '').includes(term)
                 || String(order.quotation_folio || '').includes(term);
 
-            const matchesOrderStatus = orderStatusFilter === 'all' || (order.status || '').toLowerCase() === orderStatusFilter;
+            const normalizedOrderStatus = String(order.status || '').toLowerCase();
+            const matchesOrderStatus = orderStatusFilter === 'active'
+                ? normalizedOrderStatus !== 'cancelled'
+                : normalizedOrderStatus === orderStatusFilter;
             const matchesDeliveryStatus = deliveryStatusFilter === 'all' || normalizeDeliveryStatus(order.delivery_status) === deliveryStatusFilter;
             const matchesView = viewMode === 'all' || order.user_id === profile?.id;
             const orderTimestamp = order.created_at ? new Date(order.created_at).getTime() : null;
@@ -1120,7 +1123,7 @@ const Orders = () => {
 
                 <div className="flex flex-wrap gap-2">
                     {([
-                        { key: 'all', label: 'Todos' },
+                        { key: 'active', label: 'Activos' },
                         { key: 'completed', label: 'Completados' },
                         { key: 'cancelled', label: 'Cancelados' }
                     ] as Array<{ key: OrderStatusFilter; label: string }>).map((option) => (
