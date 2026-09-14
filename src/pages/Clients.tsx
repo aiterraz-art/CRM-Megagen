@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, MapPin, ChevronRight, Phone, Mail, Trash2, Building2, Pencil, Send, Paperclip, X, FileText, Upload, AlertCircle, Users, UserCircle2, RefreshCw, CheckCircle2, Download } from 'lucide-react';
+import { Search, Plus, MapPin, ChevronRight, Phone, Mail, Trash2, Building2, Pencil, Send, Paperclip, X, FileText, Upload, AlertCircle, Users, UserCircle2, RefreshCw, CheckCircle2, Download, LockKeyhole } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Database } from '../types/supabase';
 import { Link } from 'react-router-dom';
@@ -25,6 +25,7 @@ type Client = Database['public']['Tables']['clients']['Row'];
 type ClientInsert = Database['public']['Tables']['clients']['Insert'] & { created_by?: string | null };
 type ClientUpdate = Database['public']['Tables']['clients']['Update'] & { created_by?: string | null };
 type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_settings']['Row'];
+type ReadonlyClientSearchResult = Database['public']['Functions']['search_clients_readonly']['Returns'][number];
 
 const DEFAULT_CLIENT_FOLLOWUP_SETTINGS: ClientFollowupSettingsRow = {
     id: 'default',
@@ -266,6 +267,9 @@ const ClientsContent = () => {
     const initialFilter = searchParams.get('filter') || 'all';
 
     const [clients, setClients] = useState<Client[]>([]);
+    const [readonlySearchClients, setReadonlySearchClients] = useState<ReadonlyClientSearchResult[]>([]);
+    const [readonlySearchLoading, setReadonlySearchLoading] = useState(false);
+    const [readonlySearchError, setReadonlySearchError] = useState<string | null>(null);
     const [neglectFilter, setNeglectFilter] = useState<'all' | 'neglected'>(initialFilter as any);
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(true);
@@ -602,6 +606,41 @@ const ClientsContent = () => {
             fetchProfiles();
         }
     }, [profile?.id, portfolioTab]);
+
+    // Sellers keep their normal portfolio scope. This separate, limited lookup only
+    // returns other sellers' matches as read-only references while a search is active.
+    useEffect(() => {
+        const term = search.trim();
+        if (!isSellerRole || term.length < 2) {
+            setReadonlySearchClients([]);
+            setReadonlySearchLoading(false);
+            setReadonlySearchError(null);
+            return;
+        }
+
+        let cancelled = false;
+        setReadonlySearchClients([]);
+        setReadonlySearchLoading(true);
+        setReadonlySearchError(null);
+        const timeoutId = window.setTimeout(async () => {
+            const { data, error } = await supabase.rpc('search_clients_readonly', { p_search: term });
+            if (cancelled) return;
+
+            if (error) {
+                console.error('Error searching read-only clients:', error);
+                setReadonlySearchClients([]);
+                setReadonlySearchError('No se pudieron consultar las coincidencias en otras carteras.');
+            } else {
+                setReadonlySearchClients(data || []);
+            }
+            setReadonlySearchLoading(false);
+        }, 350);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timeoutId);
+        };
+    }, [search, isSellerRole]);
 
     const handleOpenModal = (clientToEdit?: Client, mode: 'full' | 'credit' = 'full') => {
         if (clientToEdit) {
@@ -2252,6 +2291,57 @@ const ClientsContent = () => {
                     onChange={(e) => setSearch(e.target.value)}
                 />
             </div>
+
+            {isSellerRole && search.trim().length >= 2 && (readonlySearchLoading || readonlySearchError || readonlySearchClients.length > 0) && (
+                <section className="rounded-3xl border border-amber-200 bg-amber-50/70 p-5">
+                    <div className="flex items-start gap-3">
+                        <div className="mt-0.5 rounded-xl bg-amber-100 p-2 text-amber-700">
+                            <LockKeyhole size={18} />
+                        </div>
+                        <div>
+                            <h3 className="font-black text-amber-950">Coincidencias en otras carteras</h3>
+                            <p className="mt-1 text-sm text-amber-800">
+                                Estos clientes pertenecen a otro vendedor. Puedes consultar sus datos y responsable, pero no seleccionarlos ni modificarlos.
+                            </p>
+                        </div>
+                    </div>
+
+                    {readonlySearchLoading ? (
+                        <p className="mt-4 text-sm font-medium text-amber-800">Buscando coincidencias...</p>
+                    ) : readonlySearchError ? (
+                        <p className="mt-4 text-sm font-medium text-red-700">{readonlySearchError}</p>
+                    ) : (
+                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                            {readonlySearchClients.map((client) => (
+                                <article
+                                    key={client.id}
+                                    aria-disabled="true"
+                                    className="cursor-not-allowed rounded-2xl border border-amber-200 bg-white/80 p-4 opacity-80 grayscale-[0.15]"
+                                >
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <h4 className="truncate font-black text-gray-800">{client.name}</h4>
+                                            <p className="mt-1 text-xs font-bold uppercase tracking-wider text-gray-500">
+                                                {normalizeRut(client.rut || '') || 'Sin RUT'}
+                                            </p>
+                                        </div>
+                                        <LockKeyhole size={16} className="shrink-0 text-amber-600" aria-label="Solo lectura" />
+                                    </div>
+                                    <div className="mt-3 space-y-1.5 text-xs text-gray-600">
+                                        {(client.address || client.comuna) && <p>{[client.address, client.office, client.comuna].filter(Boolean).join(', ')}</p>}
+                                        {client.phone && <p>{client.phone}</p>}
+                                        {client.email && <p className="truncate">{client.email}</p>}
+                                    </div>
+                                    <p className="mt-3 flex items-center gap-1.5 text-xs font-bold text-amber-800">
+                                        <UserCircle2 size={14} />
+                                        Vendedor: {client.seller_name || 'Sin vendedor asignado'}
+                                    </p>
+                                </article>
+                            ))}
+                        </div>
+                    )}
+                </section>
+            )}
 
             {loading ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

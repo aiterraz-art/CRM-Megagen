@@ -1675,6 +1675,22 @@ export interface Database {
                 }
                 Returns: Json
             }
+            search_clients_readonly: {
+                Args: {
+                    p_search: string
+                }
+                Returns: {
+                    id: string
+                    name: string
+                    rut: string | null
+                    phone: string | null
+                    email: string | null
+                    address: string | null
+                    comuna: string | null
+                    office: string | null
+                    seller_name: string | null
+                }[]
+            }
         }
     }
 }
