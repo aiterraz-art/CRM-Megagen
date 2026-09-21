@@ -318,7 +318,9 @@ const Inventory = () => {
         try {
             const { data, error } = await (supabase.from('inventory') as any)
                 .select('id, sku, name, price, stock_qty, category, created_at, min_stock_alert, target_coverage_days, last_stock_reviewed_at, last_stock_reviewed_by, is_service_item, supplier_id, allow_sale_without_stock')
-                .eq('is_service_item', false)
+                // Los cursos se registran como servicios para no controlar su stock,
+                // pero siguen formando parte del catálogo que se administra aquí.
+                .or('is_service_item.eq.false,category.eq.Cursos')
                 .order('name');
 
             if (error) throw error;
@@ -1478,7 +1480,7 @@ const Inventory = () => {
     const paginatedMovements = movements;
     const movementHasMore = movementPage * MOVEMENTS_PAGE_SIZE < movementTotalCount;
 
-    const lowStockCount = items.filter((item) => (item.stock_qty || 0) <= (item.min_stock_alert || 5)).length;
+    const lowStockCount = items.filter((item) => !item.is_service_item && (item.stock_qty || 0) <= (item.min_stock_alert || 5)).length;
     const totalUnits = items.reduce((accumulator, item) => accumulator + (item.stock_qty || 0), 0);
     const criticalCount = rotationDisplayRows.filter((row) => row.metric.alert_level === 'critical').length;
     const warningCount = rotationDisplayRows.filter((row) => row.metric.alert_level === 'warning').length;
@@ -1745,8 +1747,8 @@ const Inventory = () => {
                                             </td>
                                             <td className="px-6 py-5 text-center text-sm font-mono text-gray-500">{item.sku || '---'}</td>
                                             <td className="px-6 py-5 text-center">
-                                                <span className={`rounded-full border px-3 py-1 text-xs font-bold ${(item.stock_qty || 0) <= (item.min_stock_alert || 5) ? 'border-orange-100 bg-orange-50 text-orange-600' : 'border-green-100 bg-green-50 text-green-600'}`}>
-                                                    {item.stock_qty} uds
+                                                <span className={`rounded-full border px-3 py-1 text-xs font-bold ${item.is_service_item ? 'border-violet-200 bg-violet-50 text-violet-700' : (item.stock_qty || 0) <= (item.min_stock_alert || 5) ? 'border-orange-100 bg-orange-50 text-orange-600' : 'border-green-100 bg-green-50 text-green-600'}`}>
+                                                    {item.is_service_item ? 'Sin control' : `${item.stock_qty} uds`}
                                                 </span>
                                             </td>
                                             {!isSellerReadOnly && (
@@ -1811,14 +1813,14 @@ const Inventory = () => {
                                             {canViewAnalytics && (
                                                 <td className="px-6 py-5 text-center">
                                                     <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">
-                                                        {item.min_stock_alert} uds
+                                                        {item.is_service_item ? 'No aplica' : `${item.min_stock_alert} uds`}
                                                     </span>
                                                 </td>
                                             )}
                                             {canShowActions && (
                                                 <td className="px-6 py-5 text-right">
                                                     <div className="flex flex-wrap justify-end gap-2">
-                                                        {canManageStockControls && (
+                                                        {canManageStockControls && !item.is_service_item && (
                                                             <>
                                                                 <button
                                                                     onClick={() => openAdjustmentModal(item)}
@@ -1874,7 +1876,7 @@ const Inventory = () => {
                                                                 <History size={18} />
                                                             </button>
                                                         )}
-                                                        {canRequestProducts && (
+                                                        {canRequestProducts && !item.is_service_item && (
                                                             <button
                                                                 onClick={() => navigate('/procurement', {
                                                                     state: {
