@@ -5,6 +5,13 @@ import { Shield, User, Search, CheckCircle, Ban, Edit, Save, AlertTriangle, Tras
 import { Profile } from '../contexts/UserContext';
 import { googleService } from '../services/googleService';
 import { Database } from '../types/supabase';
+import {
+    ASSIGNABLE_ROLES,
+    PERMISSION_CATALOG,
+    buildRolePermissionMatrix,
+    fetchRolePermissionRows,
+    normalizeRole
+} from '../utils/permissions';
 
 type InvitePayload = {
     email: string;
@@ -15,16 +22,6 @@ type InvitePayload = {
 type OrderNotificationSettingsRow = Database['public']['Tables']['order_notification_settings']['Row'];
 type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_settings']['Row'];
 type QuotationSellerRow = Database['public']['Tables']['quotation_sellers']['Row'];
-
-const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-    admin: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS', 'VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES'],
-    jefe: ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES'],
-    bodega: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
-    facturador: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
-    tesorero: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
-    seller: ['VIEW_METAS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES'],
-    driver: ['EXECUTE_DELIVERY']
-};
 
 const Settings: React.FC = () => {
     const { profile, effectiveRole } = useUser();
@@ -98,12 +95,6 @@ const Settings: React.FC = () => {
     const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
     const [showDisabledUsers, setShowDisabledUsers] = useState(false);
 
-    const normalizeRole = (role: string | null | undefined) => {
-        const normalized = (role || '').toLowerCase().trim();
-        if (normalized === 'manager') return 'admin';
-        if (normalized === 'administrativo') return 'facturador';
-        return normalized;
-    };
     const parseEmailList = (raw: string) =>
         Array.from(new Set(
             raw
@@ -111,43 +102,8 @@ const Settings: React.FC = () => {
                 .map((email) => email.trim().toLowerCase())
                 .filter(Boolean)
         ));
-    const roles = ['admin', 'jefe', 'bodega', 'facturador', 'tesorero', 'seller', 'driver'];
-    const permissionList = [
-        { key: 'UPLOAD_EXCEL', label: 'Cargar Excel', desc: 'Permite subir archivos de inventario, precios y despacho.' },
-        { key: 'MANAGE_INVENTORY', label: 'Gestión Inventario', desc: 'Crear, editar y eliminar productos.' },
-        { key: 'MANAGE_PRICING', label: 'Modificar Precios', desc: 'Cambiar precios de venta.' },
-        { key: 'VIEW_METAS', label: 'Ver Metas', desc: 'Visualizar indicadores de venta y facturación.' },
-        { key: 'MANAGE_METAS', label: 'Configurar Metas', desc: 'Asignar objetivos comerciales a vendedores.' },
-        { key: 'MANAGE_DISPATCH', label: 'Gestionar Despacho', desc: 'Crear y asignar rutas de transporte.' },
-        { key: 'EXECUTE_DELIVERY', label: 'Realizar Entregas', desc: 'Módulo de repartidor para completar pedidos.' },
-        { key: 'MANAGE_USERS', label: 'Gestionar Usuarios', desc: 'Editar roles y estados de perfiles.' },
-        { key: 'MANAGE_PERMISSIONS', label: 'Matriz Permisos', desc: 'Configurar los accesos de cada rol.' },
-        { key: 'VIEW_ALL_CLIENTS', label: 'Ver Todos Clientes', desc: 'Acceso a la cartera total de clientes (vs solo propios).' },
-        { key: 'MANAGE_CLIENTS', label: 'Gestionar Clientes', desc: 'Editar, eliminar y crear fichas de clientes.' },
-        { key: 'IMPORT_CLIENTS', label: 'Importar Clientes', desc: 'Subida masiva de clientes vía CSV.' },
-        { key: 'VIEW_TEAM_STATS', label: 'Panel Equipo', desc: 'Acceso a estadísticas y supervisión de representantes.' },
-        { key: 'VIEW_ALL_TEAM_STATS', label: 'Ver Todo el Equipo', desc: 'Supervisión global (vs solo subordinados directos).' },
-        { key: 'VIEW_OPERATIONS', label: 'Ver Operaciones', desc: 'Acceso al centro de operaciones y monitoreo operativo.' },
-        { key: 'MANAGE_AUTOMATIONS', label: 'Gestionar Automatizaciones', desc: 'Configurar reglas automáticas del sistema.' },
-        { key: 'MANAGE_SLA', label: 'Gestionar SLA', desc: 'Administrar compromisos y tiempos de servicio.' },
-        { key: 'MANAGE_APPROVALS', label: 'Gestionar Aprobaciones', desc: 'Resolver solicitudes de autorización y descuentos.' },
-        { key: 'MANAGE_POSTSALE', label: 'Gestionar Postventa', desc: 'Administrar flujos y seguimiento de postventa.' },
-        { key: 'MANAGE_COLLECTIONS', label: 'Gestionar Cobranzas', desc: 'Subir y administrar información de cobranzas.' },
-        { key: 'VIEW_TEAM_CALENDARS', label: 'Calendarios del Equipo', desc: 'Permite ver Google Calendar de otros vendedores compartidos por Workspace.' },
-        { key: 'VIEW_PROCUREMENT', label: 'Ver Compras', desc: 'Acceso al módulo de solicitudes de productos e importaciones en tránsito.' },
-        { key: 'REQUEST_PRODUCTS', label: 'Solicitar Productos', desc: 'Permite crear solicitudes de compra o reposición.' },
-        { key: 'MANAGE_PROCUREMENT', label: 'Gestionar Compras', desc: 'Permite administrar solicitudes, importaciones y vínculos con embarques.' },
-        { key: 'VIEW_PURCHASE_ORDERS', label: 'Ver Órdenes de Compra', desc: 'Acceso al módulo logístico de órdenes de compra y proveedores.' },
-        { key: 'MANAGE_PURCHASE_ORDERS', label: 'Gestionar Órdenes de Compra', desc: 'Permite crear, enviar, reenviar y cancelar órdenes de compra.' },
-        { key: 'VIEW_SUPPLIER_PAYABLES', label: 'Ver Cuentas por Pagar', desc: 'Acceso al módulo de deudas pendientes con proveedores.' },
-        { key: 'MANAGE_SUPPLIER_PAYABLES', label: 'Gestionar Cuentas por Pagar', desc: 'Permite registrar, editar y cerrar deudas con proveedores.' },
-        { key: 'VIEW_KIT_LOANS', label: 'Ver Kits', desc: 'Acceso al módulo de préstamo y seguimiento de kits clínicos.' },
-        { key: 'REQUEST_KIT_LOANS', label: 'Solicitar Kits', desc: 'Permite crear solicitudes de préstamo de kits para clientes.' },
-        { key: 'MANAGE_KIT_LOANS', label: 'Gestionar Kits', desc: 'Permite registrar kits, despachar préstamos y cerrar devoluciones.' },
-        { key: 'VIEW_SIZE_CHANGES', label: 'Ver Cambios de Medida', desc: 'Acceso al módulo comercial de solicitudes de cambio de medida.' },
-        { key: 'CREATE_SIZE_CHANGES', label: 'Crear Cambios de Medida', desc: 'Permite crear solicitudes de cambio para clientes.' },
-        { key: 'MANAGE_SIZE_CHANGES', label: 'Gestionar Cambios de Medida', desc: 'Permite enviar, cerrar y cancelar cambios de medida.' }
-    ];
+    const roles = ASSIGNABLE_ROLES;
+    const permissionList = PERMISSION_CATALOG;
 
     useEffect(() => {
         fetchUsers();
@@ -197,25 +153,12 @@ const Settings: React.FC = () => {
     };
 
     const fetchRolePermissions = async () => {
-        const { data } = await supabase.from('role_permissions').select('*');
-        if (data && data.length > 0) {
-            const matrix: Record<string, string[]> = {};
-            data.forEach((p: any) => {
-                const roleKey = normalizeRole(p.role);
-                if (!matrix[roleKey]) matrix[roleKey] = [];
-                matrix[roleKey].push(p.permission);
-            });
-            const merged: Record<string, string[]> = { ...DEFAULT_ROLE_PERMISSIONS };
-            Object.entries(matrix).forEach(([role, perms]) => {
-                const basePerms = role === 'admin'
-                    ? permissionList.map((permission) => permission.key)
-                    : (DEFAULT_ROLE_PERMISSIONS[role] || []);
-                merged[role] = Array.from(new Set([...basePerms, ...perms]));
-            });
-            setRolePerms(merged);
-        } else {
-            setRolePerms(DEFAULT_ROLE_PERMISSIONS);
-        }
+        const rows = await fetchRolePermissionRows();
+
+        // La matriz debe mostrar exactamente lo almacenado. Fusionar aqui los valores por
+        // defecto haria que todo permiso revocado reapareciera marcado y se reescribiera
+        // en el siguiente guardado, impidiendo revocar accesos de forma permanente.
+        setRolePerms(buildRolePermissionMatrix(rows));
     };
 
     const fetchUsers = async () => {

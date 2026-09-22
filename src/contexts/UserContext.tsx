@@ -1,6 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { Database } from '../types/supabase';
+import {
+    fetchRolePermissionRows,
+    getDefaultPermissions,
+    isBillingBackofficeRole,
+    normalizeRole,
+    resolveRolePermissions
+} from '../utils/permissions';
 
 export type Profile = Database['public']['Tables']['profiles']['Row'] & {
     supervisor_id?: string | null;
@@ -39,54 +46,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [impersonatedUser, setImpersonatedUser] = useState<Profile | null>(null);
     const [permissions, setPermissions] = useState<string[]>([]);
     const [simulatedRole, setSimulatedRole] = useState<string | null>(null);
-    const chiefPermissions = ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES'];
-    const normalizeRole = (role: string | null | undefined) => {
-        const baseRole = (role || '').trim().toLowerCase();
-        if (baseRole === 'manager') return 'admin';
-        if (baseRole === 'administrativo') return 'facturador';
-        if (baseRole === 'supervisor') return 'jefe';
-        return baseRole;
-    };
-    const isBillingBackofficeRole = (role: string | null | undefined) => {
-        const normalizedRole = normalizeRole(role);
-        return normalizedRole === 'facturador' || normalizedRole === 'tesorero';
-    };
-
-    const fetchPermissions = async (role: string) => {
-        const normalizedRole = normalizeRole(role);
-        const defaults: Record<string, string[]> = {
-            'admin': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'EXECUTE_DELIVERY', 'MANAGE_USERS', 'MANAGE_PERMISSIONS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_AUTOMATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'MANAGE_POSTSALE', 'MANAGE_COLLECTIONS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS', 'VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES'],
-            'jefe': chiefPermissions,
-            'bodega': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
-            'facturador': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
-            'tesorero': ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
-            'seller': ['VIEW_METAS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES'],
-            'driver': ['EXECUTE_DELIVERY'],
-            'supervisor': chiefPermissions
-        };
-
-        const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl';
-        if (profile?.email === ownerEmail) {
-            setPermissions(defaults['admin']);
-            return;
-        }
-
-        try {
-            const { data, error } = await supabase.from('role_permissions').select('permission').eq('role', normalizedRole);
-
-            if (error || !data || data.length === 0) {
-                setPermissions(defaults[normalizedRole] || []);
-                return;
-            }
-
-            const perms = Array.from(new Set([...(defaults[normalizedRole] || []), ...data.map(p => p.permission)]));
-            setPermissions(perms);
-        } catch (err) {
-            console.error("Error fetching permissions, using fallbacks:", err);
-            setPermissions(defaults[normalizedRole] || []);
-        }
-    };
-
     const fetchProfile = async () => {
         try {
             const { data: { session } } = await supabase.auth.getSession();
@@ -193,9 +152,35 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     useEffect(() => {
         const role = normalizeRole(simulatedRole || (impersonatedUser || profile)?.role);
-        if (role) fetchPermissions(role);
-        else setPermissions([]);
-    }, [profile?.role, impersonatedUser?.role, simulatedRole]);
+
+        if (!role) {
+            setPermissions([]);
+            return;
+        }
+
+        // El bypass del propietario no debe aplicarse mientras se impersona a otro usuario
+        // o se simula un rol: en ese caso el objetivo es ver exactamente lo que ve el rol destino.
+        const ownerEmail = String(import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl').trim().toLowerCase();
+        const isViewingAsSomeoneElse = Boolean(simulatedRole) || Boolean(impersonatedUser);
+        const isOwnerSession = Boolean(ownerEmail) && (profile?.email || '').trim().toLowerCase() === ownerEmail;
+
+        if (isOwnerSession && !isViewingAsSomeoneElse) {
+            setPermissions(getDefaultPermissions('admin'));
+            return;
+        }
+
+        let cancelled = false;
+
+        void (async () => {
+            const rows = await fetchRolePermissionRows();
+            if (cancelled) return;
+            setPermissions(resolveRolePermissions(role, rows).permissions);
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [profile?.email, profile?.role, impersonatedUser?.id, impersonatedUser?.role, simulatedRole]);
 
     useEffect(() => {
         if (!simulatedRole) return;
