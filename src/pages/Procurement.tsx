@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { usePersistentFormState } from '../hooks/usePersistentFormState';
 import { Database } from '../types/supabase';
 
 type InventoryItem = Database['public']['Tables']['inventory']['Row'];
@@ -292,7 +293,21 @@ const Procurement: React.FC = () => {
     const [editingRequest, setEditingRequest] = useState<ProductRequestRow | null>(null);
     const [editingShipment, setEditingShipment] = useState<ShipmentRow | null>(null);
     const [requestToManage, setRequestToManage] = useState<ProductRequestRow | null>(null);
-    const [requestForm, setRequestForm] = useState(createEmptyRequestForm);
+    const [requestForm, setRequestForm, requestDraft] = usePersistentFormState(
+        profile?.id ? `procurement:request:${profile.id}` : null,
+        createEmptyRequestForm,
+        { isOpen: showRequestModal }
+    );
+
+    // Restaura una solicitud de producto a medio escribir tras una recarga real.
+    const requestRestoreAppliedRef = useRef(false);
+    useEffect(() => {
+        if (requestRestoreAppliedRef.current) return;
+        if (!canRequestProducts || !requestDraft.hasRestoredDraft || !requestDraft.restoredIsOpen) return;
+
+        requestRestoreAppliedRef.current = true;
+        setShowRequestModal(true);
+    }, [canRequestProducts, requestDraft.hasRestoredDraft, requestDraft.restoredIsOpen]);
     const [shipmentForm, setShipmentForm] = useState(createEmptyShipmentForm);
     const [rotationMetrics, setRotationMetrics] = useState<RotationMetric[]>([]);
     const [rotationLoading, setRotationLoading] = useState(false);
@@ -701,7 +716,7 @@ const Procurement: React.FC = () => {
 
             setShowRequestModal(false);
             setEditingRequest(null);
-            setRequestForm(createEmptyRequestForm());
+            requestDraft.clear();
             setRequestProductSearch('');
             setShowRequestSuggestions(false);
             await fetchProcurementData();

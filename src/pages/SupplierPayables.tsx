@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, CircleDollarSign, FileText, Pencil, Plus, RefreshCw, Search, XCircle } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { usePersistentFormState } from '../hooks/usePersistentFormState';
 import { Database } from '../types/supabase';
 
 type SupplierRow = Database['public']['Tables']['suppliers']['Row'];
@@ -125,7 +126,27 @@ const SupplierPayables: React.FC = () => {
     const [showForm, setShowForm] = useState(false);
     const [editingPayableId, setEditingPayableId] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
-    const [form, setForm] = useState<PayableFormState>(createEmptyForm());
+    // El borrador solo se conserva para altas. Al editar un registro existente los datos
+    // ya estan en la base, de modo que no hay trabajo que perder si se recarga la pagina.
+    const payableDraftKey = profile?.id && !editingPayableId
+        ? `supplier-payables:new:${profile.id}`
+        : null;
+    const [form, setForm, payableDraft] = usePersistentFormState<PayableFormState>(
+        payableDraftKey,
+        createEmptyForm,
+        { isOpen: showForm }
+    );
+
+    // Si al recargar quedaba un alta a medio escribir, se reabre el formulario con su
+    // contenido. Se aplica una sola vez para no reabrirlo cuando el usuario lo cierra.
+    const draftRestoreAppliedRef = useRef(false);
+    useEffect(() => {
+        if (draftRestoreAppliedRef.current) return;
+        if (!canManage || !payableDraft.hasRestoredDraft || !payableDraft.restoredIsOpen) return;
+
+        draftRestoreAppliedRef.current = true;
+        setShowForm(true);
+    }, [canManage, payableDraft.hasRestoredDraft, payableDraft.restoredIsOpen]);
 
     const fetchModuleData = useCallback(async (showLoader = true) => {
         if (showLoader) {
@@ -223,7 +244,7 @@ const SupplierPayables: React.FC = () => {
 
     const handleStartCreate = () => {
         setEditingPayableId(null);
-        setForm(createEmptyForm());
+        payableDraft.clear();
         setFormError(null);
         setShowForm(true);
     };
@@ -335,7 +356,7 @@ const SupplierPayables: React.FC = () => {
 
             setShowForm(false);
             setEditingPayableId(null);
-            setForm(createEmptyForm());
+            payableDraft.clear();
             await fetchModuleData(false);
         } catch (saveError: any) {
             console.error('SupplierPayables save error:', saveError);
@@ -467,7 +488,7 @@ const SupplierPayables: React.FC = () => {
                             onClick={() => {
                                 setShowForm(false);
                                 setEditingPayableId(null);
-                                setForm(createEmptyForm());
+                                payableDraft.clear();
                                 setFormError(null);
                             }}
                             className="rounded-full p-3 text-gray-400 hover:bg-white hover:text-gray-700 transition-all"

@@ -18,6 +18,7 @@ import {
 import * as XLSX from 'xlsx';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { usePersistentFormState } from '../hooks/usePersistentFormState';
 import { Database } from '../types/supabase';
 
 type InventoryItem = Database['public']['Tables']['inventory']['Row'] & { sku?: string | null };
@@ -40,6 +41,16 @@ const MOVEMENT_REASON_OPTIONS = [
     { value: 'sample_use', label: 'Muestra / uso interno' },
     { value: 'other', label: 'Otro' }
 ];
+
+const createEmptyNewProduct = () => ({
+    sku: '',
+    name: '',
+    price: 0,
+    stock_qty: 0,
+    category: 'General',
+    supplier_id: '',
+    allow_sale_without_stock: false
+});
 
 const Inventory = () => {
     const navigate = useNavigate();
@@ -125,15 +136,22 @@ const Inventory = () => {
     const [salesHistoryData, setSalesHistoryData] = useState<any[]>([]);
     const [movementHistoryData, setMovementHistoryData] = useState<InventoryMovement[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
-    const [newProduct, setNewProduct] = useState({
-        sku: '',
-        name: '',
-        price: 0,
-        stock_qty: 0,
-        category: 'General',
-        supplier_id: '',
-        allow_sale_without_stock: false
-    });
+    const [newProduct, setNewProduct, newProductDraft] = usePersistentFormState(
+        profile?.id ? `inventory:new-product:${profile.id}` : null,
+        createEmptyNewProduct,
+        { isOpen: showNewProductModal }
+    );
+
+    // Recupera el alta de producto a medio completar si la pagina se recargo, por ejemplo
+    // al volver a abrir la aplicacion en el movil.
+    const newProductRestoreAppliedRef = useRef(false);
+    useEffect(() => {
+        if (newProductRestoreAppliedRef.current) return;
+        if (!canManageInventory || !newProductDraft.hasRestoredDraft || !newProductDraft.restoredIsOpen) return;
+
+        newProductRestoreAppliedRef.current = true;
+        setShowNewProductModal(true);
+    }, [canManageInventory, newProductDraft.hasRestoredDraft, newProductDraft.restoredIsOpen]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const normalizeHeader = (value: string) =>
@@ -804,15 +822,7 @@ const Inventory = () => {
 
             alert('Producto creado exitosamente');
             setShowNewProductModal(false);
-            setNewProduct({
-                sku: '',
-                name: '',
-                price: 0,
-                stock_qty: 0,
-                category: 'General',
-                supplier_id: '',
-                allow_sale_without_stock: false
-            });
+            newProductDraft.clear();
             await refreshAll();
         } catch (error: any) {
             console.error('Error creating product:', error);

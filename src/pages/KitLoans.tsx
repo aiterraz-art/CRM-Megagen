@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { APIProvider, AdvancedMarker, InfoWindow, Map, Pin } from '@vis.gl/react-google-maps';
 import {
     AlertTriangle,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { usePersistentFormState } from '../hooks/usePersistentFormState';
 import { Database } from '../types/supabase';
 import { checkGPSConnection } from '../utils/gps';
 
@@ -162,7 +163,22 @@ const KitLoans: React.FC = () => {
     const [requestAction, setRequestAction] = useState<{ request: KitLoanRequestRow; type: RequestActionType } | null>(null);
     const [actionNote, setActionNote] = useState('');
     const [kitForm, setKitForm] = useState(createEmptyKitForm());
-    const [requestForm, setRequestForm] = useState(createEmptyRequestForm());
+    const [requestForm, setRequestForm, requestDraft] = usePersistentFormState(
+        profile?.id ? `kit-loans:request:${profile.id}` : null,
+        createEmptyRequestForm,
+        { isOpen: showRequestModal }
+    );
+
+    // Recupera una solicitud a medio escribir cuando la pagina se recarga, por ejemplo
+    // al reabrir la aplicacion en el movil.
+    const requestRestoreAppliedRef = useRef(false);
+    useEffect(() => {
+        if (requestRestoreAppliedRef.current) return;
+        if (!canRequestKitLoans || !requestDraft.hasRestoredDraft || !requestDraft.restoredIsOpen) return;
+
+        requestRestoreAppliedRef.current = true;
+        setShowRequestModal(true);
+    }, [canRequestKitLoans, requestDraft.hasRestoredDraft, requestDraft.restoredIsOpen]);
     const [clientSuggestionsOpen, setClientSuggestionsOpen] = useState(false);
 
     const profilesById = useMemo(() => new globalThis.Map(profiles.map((row) => [row.id, row])), [profiles]);
@@ -465,7 +481,7 @@ const KitLoans: React.FC = () => {
             if (error) throw error;
 
             setShowRequestModal(false);
-            setRequestForm(createEmptyRequestForm());
+            requestDraft.clear();
             setClientSuggestionsOpen(false);
             await fetchKitLoanData();
             setActiveTab('requests');

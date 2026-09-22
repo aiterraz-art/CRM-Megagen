@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     AlertTriangle,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { usePersistentFormState } from '../hooks/usePersistentFormState';
 import { Database } from '../types/supabase';
 import { generatePurchaseOrderPdfFile, type PurchaseOrderPdfData } from '../utils/purchaseOrderPdf';
 import { sendPurchaseOrderNotificationEmail } from '../utils/purchaseOrderEmail';
@@ -194,8 +195,6 @@ const PurchaseOrders: React.FC = () => {
     const [selectedPurchaseOrder, setSelectedPurchaseOrder] = useState<PurchaseOrderView | null>(null);
     const [showSupplierModal, setShowSupplierModal] = useState(false);
     const [showOrderModal, setShowOrderModal] = useState(false);
-    const [supplierForm, setSupplierForm] = useState<SupplierFormState>(createEmptySupplierForm());
-    const [orderForm, setOrderForm] = useState<PurchaseOrderFormState>(createEmptyOrderForm());
     const [supplierSearch, setSupplierSearch] = useState('');
     const [orderSearch, setOrderSearch] = useState('');
     const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | PurchaseOrderStatus>('all');
@@ -203,6 +202,43 @@ const PurchaseOrders: React.FC = () => {
     const [orderSupplierFilter, setOrderSupplierFilter] = useState<'all' | string>('all');
     const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
     const [resendingOrderId, setResendingOrderId] = useState<string | null>(null);
+
+    // Solo se conserva el borrador de altas: al editar un proveedor existente los datos
+    // siguen en la base y no hay trabajo que perder si la pagina se recarga.
+    const [supplierForm, setSupplierForm, supplierDraft] = usePersistentFormState<SupplierFormState>(
+        profile?.id && !editingSupplierId ? `purchase-orders:supplier:${profile.id}` : null,
+        createEmptySupplierForm,
+        { isOpen: showSupplierModal }
+    );
+    const [orderForm, setOrderForm, orderDraft] = usePersistentFormState<PurchaseOrderFormState>(
+        profile?.id ? `purchase-orders:order:${profile.id}` : null,
+        createEmptyOrderForm,
+        { isOpen: showOrderModal }
+    );
+
+    // Reabre el formulario que quedo a medio completar tras una recarga real de la pagina.
+    // La orden de compra tiene prioridad por ser el formulario mas extenso de los dos.
+    const draftRestoreAppliedRef = useRef(false);
+    useEffect(() => {
+        if (draftRestoreAppliedRef.current || !canManage) return;
+
+        if (orderDraft.hasRestoredDraft && orderDraft.restoredIsOpen) {
+            draftRestoreAppliedRef.current = true;
+            setShowOrderModal(true);
+            return;
+        }
+
+        if (supplierDraft.hasRestoredDraft && supplierDraft.restoredIsOpen) {
+            draftRestoreAppliedRef.current = true;
+            setShowSupplierModal(true);
+        }
+    }, [
+        canManage,
+        orderDraft.hasRestoredDraft,
+        orderDraft.restoredIsOpen,
+        supplierDraft.hasRestoredDraft,
+        supplierDraft.restoredIsOpen
+    ]);
 
     const fetchModuleData = useCallback(async (showLoader = true) => {
         if (showLoader) {
@@ -427,12 +463,12 @@ const PurchaseOrders: React.FC = () => {
 
     const resetSupplierModal = () => {
         setEditingSupplierId(null);
-        setSupplierForm(createEmptySupplierForm());
+        supplierDraft.clear();
         setShowSupplierModal(false);
     };
 
     const resetOrderModal = () => {
-        setOrderForm(createEmptyOrderForm());
+        orderDraft.clear();
         setShowOrderModal(false);
     };
 
