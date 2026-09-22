@@ -113,7 +113,7 @@ const Schedule = () => {
         if (profile?.id && !selectedSellerId) {
             setSelectedSellerId(profile.id);
         }
-    }, [profile, selectedSellerId]);
+    }, [profile?.id, selectedSellerId]);
 
     useEffect(() => {
         const fetchSellers = async () => {

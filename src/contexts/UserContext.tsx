@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { Database } from '../types/supabase';
 import {
@@ -46,10 +46,14 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [impersonatedUser, setImpersonatedUser] = useState<Profile | null>(null);
     const [permissions, setPermissions] = useState<string[]>([]);
     const [simulatedRole, setSimulatedRole] = useState<string | null>(null);
+    // Identifica al usuario cuyo perfil ya esta cargado, para no repetir la carga
+    // ante eventos de sesion que no cambian de usuario.
+    const loadedUserIdRef = useRef<string | null>(null);
     const fetchProfile = async () => {
         try {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user) {
+                loadedUserIdRef.current = session.user.id;
                 const email = session.user.email?.toLowerCase();
                 const normalizedSessionEmail = (session.user.email || '').toLowerCase();
 
@@ -131,22 +135,36 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         } catch (err) {
             console.error("UserContext: Profile Load Error:", err);
+            // Si la carga fallo, se libera la marca para que un evento de sesion
+            // posterior pueda reintentarla en lugar de quedar bloqueada.
+            loadedUserIdRef.current = null;
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchProfile();
+        void fetchProfile();
+
         const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (session) fetchProfile();
-            else {
+            if (!session?.user) {
+                loadedUserIdRef.current = null;
                 setProfile(null);
                 setImpersonatedUser(null);
                 setSimulatedRole(null);
                 setLoading(false);
+                return;
             }
+
+            // Solo se recarga el perfil cuando cambia el usuario autenticado. Los eventos
+            // de refresco de token que Supabase emite al volver el foco a la pestana no
+            // traen informacion nueva, y recargar aqui sustituia el objeto del perfil,
+            // lo que reejecutaba las consultas de las paginas y cerraba los formularios.
+            if (loadedUserIdRef.current === session.user.id) return;
+
+            void fetchProfile();
         });
+
         return () => authListener.subscription.unsubscribe();
     }, []);
 

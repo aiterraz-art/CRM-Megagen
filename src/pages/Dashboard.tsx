@@ -248,7 +248,7 @@ const Dashboard = () => {
         return () => {
             subscription.unsubscribe();
         };
-    }, [profile, selectedDate]);
+    }, [profile?.id, profile?.role, selectedDate]);
 
     const [monthlyStats, setMonthlyStats] = useState({ goal: 0, currentSales: 0, commissionRate: 0 });
 

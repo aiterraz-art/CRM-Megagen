@@ -104,7 +104,7 @@ const Pipeline = () => {
 
     useEffect(() => {
         fetchPipeline();
-    }, [profile, effectiveRole]);
+    }, [profile?.id, effectiveRole]);
 
     const fetchPipeline = async () => {
         try {
