@@ -96,6 +96,7 @@ const Settings: React.FC = () => {
     const [pendingInvites, setPendingInvites] = useState<any[]>([]); // New state for Pending Invites
     const [resendingInviteEmail, setResendingInviteEmail] = useState<string | null>(null);
     const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+    const [showDisabledUsers, setShowDisabledUsers] = useState(false);
 
     const normalizeRole = (role: string | null | undefined) => {
         const normalized = (role || '').toLowerCase().trim();
@@ -782,7 +783,12 @@ const Settings: React.FC = () => {
 
     if (!profile || !canAccessSettings) return <div className="p-20 text-center font-bold">Acceso Denegado</div>;
 
-    const filteredUsers = users.filter(u => (u.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || (u.full_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()));
+    const filteredUsers = users.filter((user) => {
+        const isDisabled = ['disabled', 'suspended'].includes((user.status || '').toLowerCase());
+        const matchesSearch = (user.email?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+            || (user.full_name?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+        return matchesSearch && (showDisabledUsers || !isDisabled);
+    });
 
     return (
         <div className="w-full mx-auto space-y-8 pb-20">
@@ -837,9 +843,18 @@ const Settings: React.FC = () => {
                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-gray-100 overflow-hidden">
                     <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-white/50 backdrop-blur-md sticky top-0 z-20">
                         <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><User className="text-indigo-600" /> Miembros del Equipo</h3>
-                        <div className="relative w-96">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                            <input type="text" placeholder="Buscar por email o nombre..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 shadow-inner" />
+                        <div className="flex items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowDisabledUsers((current) => !current)}
+                                className={`rounded-xl px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-colors ${showDisabledUsers ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                            >
+                                {showDisabledUsers ? 'Ocultar deshabilitados' : 'Ver deshabilitados'}
+                            </button>
+                            <div className="relative w-96">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                                <input type="text" placeholder="Buscar por email o nombre..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-xl font-medium focus:ring-2 focus:ring-indigo-500 shadow-inner" />
+                            </div>
                         </div>
                     </div>
 
@@ -856,9 +871,9 @@ const Settings: React.FC = () => {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {loading ? (
-                                    <tr><td colSpan={4} className="p-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Sincronizando...</td></tr>
+                                    <tr><td colSpan={5} className="p-20 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Sincronizando...</td></tr>
                                 ) : filteredUsers.length === 0 ? (
-                                    <tr><td colSpan={4} className="p-20 text-center text-gray-400 font-bold">Sin resultados.</td></tr>
+                                    <tr><td colSpan={5} className="p-20 text-center text-gray-400 font-bold">Sin resultados.</td></tr>
                                 ) : (
                                     filteredUsers.map(user => (
                                         <tr key={user.id} className="hover:bg-gray-50/50 transition-colors group">
@@ -921,7 +936,16 @@ const Settings: React.FC = () => {
                                                     </div>
                                                 ) : (
                                                     <div className="flex justify-end items-center gap-4">
-                                                        <button onClick={() => handleDisableUser(user.id, user.email || '')} disabled={user.email === ownerEmail} className="text-gray-300 hover:text-amber-600 transition-all disabled:opacity-0 hover:scale-125"><Ban size={18} /></button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => void handleDisableUser(user.id, user.email || '')}
+                                                            disabled={user.email === ownerEmail || user.id === profile?.id || ['disabled', 'suspended'].includes((user.status || '').toLowerCase())}
+                                                            className="flex items-center gap-1.5 text-amber-600 hover:text-amber-800 disabled:cursor-not-allowed disabled:opacity-30"
+                                                            title="Deshabilitar usuario y ocultarlo de los listados"
+                                                        >
+                                                            <Ban size={15} />
+                                                            <span className="text-[10px] font-black uppercase tracking-widest">Deshabilitar</span>
+                                                        </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => void handleDeleteUser(user)}
