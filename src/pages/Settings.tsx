@@ -95,6 +95,7 @@ const Settings: React.FC = () => {
     const [togglingQuotationSellerId, setTogglingQuotationSellerId] = useState<string | null>(null);
     const [pendingInvites, setPendingInvites] = useState<any[]>([]); // New state for Pending Invites
     const [resendingInviteEmail, setResendingInviteEmail] = useState<string | null>(null);
+    const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
     const normalizeRole = (role: string | null | undefined) => {
         const normalized = (role || '').toLowerCase().trim();
@@ -535,6 +536,33 @@ const Settings: React.FC = () => {
         }
     };
 
+    const handleDeleteUser = async (user: Profile) => {
+        const email = user.email || 'este usuario';
+        if (user.id === profile?.id) {
+            alert('No puedes eliminar tu propia cuenta mientras tienes una sesión activa.');
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `¿Eliminar permanentemente a ${email}?\n\nSe eliminará su acceso al CRM. Si el usuario tiene historial operativo asociado, deberás deshabilitarlo para conservar la trazabilidad.`
+        );
+        if (!confirmed) return;
+
+        setDeletingUserId(user.id);
+        try {
+            const { error } = await supabase.rpc('delete_crm_user', { p_user_id: user.id });
+            if (error) throw error;
+
+            alert(`Usuario ${email} eliminado correctamente.`);
+            await Promise.all([fetchUsers(), fetchPendingInvites()]);
+        } catch (error: any) {
+            console.error('Error al eliminar usuario:', error);
+            alert(`No se pudo eliminar a ${email}: ${error.message || 'Error desconocido'}`);
+        } finally {
+            setDeletingUserId(null);
+        }
+    };
+
     const handleTestGoogleSync = async () => {
         setTestingSync(true);
         try {
@@ -892,8 +920,18 @@ const Settings: React.FC = () => {
                                                         <button onClick={() => handleSave(user.id)} className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-100 flex items-center gap-2 hover:bg-indigo-700 active:scale-95 transition-all"><Save size={14} /> Guardar</button>
                                                     </div>
                                                 ) : (
-                                                    <div className="flex justify-end items-center gap-6">
+                                                    <div className="flex justify-end items-center gap-4">
                                                         <button onClick={() => handleDisableUser(user.id, user.email || '')} disabled={user.email === ownerEmail} className="text-gray-300 hover:text-amber-600 transition-all disabled:opacity-0 hover:scale-125"><Ban size={18} /></button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => void handleDeleteUser(user)}
+                                                            disabled={user.email === ownerEmail || user.id === profile?.id || deletingUserId === user.id}
+                                                            className="flex items-center gap-1.5 text-rose-600 hover:text-rose-800 disabled:cursor-not-allowed disabled:opacity-30"
+                                                            title="Eliminar usuario permanentemente"
+                                                        >
+                                                            <Trash2 size={15} />
+                                                            <span className="text-[10px] font-black uppercase tracking-widest">{deletingUserId === user.id ? 'Eliminando...' : 'Eliminar'}</span>
+                                                        </button>
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
