@@ -28,6 +28,17 @@ type ClientUpdate = Database['public']['Tables']['clients']['Update'] & { create
 type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_settings']['Row'];
 type ReadonlyClientSearchResult = Database['public']['Functions']['search_clients_readonly']['Returns'][number];
 
+const CLIENTS_PAGE_SIZE = 25;
+
+type ClientSearchRow = {
+    client: Client;
+    last_activity_days: number;
+    total_count: number;
+    in_risk_count: number;
+    with_coordinates_count: number;
+    mine_count: number;
+};
+
 const DEFAULT_CLIENT_FOLLOWUP_SETTINGS: ClientFollowupSettingsRow = {
     id: 'default',
     active_warning_days: 30,
@@ -243,28 +254,28 @@ const buildClientFormState = (assignedSellerId = '') => ({
     requiresDiscountApproval: true
 });
 
-const getLatestIsoDate = (...values: Array<string | null | undefined>) => {
-    return values
-        .filter(Boolean)
-        .reduce<string | null>((latest, current) => {
-            if (!current) return latest;
-            if (!latest) return current;
-            return new Date(current).getTime() > new Date(latest).getTime() ? current : latest;
-        }, null);
-};
-
 const ClientsContent = () => {
     const { profile, hasPermission, isSupervisor, effectiveRole } = useUser();
     const navigate = useNavigate();
     const searchParams = new URLSearchParams(window.location.search);
     const initialFilter = searchParams.get('filter') || 'all';
 
+    // La cartera ya no se carga entera: se pide una pagina a la base, con la busqueda y
+    // los filtros resueltos alli. Asi el coste de abrir el modulo no crece con la cartera.
     const [clients, setClients] = useState<Client[]>([]);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [clientTotals, setClientTotals] = useState({ total: 0, inRisk: 0, withCoordinates: 0, mine: 0 });
+    // Clientes que comparten nombre normalizado con algun otro. Son los unicos candidatos
+    // posibles a duplicado, de modo que basta con ellos para reproducir el agrupamiento.
+    const [duplicateCandidates, setDuplicateCandidates] = useState<Client[]>([]);
     const [readonlySearchClients, setReadonlySearchClients] = useState<ReadonlyClientSearchResult[]>([]);
     const [readonlySearchLoading, setReadonlySearchLoading] = useState(false);
     const [readonlySearchError, setReadonlySearchError] = useState<string | null>(null);
     const [neglectFilter, setNeglectFilter] = useState<'all' | 'neglected'>(initialFilter as any);
     const [search, setSearch] = useState('');
+    // La busqueda ahora viaja a la base, asi que se espera a que el usuario deje de
+    // escribir en lugar de consultar en cada pulsacion.
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     const [loading, setLoading] = useState(true);
     const [profiles, setProfiles] = useState<any[]>([]);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -446,97 +457,132 @@ const ClientsContent = () => {
         }
     };
 
+    const buildClientSearchParams = (page: number, pageSize: number) => ({
+        p_actor_id: profile?.id ?? null,
+        // Un vendedor siempre queda acotado a su propia cartera, igual que antes.
+        p_can_view_all: canViewAll && !isSellerRole,
+        p_portfolio_tab: portfolioTab,
+        p_view_mode: viewMode,
+        p_search: debouncedSearch,
+        p_client_type: clientTypeFilter,
+        p_neglect: neglectFilter,
+        p_seller: sellerFilter,
+        p_limit: pageSize,
+        p_offset: Math.max(0, (page - 1) * pageSize)
+    });
+
     const fetchClients = async () => {
         setLoading(true);
         setErrorMessage(null);
         try {
-            const followupSettings = await fetchClientFollowupSettings();
-            let query = supabase.from('clients').select('*').order('name');
+            await fetchClientFollowupSettings();
 
-            if (portfolioTab === 'pool') {
-                query = query.in('status', ['prospect', 'prospect_new', 'prospect_contacted', 'prospect_evaluating']);
-            } else if (isSellerRole && profile?.id) {
-                query = query.eq('created_by', profile.id);
-            } else if (!canViewAll && profile?.id) {
-                query = query.eq('created_by', profile.id);
-            }
+            const { data, error } = await supabase.rpc(
+                'search_clients_paged',
+                buildClientSearchParams(currentPage, CLIENTS_PAGE_SIZE)
+            );
 
-            const { data, error } = await query;
+            if (error) throw error;
 
-            if (error) {
-                console.error("Error fetching clients:", error);
-                throw error;
-            }
+            const rows = (data || []) as ClientSearchRow[];
+            const pageClients = rows.map((row) => row.client);
+            const neglectMap: Record<string, number> = {};
+            rows.forEach((row) => {
+                if (row.client?.id) neglectMap[row.client.id] = row.last_activity_days;
+            });
 
-            if (data) {
-                const visibleClients = data;
-                setClients(visibleClients);
-                setLastRefreshAt(new Date().toISOString());
-
-                const neglectMap: Record<string, number> = {};
-                const now = new Date();
-                const clientIds = visibleClients.map((client) => client.id).filter(Boolean);
-                const latestQuotationByClient: Record<string, string> = {};
-                const latestOrderByClient: Record<string, string> = {};
-                const latestCallByClient: Record<string, string> = {};
-                const latestEmailByClient: Record<string, string> = {};
-                const latestWhatsappByClient: Record<string, string> = {};
-
-                // Una consulta por bloque contra la vista, y todos los bloques en paralelo.
-                // Antes eran cinco consultas por bloque, encadenadas en serie, que ademas
-                // traian el historial completo de cada cliente para quedarse solo con la
-                // fecha mas reciente de cada origen.
-                const activityChunks = await Promise.all(
-                    chunkArray(clientIds, ID_FILTER_CHUNK_SIZE).map((chunk) =>
-                        supabase
-                            .from('vw_client_last_activity')
-                            .select('client_id, last_quotation_at, last_order_at, last_call_at, last_email_at, last_whatsapp_at')
-                            .in('client_id', chunk)
-                    )
-                );
-
-                for (const { data: activityRows, error: activityError } of activityChunks) {
-                    if (activityError) throw activityError;
-
-                    (activityRows || []).forEach((row: any) => {
-                        if (!row?.client_id) return;
-
-                        if (row.last_quotation_at) latestQuotationByClient[row.client_id] = row.last_quotation_at;
-                        if (row.last_order_at) latestOrderByClient[row.client_id] = row.last_order_at;
-                        if (row.last_call_at) latestCallByClient[row.client_id] = row.last_call_at;
-                        if (row.last_email_at) latestEmailByClient[row.client_id] = row.last_email_at;
-                        if (row.last_whatsapp_at) latestWhatsappByClient[row.client_id] = row.last_whatsapp_at;
-                    });
-                }
-
-                visibleClients.forEach(client => {
-                    const lastActivityAt = getLatestIsoDate(
-                        client.last_visit_date,
-                        latestQuotationByClient[client.id] || null,
-                        latestOrderByClient[client.id] || null,
-                        latestCallByClient[client.id] || null,
-                        latestEmailByClient[client.id] || null,
-                        latestWhatsappByClient[client.id] || null,
-                        client.created_at
-                    );
-                    const days = lastActivityAt
-                        ? Math.max(0, Math.floor((now.getTime() - new Date(lastActivityAt).getTime()) / (1000 * 60 * 60 * 24)))
-                        : 999;
-                    const isProspect = isProspectStatus(client.status);
-
-                    if (portfolioTab === 'pool' && (!isProspect || days < followupSettings.pool_reassignment_days)) {
-                        return;
-                    }
-
-                    neglectMap[client.id] = days;
-                });
-                setNeglectedData(neglectMap);
-            }
+            setClients(pageClients);
+            setNeglectedData(neglectMap);
+            // Los totales llegan calculados sobre el conjunto filtrado completo, no sobre
+            // la pagina, para que los indicadores sigan significando lo mismo.
+            setClientTotals({
+                total: Number(rows[0]?.total_count || 0),
+                inRisk: Number(rows[0]?.in_risk_count || 0),
+                withCoordinates: Number(rows[0]?.with_coordinates_count || 0),
+                mine: Number(rows[0]?.mine_count || 0)
+            });
+            setLastRefreshAt(new Date().toISOString());
         } catch (err: any) {
             console.error("Critical error in fetchClients:", err);
             setErrorMessage(err?.message || 'No se pudo cargar la cartera de clientes.');
         } finally {
             setLoading(false);
+        }
+    };
+
+    /**
+     * Trae el conjunto filtrado completo, no solo la pagina.
+     *
+     * Lo usan las exportaciones, que deben seguir cubriendo todo lo filtrado. La funcion
+     * limita cada llamada a 200 filas, asi que se recorre por paginas hasta completar.
+     */
+    const fetchAllMatchingClients = async (): Promise<{ clients: Client[]; daysById: Record<string, number> }> => {
+        const BATCH_SIZE = 200;
+        const todos: Client[] = [];
+        const daysById: Record<string, number> = {};
+        let page = 1;
+        let total = Infinity;
+
+        while (todos.length < total) {
+            const { data, error } = await supabase.rpc(
+                'search_clients_paged',
+                buildClientSearchParams(page, BATCH_SIZE)
+            );
+
+            if (error) throw error;
+
+            const rows = (data || []) as ClientSearchRow[];
+            if (rows.length === 0) break;
+
+            total = Number(rows[0]?.total_count || 0);
+            rows.forEach((row) => {
+                if (!row.client?.id) return;
+                todos.push(row.client);
+                daysById[row.client.id] = row.last_activity_days;
+            });
+            page += 1;
+        }
+
+        return { clients: todos, daysById };
+    };
+
+    /**
+     * Carga los clientes que comparten nombre normalizado con algun otro.
+     *
+     * La deteccion de duplicados necesita ver la cartera entera, pero solo puede agrupar
+     * clientes con el mismo nombre normalizado, de modo que basta con traer esos. Hoy no
+     * hay ninguno en produccion, asi que en la practica no cuesta nada.
+     */
+    const fetchDuplicateCandidates = async () => {
+        try {
+            const { data: grupos, error: gruposError } = await supabase
+                .from('vw_client_duplicate_names')
+                .select('client_ids');
+
+            if (gruposError) throw gruposError;
+
+            const ids = (grupos || []).flatMap((grupo: any) => (grupo?.client_ids || []) as string[]);
+            if (ids.length === 0) {
+                setDuplicateCandidates([]);
+                return;
+            }
+
+            const bloques = await Promise.all(
+                chunkArray(ids, ID_FILTER_CHUNK_SIZE).map((bloque) =>
+                    supabase.from('clients').select('*').in('id', bloque)
+                )
+            );
+
+            const candidatos: Client[] = [];
+            for (const { data, error } of bloques) {
+                if (error) throw error;
+                if (data) candidatos.push(...(data as Client[]));
+            }
+
+            setDuplicateCandidates(candidatos);
+        } catch (err: any) {
+            console.error('No se pudieron cargar los candidatos a duplicado:', err);
+            setDuplicateCandidates([]);
         }
     };
 
@@ -552,11 +598,35 @@ const ClientsContent = () => {
     };
 
     useEffect(() => {
-        if (profile?.id) {
-            fetchClients();
-            fetchProfiles();
-        }
-    }, [profile?.id, portfolioTab]);
+        const temporizador = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
+        return () => window.clearTimeout(temporizador);
+    }, [search]);
+
+    // Cualquier cambio de filtro devuelve a la primera pagina: mantener la pagina actual
+    // dejaria al usuario en un tramo que quiza ya no existe en el nuevo conjunto.
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [debouncedSearch, portfolioTab, viewMode, clientTypeFilter, neglectFilter, sellerFilter]);
+
+    useEffect(() => {
+        if (!profile?.id) return;
+        void fetchClients();
+    }, [
+        profile?.id,
+        portfolioTab,
+        viewMode,
+        clientTypeFilter,
+        neglectFilter,
+        sellerFilter,
+        debouncedSearch,
+        currentPage
+    ]);
+
+    useEffect(() => {
+        if (!profile?.id) return;
+        void fetchProfiles();
+        void fetchDuplicateCandidates();
+    }, [profile?.id]);
 
     // Sellers keep their normal portfolio scope. This separate, limited lookup only
     // returns other sellers' matches as read-only references while a search is active.
@@ -1582,45 +1652,15 @@ const ClientsContent = () => {
         return 'normal';
     };
 
-    const filteredClients = useMemo(() => {
-        const normalizedSearch = search.trim().toLowerCase();
-        return clients.filter(c => {
-            const matchesSearch = !normalizedSearch ||
-                c.name.toLowerCase().includes(normalizedSearch) ||
-                c.rut?.toLowerCase().includes(normalizedSearch) ||
-                (c.address?.toLowerCase().includes(normalizedSearch) ?? false);
+    // La busqueda y los filtros se resuelven en la base, de modo que lo recibido ya es
+    // el conjunto que corresponde mostrar.
+    const filteredClients = clients;
 
-            const isOwner = c.created_by === profile?.id;
-            const isProspect = isProspectStatus(c.status);
-            const severity = getClientFollowupSeverity(c);
-            const isNeglected = severity !== 'normal';
-            const passesNeglect = neglectFilter === 'all' || isNeglected;
-            const passesTypeFilter = clientTypeFilter === 'all'
-                || (clientTypeFilter === 'active' && !isProspect)
-                || (clientTypeFilter === 'prospect' && isProspect);
-            const passesSellerFilter = !canViewAll
-                || sellerFilter === 'all'
-                || (sellerFilter === '__unassigned__'
-                    ? !c.created_by
-                    : c.created_by === sellerFilter);
-
-            if (portfolioTab === 'pool') {
-                return matchesSearch
-                    && isProspect
-                    && passesSellerFilter
-                    && (neglectedData[c.id] || 0) >= clientFollowupSettings.pool_reassignment_days;
-            }
-
-            if (canViewAll) {
-                return (viewMode === 'all' || isOwner) && matchesSearch && passesNeglect && passesTypeFilter && passesSellerFilter;
-            }
-            return isOwner && matchesSearch && passesNeglect && passesTypeFilter;
-        });
-    }, [search, clients, profile?.id, neglectedData, neglectFilter, canViewAll, viewMode, clientTypeFilter, portfolioTab, clientFollowupSettings, sellerFilter]);
-
+    // Se agrupa sobre los candidatos de toda la cartera, no sobre la pagina: dos
+    // duplicados en paginas distintas deben seguir detectandose.
     const duplicateGroups = useMemo(
-        () => computeDuplicateClientGroups(clients),
-        [clients]
+        () => computeDuplicateClientGroups(duplicateCandidates),
+        [duplicateCandidates]
     );
 
     const hiddenDuplicateClientIds = useMemo(() => {
@@ -1644,14 +1684,17 @@ const ClientsContent = () => {
         [filteredClients, hiddenDuplicateClientIds]
     );
 
-    const downloadCreditDaysList = () => {
-        if (displayedClients.length === 0) {
+    const downloadCreditDaysList = async () => {
+        if (clientStats.total === 0) {
             alert('No hay clientes cargados en esta vista para exportar.');
             return;
         }
 
+        // La exportacion cubre todo lo filtrado, no solo la pagina visible.
+        const { clients: exportables } = await fetchAllMatchingClients();
+
         const headers = ['ID', 'RUT', 'Nombre', 'Días de Crédito'];
-        const data = displayedClients.map((client) => [
+        const data = exportables.map((client) => [
             client.id,
             client.rut || '',
             client.name,
@@ -1664,13 +1707,15 @@ const ClientsContent = () => {
         XLSX.writeFile(wb, 'clientes_dias_credito.xlsx');
     };
 
-    const exportClientsList = () => {
-        if (displayedClients.length === 0) {
+    const exportClientsList = async () => {
+        if (clientStats.total === 0) {
             alert('No hay clientes visibles para exportar.');
             return;
         }
 
-        const exportRows = displayedClients.map((client) => ({
+        const { clients: exportables, daysById } = await fetchAllMatchingClients();
+
+        const exportRows = exportables.map((client) => ({
             ID: client.id,
             RUT: normalizeRut(client.rut || ''),
             'Razón Social': client.name,
@@ -1684,7 +1729,7 @@ const ClientsContent = () => {
             Contacto: client.purchase_contact || '',
             'Días de Crédito': client.credit_days ?? 0,
             'Última visita': client.last_visit_date ? new Date(client.last_visit_date).toLocaleDateString('es-CL') : '',
-            'Días sin actividad': neglectedData[client.id] ?? '',
+            'Días sin actividad': daysById[client.id] ?? '',
             'Vendedor Asignado': ownersById[client.created_by || ''] || client.pending_seller_email || 'Sin asignar',
             Notas: client.notes || ''
         }));
@@ -1873,17 +1918,16 @@ const ClientsContent = () => {
         reader.readAsBinaryString(file);
     };
 
-    const clientStats = useMemo(() => {
-        const inRisk = displayedClients.filter((client) => getClientFollowupSeverity(client) !== 'normal').length;
-        const withCoordinates = displayedClients.filter((client) => !!client.lat && !!client.lng).length;
-        const mine = displayedClients.filter((client) => client.created_by === profile?.id).length;
-        return {
-            total: displayedClients.length,
-            inRisk,
-            withCoordinates,
-            mine
-        };
-    }, [displayedClients, neglectedData, profile?.id, clientFollowupSettings]);
+    // Los indicadores describen el conjunto filtrado completo, calculado en la base,
+    // no la pagina que se esta viendo.
+    const clientStats = clientTotals;
+
+    const totalClientPages = Math.max(1, Math.ceil(clientStats.total / CLIENTS_PAGE_SIZE));
+
+    // Si al recargar la cartera el conjunto encoge, la pagina actual puede quedar vacia.
+    useEffect(() => {
+        if (currentPage > totalClientPages) setCurrentPage(totalClientPages);
+    }, [currentPage, totalClientPages]);
 
     const handleMergeDuplicateGroup = async (groupId: string) => {
         const targetGroup = duplicateGroups.find((group) => group.id === groupId);
@@ -2309,9 +2353,9 @@ const ClientsContent = () => {
                     <p className="text-gray-500 mt-2 text-center max-w-sm">
                         {search ? `No hay resultados para "${search}"` : 'Parece que aún no tienes clientes registrados o no tienes permisos para verlos.'}
                     </p>
-                    {clients.length > 0 && displayedClients.length === 0 && (
+                    {clientStats.total > 0 && displayedClients.length === 0 && (
                         <p className="text-indigo-600 font-bold mt-4 text-sm bg-indigo-50 px-4 py-2 rounded-full">
-                            Hay {clients.length} clientes totales, pero ninguno coincide con tus filtros.
+                            Hay {clientStats.total} cliente(s) que coinciden con los filtros, pero esta página quedó vacía. Vuelve a la primera página.
                         </p>
                     )}
                 </div>
@@ -2497,6 +2541,36 @@ const ClientsContent = () => {
                 </div >
             )
             }
+
+            {!loading && clientStats.total > CLIENTS_PAGE_SIZE && (
+                <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:flex-row">
+                    <p className="text-xs font-bold uppercase tracking-widest text-gray-400">
+                        Mostrando {displayedClients.length} de {clientStats.total} cliente(s). Página {currentPage} de {totalClientPages}.
+                    </p>
+
+                    <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                            disabled={currentPage <= 1}
+                            className="rounded-2xl border border-gray-200 px-5 py-3 text-xs font-black uppercase tracking-widest text-gray-600 transition-all hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                            Anterior
+                        </button>
+                        <span className="text-sm font-black text-gray-900">
+                            {currentPage} / {totalClientPages}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setCurrentPage((page) => Math.min(totalClientPages, page + 1))}
+                            disabled={currentPage >= totalClientPages}
+                            className="rounded-2xl border border-gray-200 px-5 py-3 text-xs font-black uppercase tracking-widest text-gray-600 transition-all hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                            Siguiente
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Client Detail View Modal */}
             {
