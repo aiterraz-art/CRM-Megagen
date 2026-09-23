@@ -191,11 +191,16 @@ const getDeliveryStatusLabel = (status: string | null | undefined) => {
 
 const Orders = () => {
     const { profile, effectiveRole, hasPermission, isSupervisor } = useUser();
+    // La lista ya no se carga entera: la base devuelve una pagina con la busqueda, los
+    // filtros y el orden ya resueltos.
     const [orders, setOrders] = useState<EnrichedOrder[]>([]);
+    const [orderTotals, setOrderTotals] = useState({ total: 0, completed: 0, delivered: 0, billedAmount: 0 });
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
     const [search, setSearch] = useState('');
+    // La busqueda viaja a la base, asi que se espera a que el usuario deje de escribir.
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('active');
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<DeliveryStatusFilter>('all');
     const [dateFrom, setDateFrom] = useState('');
@@ -263,22 +268,33 @@ const Orders = () => {
         setLoading(true);
         setErrorMessage(null);
         try {
-            let query = supabase
-                .from('orders')
-                .select('id, folio, quotation_id, client_id, user_id, status, delivery_status, delivery_photo_url, total_amount, created_at, payment_email_status, payment_email_error, payment_proof_path, payment_proof_name, payment_proof_mime_type, shipment_method, courier_name, tracking_number, courier_marked_at')
-                .not('quotation_id', 'is', null)
-                .order('created_at', { ascending: false });
-
-            if (isSellerRole && profile?.id) {
-                query = query.eq('user_id', profile.id);
-            } else if (!canViewAll && profile?.id) {
-                query = query.eq('user_id', profile.id);
-            }
-
-            const { data, error } = await query;
+            // Los limites de fecha se calculan aqui, con la hora local del navegador,
+            // exactamente como cuando el filtro se aplicaba sobre la lista ya cargada.
+            const { data, error } = await supabase.rpc('search_orders_paged', {
+                p_actor_id: profile?.id ?? null,
+                p_can_view_all: canViewAll && !isSellerRole,
+                p_view_mode: viewMode,
+                p_order_status: orderStatusFilter,
+                p_delivery_status: deliveryStatusFilter,
+                p_search: debouncedSearch,
+                p_date_from: dateFrom ? new Date(`${dateFrom}T00:00:00`).toISOString() : null,
+                p_date_to: dateTo ? new Date(`${dateTo}T23:59:59`).toISOString() : null,
+                p_limit: PAGE_SIZE,
+                p_offset: Math.max(0, (currentPage - 1) * PAGE_SIZE)
+            });
             if (error) throw error;
 
-            const loaded = (data || []) as Array<any>;
+            const rows = (data || []) as Array<any>;
+            const loaded = rows.map((row) => row.order) as Array<any>;
+
+            // Los indicadores describen el conjunto filtrado completo, no la pagina.
+            setOrderTotals({
+                total: Number(rows[0]?.total_count || 0),
+                completed: Number(rows[0]?.completed_count || 0),
+                delivered: Number(rows[0]?.delivered_count || 0),
+                billedAmount: Number(rows[0]?.billed_amount || 0)
+            });
+
             if (loaded.length === 0) {
                 setOrders([]);
                 setLastRefreshAt(new Date().toISOString());
@@ -358,7 +374,18 @@ const Orders = () => {
         } finally {
             setLoading(false);
         }
-    }, [canViewAll, isSellerRole, profile?.id]);
+    }, [
+        canViewAll,
+        isSellerRole,
+        profile?.id,
+        viewMode,
+        orderStatusFilter,
+        deliveryStatusFilter,
+        debouncedSearch,
+        dateFrom,
+        dateTo,
+        currentPage
+    ]);
 
     const openNotificationHistory = useCallback(async (order: EnrichedOrder) => {
         setSelectedNotificationOrder(order);
@@ -960,54 +987,29 @@ const Orders = () => {
         }
     }, [closeCourierModal, courierModalOrder, courierProvider, effectiveRole, fetchOrders, profile?.id, trackingNumber]);
 
-    const filteredOrders = useMemo(() => {
-        const term = search.trim().toLowerCase();
-        return orders.filter((order) => {
-            const matchesSearch = !term
-                || (order.client_name || '').toLowerCase().includes(term)
-                || (order.seller_name || '').toLowerCase().includes(term)
-                || String(order.folio || '').includes(term)
-                || String(order.quotation_folio || '').includes(term);
-
-            const normalizedOrderStatus = String(order.status || '').toLowerCase();
-            const matchesOrderStatus = orderStatusFilter === 'active'
-                ? normalizedOrderStatus !== 'cancelled'
-                : normalizedOrderStatus === orderStatusFilter;
-            const matchesDeliveryStatus = deliveryStatusFilter === 'all' || normalizeDeliveryStatus(order.delivery_status) === deliveryStatusFilter;
-            const matchesView = viewMode === 'all' || order.user_id === profile?.id;
-            const orderTimestamp = order.created_at ? new Date(order.created_at).getTime() : null;
-            const matchesDateFrom = !dateFrom || (orderTimestamp !== null && orderTimestamp >= new Date(`${dateFrom}T00:00:00`).getTime());
-            const matchesDateTo = !dateTo || (orderTimestamp !== null && orderTimestamp <= new Date(`${dateTo}T23:59:59`).getTime());
-
-            return matchesSearch && matchesOrderStatus && matchesDeliveryStatus && matchesView && matchesDateFrom && matchesDateTo;
-        });
-    }, [dateFrom, dateTo, deliveryStatusFilter, orderStatusFilter, orders, profile?.id, search, viewMode]);
+    // La base ya aplica busqueda, estados, vista y rango de fechas.
+    const filteredOrders = orders;
 
     useEffect(() => {
+        const temporizador = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
+        return () => window.clearTimeout(temporizador);
+    }, [search]);
+
+    // Cambiar cualquier filtro devuelve a la primera pagina.
+    useEffect(() => {
         setCurrentPage(1);
-    }, [search, orderStatusFilter, deliveryStatusFilter, viewMode, dateFrom, dateTo]);
+    }, [debouncedSearch, orderStatusFilter, deliveryStatusFilter, viewMode, dateFrom, dateTo]);
 
-    const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
-    const paginatedOrders = useMemo(() => {
-        const safePage = Math.min(currentPage, totalPages);
-        const start = (safePage - 1) * PAGE_SIZE;
-        return filteredOrders.slice(start, start + PAGE_SIZE);
-    }, [currentPage, filteredOrders, totalPages]);
-
+    const totalPages = Math.max(1, Math.ceil(orderTotals.total / PAGE_SIZE));
+    // La pagina llega ya recortada desde la base.
+    const paginatedOrders = filteredOrders;
     useEffect(() => {
         if (currentPage > totalPages) {
             setCurrentPage(totalPages);
         }
     }, [currentPage, totalPages]);
 
-    const orderStats = useMemo(() => {
-        const completed = filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'completed').length;
-        const delivered = filteredOrders.filter((o) => normalizeDeliveryStatus(o.delivery_status) === 'delivered').length;
-        const billedAmount = filteredOrders
-            .filter((o) => (o.status || '').toLowerCase() !== 'cancelled')
-            .reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
-        return { total: filteredOrders.length, completed, delivered, billedAmount };
-    }, [filteredOrders]);
+    const orderStats = orderTotals;
 
     return (
         <div className="space-y-8 max-w-7xl mx-auto">
