@@ -289,29 +289,67 @@ const Dashboard = () => {
                 const firstDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)).toISOString();
                 const lastDayOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)).toISOString();
 
-                // A. Get Goal (Note: Goals table uses separate month/year columns as numbers)
-                const { data: goalData, error: goalError } = await supabase
-                    .from('goals')
-                    .select('*')
-                    .eq('user_id', profile.id)
-                    .eq('month', currentMonth)
-                    .eq('year', currentYear)
-                    .maybeSingle();
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+                sevenDaysAgo.setHours(0, 0, 0, 0);
 
-                // DEBUG: Fetch ALL goals for this user to check for mismatches
-                const { data: allGoals } = await supabase
-                    .from('goals')
-                    .select('*')
-                    .eq('user_id', profile.id);
-
-                // B. Get Monthly Sales (Direct Orders Query)
-                const { data: monthOrders } = await supabase
-                    .from('orders')
-                    .select('total_amount, status, created_at')
-                    .eq('user_id', profile.id)
-                    .not('quotation_id', 'is', null)
-                    .gte('created_at', firstDayOfMonth)
-                    .lte('created_at', lastDayOfMonth);
+                /**
+                 * Estas siete consultas no dependen unas de otras, pero se lanzaban en fila
+                 * y cada una esperaba a que terminara la anterior. Agrupadas, el dashboard
+                 * paga una sola espera en lugar de siete.
+                 */
+                const [
+                    { data: goalData, error: goalError },
+                    { data: allGoals },
+                    { data: monthOrders },
+                    { data: weekVisits },
+                    { data: weekOrders },
+                    { data: monthVisits },
+                    tasksResponse
+                ] = await Promise.all([
+                    supabase
+                        .from('goals')
+                        .select('*')
+                        .eq('user_id', profile.id)
+                        .eq('month', currentMonth)
+                        .eq('year', currentYear)
+                        .maybeSingle(),
+                    supabase
+                        .from('goals')
+                        .select('*')
+                        .eq('user_id', profile.id),
+                    supabase
+                        .from('orders')
+                        .select('total_amount, status, created_at')
+                        .eq('user_id', profile.id)
+                        .not('quotation_id', 'is', null)
+                        .gte('created_at', firstDayOfMonth)
+                        .lte('created_at', lastDayOfMonth),
+                    supabase
+                        .from('visits')
+                        .select('check_in_time')
+                        .eq('sales_rep_id', profile.id)
+                        .gte('check_in_time', sevenDaysAgo.toISOString()),
+                    supabase
+                        .from('orders')
+                        .select('created_at')
+                        .eq('user_id', profile.id)
+                        .not('quotation_id', 'is', null)
+                        .gte('created_at', sevenDaysAgo.toISOString()),
+                    supabase
+                        .from('visits')
+                        .select('clients(zone)')
+                        .eq('sales_rep_id', profile.id)
+                        .gte('check_in_time', firstDayOfMonth)
+                        .lte('check_in_time', lastDayOfMonth),
+                    supabase
+                        .from('tasks')
+                        .select('*')
+                        .eq('user_id', profile.id)
+                        .eq('status', 'pending')
+                        .lte('due_date', new Date(new Date().setHours(23, 59, 59, 999)).toISOString())
+                        .order('due_date', { ascending: true })
+                ]);
 
                 let monthSales = 0;
                 let activeOrdersCount = 0; // Not strictly used but kept for logic structure
@@ -340,23 +378,6 @@ const Dashboard = () => {
                 ));
 
                 // 2. Weekly Activity (Last 7 Days)
-                const sevenDaysAgo = new Date();
-                sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-                sevenDaysAgo.setHours(0, 0, 0, 0);
-
-                const { data: weekVisits } = await supabase
-                    .from('visits')
-                    .select('check_in_time')
-                    .eq('sales_rep_id', profile.id)
-                    .gte('check_in_time', sevenDaysAgo.toISOString());
-
-                const { data: weekOrders } = await supabase
-                    .from('orders')
-                    .select('created_at')
-                    .eq('user_id', profile.id)
-                    .not('quotation_id', 'is', null)
-                    .gte('created_at', sevenDaysAgo.toISOString());
-
                 setWeeklyActivity(buildWeeklyActivitySeries(
                     (weekVisits || []) as Array<{ check_in_time?: string | null }>,
                     (weekOrders || []) as Array<{ created_at?: string | null }>,
@@ -364,13 +385,6 @@ const Dashboard = () => {
                 ));
 
                 // 3. Zone Distribution
-                const { data: monthVisits } = await supabase
-                    .from('visits')
-                    .select('clients(zone)')
-                    .eq('sales_rep_id', profile.id)
-                    .gte('check_in_time', firstDayOfMonth)
-                    .lte('check_in_time', lastDayOfMonth);
-
                 const zoneCount = new Map<string, number>();
                 monthVisits?.forEach(v => {
                     const zone = (v.clients as any)?.zone || 'Sin Zona';
@@ -384,13 +398,7 @@ const Dashboard = () => {
                 setZoneData(zoneArray);
 
                 // Fetch Tasks
-                let { data: tasksData } = await supabase
-                    .from('tasks')
-                    .select('*')
-                    .eq('user_id', profile.id)
-                    .eq('status', 'pending')
-                    .lte('due_date', new Date(new Date().setHours(23, 59, 59, 999)).toISOString())
-                    .order('due_date', { ascending: true });
+                let tasksData = tasksResponse.data;
 
                 if (!tasksData || tasksData.length === 0) {
                     const { data: legacyTasks } = await supabase
@@ -412,15 +420,19 @@ const Dashboard = () => {
                 const { data: allClients } = await clientsQuery;
 
                 if (allClients) {
-                    const clientIds = allClients.map(c => c.id);
+                    /**
+                     * La ultima actividad de cada cliente se resuelve en la base.
+                     *
+                     * Antes se traia el historial completo de visitas, pedidos, cotizaciones,
+                     * llamadas, correos y WhatsApp en seis consultas que enviaban los
+                     * identificadores de todos los clientes dentro de la URL. Con casi mil
+                     * clientes esa URL supera los 34 KB y el servidor la rechaza, de modo que
+                     * el panel llevaba tiempo sin cargar y nadie lo notaba porque los errores
+                     * no se comprobaban.
+                     */
                     const [
                         { data: followupSettingsRow },
-                        { data: lastVisits },
-                        { data: lastOrders },
-                        { data: lastQuotes },
-                        { data: lastCalls },
-                        { data: lastEmails },
-                        { data: lastWhatsapp }
+                        { data: activityRows, error: activityError }
                     ] = await Promise.all([
                         supabase
                             .from('client_followup_settings')
@@ -428,83 +440,33 @@ const Dashboard = () => {
                             .eq('id', 'default')
                             .maybeSingle(),
                         supabase
-                            .from('visits')
-                            .select('client_id, check_in_time')
-                            .in('client_id', clientIds)
-                            .eq('status', 'completed')
-                            .order('check_in_time', { ascending: false }),
-                        supabase
-                            .from('orders')
-                            .select('client_id, created_at')
-                            .in('client_id', clientIds)
-                            .order('created_at', { ascending: false }),
-                        supabase
-                            .from('quotations')
-                            .select('client_id, created_at')
-                            .in('client_id', clientIds)
-                            .order('created_at', { ascending: false }),
-                        supabase
-                            .from('call_logs')
-                            .select('client_id, created_at')
-                            .in('client_id', clientIds)
-                            .order('created_at', { ascending: false }),
-                        supabase
-                            .from('email_logs')
-                            .select('client_id, created_at')
-                            .in('client_id', clientIds)
-                            .order('created_at', { ascending: false }),
-                        supabase
-                            .from('lead_message_logs')
-                            .select('client_id, created_at, channel, status')
-                            .in('client_id', clientIds)
-                            .eq('channel', 'whatsapp')
-                            .in('status', ['sent', 'opened_external'])
-                            .order('created_at', { ascending: false })
+                            .from('vw_client_last_activity')
+                            .select('client_id, last_visit_at, last_order_at, last_quotation_at, last_call_at, last_email_at, last_whatsapp_at')
                     ]);
+
+                    if (activityError) throw activityError;
 
                     const warningDays = Number(followupSettingsRow?.active_warning_days || 15);
                     const now = new Date();
-                    const latestVisitByClient = new Map<string, string>();
-                    const latestOrderByClient = new Map<string, string>();
-                    const latestQuoteByClient = new Map<string, string>();
-                    const latestCallByClient = new Map<string, string>();
-                    const latestEmailByClient = new Map<string, string>();
-                    const latestWhatsappByClient = new Map<string, string>();
+                    const lastActivityByClient = new Map<string, string | null>();
 
-                    (lastVisits || []).forEach((visit: any) => {
-                        if (!visit.client_id) return;
-                        latestVisitByClient.set(visit.client_id, getLatestIsoDate(latestVisitByClient.get(visit.client_id) || null, visit.check_in_time) || visit.check_in_time);
-                    });
-                    (lastOrders || []).forEach((order: any) => {
-                        if (!order.client_id) return;
-                        latestOrderByClient.set(order.client_id, getLatestIsoDate(latestOrderByClient.get(order.client_id) || null, order.created_at) || order.created_at);
-                    });
-                    (lastQuotes || []).forEach((quote: any) => {
-                        if (!quote.client_id) return;
-                        latestQuoteByClient.set(quote.client_id, getLatestIsoDate(latestQuoteByClient.get(quote.client_id) || null, quote.created_at) || quote.created_at);
-                    });
-                    (lastCalls || []).forEach((call: any) => {
-                        if (!call.client_id) return;
-                        latestCallByClient.set(call.client_id, getLatestIsoDate(latestCallByClient.get(call.client_id) || null, call.created_at) || call.created_at);
-                    });
-                    (lastEmails || []).forEach((email: any) => {
-                        if (!email.client_id) return;
-                        latestEmailByClient.set(email.client_id, getLatestIsoDate(latestEmailByClient.get(email.client_id) || null, email.created_at) || email.created_at);
-                    });
-                    (lastWhatsapp || []).forEach((message: any) => {
-                        if (!message.client_id) return;
-                        latestWhatsappByClient.set(message.client_id, getLatestIsoDate(latestWhatsappByClient.get(message.client_id) || null, message.created_at) || message.created_at);
+                    (activityRows || []).forEach((row: any) => {
+                        if (!row?.client_id) return;
+                        lastActivityByClient.set(
+                            row.client_id,
+                            getLatestIsoDate(
+                                row.last_visit_at,
+                                row.last_order_at,
+                                row.last_quotation_at,
+                                row.last_call_at,
+                                row.last_email_at,
+                                row.last_whatsapp_at
+                            )
+                        );
                     });
 
                     const neglected = allClients.map(client => {
-                        const lastActivityAt = getLatestIsoDate(
-                            latestVisitByClient.get(client.id) || null,
-                            latestOrderByClient.get(client.id) || null,
-                            latestQuoteByClient.get(client.id) || null,
-                            latestCallByClient.get(client.id) || null,
-                            latestEmailByClient.get(client.id) || null,
-                            latestWhatsappByClient.get(client.id) || null
-                        );
+                        const lastActivityAt = lastActivityByClient.get(client.id) || null;
                         const lastDate = lastActivityAt ? new Date(lastActivityAt) : null;
                         const days = lastDate ? Math.floor((now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)) : 999;
                         return { ...client, daysSinceLastVisit: days, lastVisitDate: lastDate };
@@ -541,51 +503,73 @@ const Dashboard = () => {
                     }
                     return true;
                 });
-                const pendingClientGeoBackfill = new Map<string, { comuna?: string; zone?: string }>();
-                const enrichedVisits = await Promise.all(
-                    filteredVisits.map(async (visit: any) => {
-                        const currentComuna = (visit.clients as any)?.comuna;
-                        const currentZone = (visit.clients as any)?.zone;
+                /**
+                 * La comuna se resuelve DESPUES de pintar, nunca antes.
+                 *
+                 * Las visitas cuyo cliente no tiene comuna ni zona se resolvian consultando
+                 * la geocodificacion inversa de OpenStreetMap, una peticion por visita y
+                 * todas a la vez, con el dashboard esperando a que terminaran. Ese servicio
+                 * admite una peticion por segundo y rechaza las rafagas, asi que en un dia
+                 * con veinte visitas el panel quedaba bloqueado varios segundos.
+                 *
+                 * Ahora se muestra 'Sin Zona' de inmediato y las comunas van apareciendo a
+                 * medida que se resuelven, de una en una y respetando ese limite.
+                 */
+                const visitsNeedingComuna: Array<{ id: string; clientId: string | null; lat: number; lng: number }> = [];
 
-                        const hasComuna = hasMeaningfulZone(currentComuna);
-                        const hasZone = hasMeaningfulZone(currentZone);
+                const initialVisits = filteredVisits.map((visit: any) => {
+                    const currentComuna = (visit.clients as any)?.comuna;
+                    const currentZone = (visit.clients as any)?.zone;
+                    const hasComuna = hasMeaningfulZone(currentComuna);
+                    const hasZone = hasMeaningfulZone(currentZone);
 
-                        if (hasComuna || hasZone) {
-                            return { ...visit, dashboardComuna: hasComuna ? currentComuna : currentZone };
-                        }
+                    if (hasComuna || hasZone) {
+                        return { ...visit, dashboardComuna: hasComuna ? currentComuna : currentZone };
+                    }
 
-                        const latCandidate = visit.check_out_lat ?? visit.lat;
-                        const lngCandidate = visit.check_out_lng ?? visit.lng;
+                    const latCandidate = visit.check_out_lat ?? visit.lat;
+                    const lngCandidate = visit.check_out_lng ?? visit.lng;
 
-                        if (!isValidGpsNumber(latCandidate) || !isValidGpsNumber(lngCandidate)) {
-                            return { ...visit, dashboardComuna: 'Sin Zona' };
-                        }
+                    if (isValidGpsNumber(latCandidate) && isValidGpsNumber(lngCandidate)) {
+                        visitsNeedingComuna.push({
+                            id: visit.id,
+                            clientId: visit.client_id || null,
+                            lat: Number(latCandidate),
+                            lng: Number(lngCandidate)
+                        });
+                    }
 
-                        const resolvedComuna = await resolveComunaFromGps(Number(latCandidate), Number(lngCandidate));
-                        if (resolvedComuna && visit.client_id) {
-                            pendingClientGeoBackfill.set(visit.client_id, {
-                                comuna: resolvedComuna,
-                                zone: resolvedComuna
-                            });
-                        }
-                        return { ...visit, dashboardComuna: resolvedComuna || 'Sin Zona' };
-                    })
-                );
+                    return { ...visit, dashboardComuna: 'Sin Zona' };
+                });
 
-                setDailyVisits(enrichedVisits);
+                setDailyVisits(initialVisits);
 
-                if (pendingClientGeoBackfill.size > 0) {
-                    void Promise.all(
-                        Array.from(pendingClientGeoBackfill.entries()).map(async ([clientId, values]) => {
-                            const { error } = await supabase
-                                .from('clients')
-                                .update(values)
-                                .eq('id', clientId);
-                            if (error) {
-                                console.warn('Dashboard: no se pudo persistir comuna/zona desde GPS para client_id=', clientId, error.message);
+                if (visitsNeedingComuna.length > 0) {
+                    void (async () => {
+                        for (const pendiente of visitsNeedingComuna) {
+                            const resolvedComuna = await resolveComunaFromGps(pendiente.lat, pendiente.lng);
+                            if (!resolvedComuna) continue;
+
+                            setDailyVisits((previas: any[]) => previas.map((visit: any) => (
+                                visit.id === pendiente.id
+                                    ? { ...visit, dashboardComuna: resolvedComuna }
+                                    : visit
+                            )));
+
+                            if (pendiente.clientId) {
+                                const { error } = await supabase
+                                    .from('clients')
+                                    .update({ comuna: resolvedComuna })
+                                    .eq('id', pendiente.clientId);
+                                if (error) {
+                                    console.warn('Dashboard: no se pudo persistir la comuna desde GPS para client_id=', pendiente.clientId, error.message);
+                                }
                             }
-                        })
-                    );
+
+                            // OpenStreetMap admite una peticion por segundo.
+                            await new Promise((resolve) => window.setTimeout(resolve, 1100));
+                        }
+                    })();
                 }
             } else if (visitsError) {
                 console.error("Error fetching detail visits:", visitsError);
@@ -792,89 +776,111 @@ const Dashboard = () => {
                     const weekEnd = new Date(selectedDate);
                     weekEnd.setHours(23, 59, 59, 999);
 
-                    const todayVisitsRows = preloadedTodayVisitsRows.length > 0
-                        ? preloadedTodayVisitsRows
-                        : (await supabase
-                            .from('visits')
-                            .select('id, sales_rep_id, client_id, check_in_time, status')
-                            .in('sales_rep_id', sellerIds)
-                            .gte('check_in_time', startOfToday.toISOString())
-                            .lte('check_in_time', endOfToday.toISOString())
-                            .neq('status', 'cancelled')).data || [];
+                    /**
+                     * Nueve consultas que solo dependen de sellerIds y de un rango de fechas,
+                     * encadenadas una tras otra. Lanzadas juntas, el panel de equipo pasa de
+                     * pagar nueve esperas a pagar una. Las ya precargadas se resuelven de
+                     * inmediato, sin consultar.
+                     */
+                    const yaResuelto = <T,>(filas: T[]) => Promise.resolve({ data: filas } as { data: T[] | null });
 
-                    const todayOrdersRows = preloadedTodayOrdersRows.length > 0
-                        ? preloadedTodayOrdersRows
-                        : (await supabase
+                    const [
+                        todayVisitsRes,
+                        todayOrdersRes,
+                        weekVisitsRes,
+                        weekOrdersRes,
+                        monthOrdersRes,
+                        previousMonthOrdersRes,
+                        yesterdayVisitsRes,
+                        yesterdayQuotesRes,
+                        teamGoalsRes
+                    ] = await Promise.all([
+                        preloadedTodayVisitsRows.length > 0
+                            ? yaResuelto(preloadedTodayVisitsRows)
+                            : supabase
+                                .from('visits')
+                                .select('id, sales_rep_id, client_id, check_in_time, status')
+                                .in('sales_rep_id', sellerIds)
+                                .gte('check_in_time', startOfToday.toISOString())
+                                .lte('check_in_time', endOfToday.toISOString())
+                                .neq('status', 'cancelled'),
+                        preloadedTodayOrdersRows.length > 0
+                            ? yaResuelto(preloadedTodayOrdersRows)
+                            : supabase
+                                .from('orders')
+                                .select('id, user_id, total_amount, status, quotation_id, created_at')
+                                .in('user_id', sellerIds)
+                                .not('quotation_id', 'is', null)
+                                .gte('created_at', startOfToday.toISOString())
+                                .lte('created_at', endOfToday.toISOString()),
+                        supabase
+                            .from('visits')
+                            .select('check_in_time, sales_rep_id')
+                            .in('sales_rep_id', sellerIds)
+                            .gte('check_in_time', weekStart.toISOString())
+                            .lte('check_in_time', weekEnd.toISOString())
+                            .neq('status', 'cancelled'),
+                        supabase
+                            .from('orders')
+                            .select('created_at, user_id, status, quotation_id')
+                            .in('user_id', sellerIds)
+                            .not('quotation_id', 'is', null)
+                            .gte('created_at', weekStart.toISOString())
+                            .lte('created_at', weekEnd.toISOString()),
+                        preloadedMonthOrdersRows.length > 0
+                            ? yaResuelto(preloadedMonthOrdersRows)
+                            : supabase
+                                .from('orders')
+                                .select('id, user_id, total_amount, status, quotation_id, created_at')
+                                .in('user_id', sellerIds)
+                                .not('quotation_id', 'is', null)
+                                .gte('created_at', teamFirstDayOfMonth)
+                                .lte('created_at', teamLastDayOfMonth),
+                        supabase
                             .from('orders')
                             .select('id, user_id, total_amount, status, quotation_id, created_at')
                             .in('user_id', sellerIds)
                             .not('quotation_id', 'is', null)
-                            .gte('created_at', startOfToday.toISOString())
-                            .lte('created_at', endOfToday.toISOString())).data || [];
+                            .gte('created_at', previousMonthStart)
+                            .lte('created_at', previousMonthComparableEnd),
+                        preloadedYesterdayVisitsRows.length > 0
+                            ? yaResuelto(preloadedYesterdayVisitsRows)
+                            : supabase
+                                .from('visits')
+                                .select('id, sales_rep_id, client_id, check_in_time, clients(name, comuna, zone)')
+                                .in('sales_rep_id', sellerIds)
+                                .eq('status', 'completed')
+                                .not('client_id', 'is', null)
+                                .gte('check_in_time', startOfYesterday.toISOString())
+                                .lte('check_in_time', endOfYesterday.toISOString()),
+                        preloadedYesterdayQuotesRows.length > 0
+                            ? yaResuelto(preloadedYesterdayQuotesRows)
+                            : supabase
+                                .from('quotations')
+                                .select('id, folio, seller_id, client_id, status, total_amount, created_at, clients(name)')
+                                .in('seller_id', sellerIds)
+                                .in('status', ['sent', 'approved'])
+                                .gte('created_at', startOfYesterday.toISOString())
+                                .lte('created_at', endOfYesterday.toISOString()),
+                        preloadedTeamGoalsRows.length > 0
+                            ? yaResuelto(preloadedTeamGoalsRows)
+                            : supabase
+                                .from('goals')
+                                .select('user_id, target_amount')
+                                .in('user_id', sellerIds)
+                                .eq('month', teamCurrentMonth)
+                                .eq('year', teamCurrentYear)
+                    ]);
 
-                    const weekVisitsRows = (await supabase
-                        .from('visits')
-                        .select('check_in_time, sales_rep_id')
-                        .in('sales_rep_id', sellerIds)
-                        .gte('check_in_time', weekStart.toISOString())
-                        .lte('check_in_time', weekEnd.toISOString())
-                        .neq('status', 'cancelled')).data || [];
-
-                    const weekOrdersRows = (await supabase
-                        .from('orders')
-                        .select('created_at, user_id, status, quotation_id')
-                        .in('user_id', sellerIds)
-                        .not('quotation_id', 'is', null)
-                        .gte('created_at', weekStart.toISOString())
-                        .lte('created_at', weekEnd.toISOString())).data || [];
-
-                    const monthOrdersRows = preloadedMonthOrdersRows.length > 0
-                        ? preloadedMonthOrdersRows
-                        : (await supabase
-                            .from('orders')
-                            .select('id, user_id, total_amount, status, quotation_id, created_at')
-                            .in('user_id', sellerIds)
-                            .not('quotation_id', 'is', null)
-                            .gte('created_at', teamFirstDayOfMonth)
-                            .lte('created_at', teamLastDayOfMonth)).data || [];
-
-                    const previousMonthOrdersRows = (await supabase
-                        .from('orders')
-                        .select('id, user_id, total_amount, status, quotation_id, created_at')
-                        .in('user_id', sellerIds)
-                        .not('quotation_id', 'is', null)
-                        .gte('created_at', previousMonthStart)
-                        .lte('created_at', previousMonthComparableEnd)).data || [];
-
-                    const yesterdayVisitsRows = preloadedYesterdayVisitsRows.length > 0
-                        ? preloadedYesterdayVisitsRows
-                        : (await supabase
-                            .from('visits')
-                            .select('id, sales_rep_id, client_id, check_in_time, clients(name, comuna, zone)')
-                            .in('sales_rep_id', sellerIds)
-                            .eq('status', 'completed')
-                            .not('client_id', 'is', null)
-                            .gte('check_in_time', startOfYesterday.toISOString())
-                            .lte('check_in_time', endOfYesterday.toISOString())).data || [];
-
-                    const yesterdayQuotesRows = preloadedYesterdayQuotesRows.length > 0
-                        ? preloadedYesterdayQuotesRows
-                        : (await supabase
-                            .from('quotations')
-                            .select('id, folio, seller_id, client_id, status, total_amount, created_at, clients(name)')
-                            .in('seller_id', sellerIds)
-                            .in('status', ['sent', 'approved'])
-                            .gte('created_at', startOfYesterday.toISOString())
-                            .lte('created_at', endOfYesterday.toISOString())).data || [];
-
-                    const teamGoalsRows = preloadedTeamGoalsRows.length > 0
-                        ? preloadedTeamGoalsRows
-                        : (await supabase
-                            .from('goals')
-                            .select('user_id, target_amount')
-                            .in('user_id', sellerIds)
-                            .eq('month', teamCurrentMonth)
-                            .eq('year', teamCurrentYear)).data || [];
+                    const todayVisitsRows = todayVisitsRes.data || [];
+                    const todayOrdersRows = todayOrdersRes.data || [];
+                    const weekVisitsRows = weekVisitsRes.data || [];
+                    const weekOrdersRows = weekOrdersRes.data || [];
+                    const monthOrdersRows = monthOrdersRes.data || [];
+                    const previousMonthOrdersRows = previousMonthOrdersRes.data || [];
+                    const yesterdayVisitsRows = yesterdayVisitsRes.data || [];
+                    const yesterdayQuotesRows = yesterdayQuotesRes.data || [];
+                    const teamGoalsRows = teamGoalsRes.data || [];
 
                     const yesterdayVisitClientIds = Array.from(
                         new Set(((yesterdayVisitsRows || []) as any[]).map((visit: any) => visit.client_id).filter(Boolean))
