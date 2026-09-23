@@ -3515,11 +3515,11 @@ const Quotations: React.FC = () => {
                             <p className="text-gray-400 font-medium text-sm">Capturaremos tu ubicación actual para el registro.</p>
                         </div>
 
-	                        <div className="mt-8 space-y-3">
-	                            {[
-	                                { id: 'Presencial', icon: <User size={18} />, desc: 'Visita en clínica', disabled: !activeVisit },
-	                                { id: 'WhatsApp', icon: <MessageSquare size={18} />, desc: 'Conversación digital', disabled: false },
-	                                { id: 'Teléfono', icon: <Phone size={18} />, desc: 'Llamada comercial', disabled: false }
+                        <div className="mt-8 space-y-3">
+                            {[
+                                { id: 'Presencial', icon: <User size={18} />, desc: 'Visita en clínica', disabled: !activeVisit },
+                                { id: 'WhatsApp', icon: <MessageSquare size={18} />, desc: 'Conversación digital', disabled: false },
+                                { id: 'Teléfono', icon: <Phone size={18} />, desc: 'Llamada comercial', disabled: false }
                             ].map((type) => (
                                 <button
                                     key={type.id}
@@ -3537,9 +3537,9 @@ const Quotations: React.FC = () => {
                                         </div>
                                     </div>
                                     {selectedInteractionType === type.id && <CheckCircle2 size={18} className="text-indigo-600" />}
-	                                </button>
-	                            ))}
-	                        </div>
+                                </button>
+                            ))}
+                        </div>
 
                             {createError && (
                                 <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-left">
@@ -3548,8 +3548,8 @@ const Quotations: React.FC = () => {
                                 </div>
                             )}
 
-	                        <div className="mt-8 flex gap-3">
-	                            <button
+                        <div className="mt-8 flex gap-3">
+                            <button
                                 onClick={() => setIsInteractionModalOpen(false)}
                                 className="flex-1 py-4 text-gray-400 font-bold text-sm hover:text-gray-600"
                             >
