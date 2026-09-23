@@ -83,6 +83,16 @@ const normalizeProductKey = (value: string) =>
 const DISPATCH_SERVICE_NAME_KEY = normalizeProductKey(DISPATCH_SERVICE_NAME);
 const DISPATCH_SERVICE_SKU_KEY = normalizeProductKey(DISPATCH_SERVICE_SKU);
 const ORDER_CONVERSION_TIMEOUT_MS = 60_000;
+const QUOTATIONS_PAGE_SIZE = 25;
+
+// El filtro de la pantalla usa etiquetas propias; la base guarda los estados en minuscula.
+const QUOTATION_STATUS_BY_FILTER: Record<string, string> = {
+    All: 'All',
+    Draft: 'draft',
+    Sent: 'sent',
+    Approved: 'approved'
+};
+
 const PAYMENT_PROOF_MODAL_DRAFT_KEY = 'quotation_payment_proof_modal';
 
 // El borrador de la cotizacion en construccion se guarda por usuario: en un dispositivo
@@ -253,7 +263,19 @@ const notifyApprovalPush = async (approvalId: string) => {
 const Quotations: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
+    // La lista ya no se carga entera: la base devuelve una pagina con la busqueda, el
+    // filtro de estado y el orden ya resueltos.
     const [quotations, setQuotations] = useState<any[]>([]);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [quotationTotals, setQuotationTotals] = useState({
+        filtered: 0,
+        total: 0,
+        drafts: 0,
+        sent: 0,
+        approved: 0,
+        totalAmount: 0,
+        pendingMine: 0
+    });
     const [activeFilter, setActiveFilter] = useState<QuoteFilter>('All');
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -269,6 +291,8 @@ const Quotations: React.FC = () => {
     const [collectionsDebtWarningLoading, setCollectionsDebtWarningLoading] = useState(false);
     const [availableClients, setAvailableClients] = useState<any[]>([]);
     const [quotationSearch, setQuotationSearch] = useState('');
+    // La busqueda viaja a la base, asi que se espera a que el usuario deje de escribir.
+    const [debouncedQuotationSearch, setDebouncedQuotationSearch] = useState('');
     const [clientSelectorSearch, setClientSelectorSearch] = useState('');
     const [selectedLocation, setSelectedLocation] = useState<any>(null); // For View Location Modal
     const [manualLocation, setManualLocation] = useState<{ lat: number; lng: number } | null>(null); // For Custom Picker
@@ -536,24 +560,34 @@ const Quotations: React.FC = () => {
                 console.warn('No se pudo ejecutar expiración automática de cotizaciones enviadas:', expireError);
             }
 
-            let query = supabase
-                .from('quotations')
-                .select(`
-                    *,
-                    clients (id, name, rut, address, zone, purchase_contact, status, phone, email, giro, comuna, office, credit_days, requires_discount_approval)
-                `);
-
-            if (isSellerRole && profile?.id) {
-                query = query.eq('seller_id', profile.id);
-            } else if (!canViewAll && profile?.id) {
-                query = query.eq('seller_id', profile.id);
-            }
-
-            const { data: quotesData, error: quotesError } = await query.order('created_at', { ascending: false });
+            const { data: pageRows, error: quotesError } = await supabase.rpc('search_quotations_paged', {
+                p_actor_id: profile?.id ?? null,
+                // Un vendedor queda acotado a sus propias cotizaciones, igual que antes.
+                p_can_view_all: canViewAll && !isSellerRole,
+                p_is_seller: isSellerRole,
+                p_status: QUOTATION_STATUS_BY_FILTER[activeFilter] ?? 'All',
+                p_search: debouncedQuotationSearch,
+                p_limit: QUOTATIONS_PAGE_SIZE,
+                p_offset: Math.max(0, (currentPage - 1) * QUOTATIONS_PAGE_SIZE)
+            });
 
             if (quotesError) {
                 throw quotesError;
-            } else if (quotesData) {
+            } else if (pageRows) {
+                const rows = (pageRows || []) as any[];
+                const quotesData = rows.map((row) => row.quotation);
+
+                // Los indicadores describen todo el ambito visible, sin aplicar el filtro
+                // de estado ni la busqueda, que es como se comportaban antes de paginar.
+                setQuotationTotals({
+                    filtered: Number(rows[0]?.total_count || 0),
+                    total: Number(rows[0]?.scope_total || 0),
+                    drafts: Number(rows[0]?.scope_drafts || 0),
+                    sent: Number(rows[0]?.scope_sent || 0),
+                    approved: Number(rows[0]?.scope_approved || 0),
+                    totalAmount: Number(rows[0]?.scope_total_amount || 0),
+                    pendingMine: Number(rows[0]?.pending_mine_count || 0)
+                });
                 // Manual Fetch for Auxiliary Data to avoid Join issues
                 const sellerIds = Array.from(new Set(quotesData.map((q: any) => q.seller_id).filter(Boolean)));
                 const sellerCatalogIds = Array.from(new Set(quotesData.map((q: any) => q.seller_catalog_id).filter(Boolean)));
@@ -711,7 +745,14 @@ const Quotations: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [canViewAll, isSellerRole, profile?.id]);
+    }, [
+        canViewAll,
+        isSellerRole,
+        profile?.id,
+        activeFilter,
+        debouncedQuotationSearch,
+        currentPage
+    ]);
 
     const fetchProducts = useCallback(async () => {
         // Explicit columns: never fetch potential cost/margin fields to seller UI.
@@ -889,11 +930,30 @@ const Quotations: React.FC = () => {
     }, [fetchAvailableSellers, newSellerEmail, newSellerName, profile?.id]);
 
     useEffect(() => {
-        fetchQuotations();
+        const temporizador = window.setTimeout(
+            () => setDebouncedQuotationSearch(quotationSearch.trim()),
+            350
+        );
+        return () => window.clearTimeout(temporizador);
+    }, [quotationSearch]);
+
+    // Cambiar de filtro o de busqueda devuelve a la primera pagina: conservar la actual
+    // dejaria al usuario en un tramo que quiza ya no existe en el nuevo conjunto.
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [activeFilter, debouncedQuotationSearch]);
+
+    // La lista se recarga al cambiar de pagina o de filtro. Los catalogos auxiliares no,
+    // porque no dependen de la pagina que se este viendo.
+    useEffect(() => {
+        void fetchQuotations();
+    }, [fetchQuotations]);
+
+    useEffect(() => {
         fetchClientsForModal();
         fetchProducts();
         void fetchAvailableSellers();
-    }, [fetchAvailableSellers, fetchQuotations, fetchClientsForModal, permissions]);
+    }, [fetchAvailableSellers, fetchClientsForModal, fetchProducts, permissions]);
 
     useEffect(() => {
         if (!isItemModalOpen) return;
@@ -2172,44 +2232,19 @@ const Quotations: React.FC = () => {
         }
     };
 
-    const filteredQuotations = useMemo(() => {
-        const searchLower = quotationSearch.trim().toLowerCase();
-        const filtered = quotations
-            .filter((q) => {
-                if (activeFilter === 'All') return true;
-                if (activeFilter === 'Draft') return q.status === 'draft';
-                if (activeFilter === 'Sent') return q.status === 'sent';
-                if (activeFilter === 'Approved') return q.status === 'approved';
-                return true;
-            })
-            .filter((q) => {
-                if (!searchLower) return true;
-                return q.client_name?.toLowerCase().includes(searchLower) || q.folio?.toString().includes(searchLower);
-            });
+    // La base ya aplica el filtro de estado, la busqueda y el orden, incluido el que
+    // pone primero las aprobaciones pendientes del propio vendedor.
+    const filteredQuotations = quotations;
 
-        if (effectiveRole !== 'seller') return filtered;
+    const quotationStats = quotationTotals;
 
-        return [...filtered].sort((a, b) => {
-            const aPending = a.discount_approval?.status === 'pending' && a.seller_id === profile?.id ? 1 : 0;
-            const bPending = b.discount_approval?.status === 'pending' && b.seller_id === profile?.id ? 1 : 0;
-            if (aPending !== bPending) return bPending - aPending;
-            const aDate = new Date(a.created_at || 0).getTime();
-            const bDate = new Date(b.created_at || 0).getTime();
-            return bDate - aDate;
-        });
-    }, [quotations, activeFilter, quotationSearch, effectiveRole, profile?.id]);
+    const totalQuotationPages = Math.max(1, Math.ceil(quotationTotals.filtered / QUOTATIONS_PAGE_SIZE));
 
-    const quotationStats = useMemo(() => {
-        const drafts = quotations.filter((q) => q.status === 'draft').length;
-        const sent = quotations.filter((q) => q.status === 'sent').length;
-        const approved = quotations.filter((q) => q.status === 'approved').length;
-        const totalAmount = quotations.reduce((acc, q) => acc + toWholeMoney(q.total_amount || 0), 0);
-        return { total: quotations.length, drafts, sent, approved, totalAmount };
-    }, [quotations]);
-    const pendingApprovalMineCount = useMemo(() => {
-        if (effectiveRole !== 'seller') return 0;
-        return filteredQuotations.filter((q) => q.discount_approval?.status === 'pending' && q.seller_id === profile?.id).length;
-    }, [filteredQuotations, effectiveRole, profile?.id]);
+    // Si el conjunto encoge tras recargar, la pagina actual puede quedar fuera de rango.
+    useEffect(() => {
+        if (currentPage > totalQuotationPages) setCurrentPage(totalQuotationPages);
+    }, [currentPage, totalQuotationPages]);
+    const pendingApprovalMineCount = effectiveRole === 'seller' ? quotationTotals.pendingMine : 0;
     const formMaxDiscountPct = useMemo(() => {
         return getQuotationMaxDiscountPct(formItems);
     }, [formItems]);
@@ -2548,6 +2583,36 @@ const Quotations: React.FC = () => {
                     )})
                 )}
             </div>
+
+            {!loading && quotationTotals.filtered > QUOTATIONS_PAGE_SIZE && (
+                <div className="mt-8 flex flex-col items-center justify-between gap-4 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm sm:flex-row">
+                    <p className="text-xs font-bold uppercase tracking-widest text-gray-400">
+                        Mostrando {filteredQuotations.length} de {quotationTotals.filtered} cotización(es). Página {currentPage} de {totalQuotationPages}.
+                    </p>
+
+                    <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                            disabled={currentPage <= 1}
+                            className="rounded-2xl border border-gray-200 px-5 py-3 text-xs font-black uppercase tracking-widest text-gray-600 transition-all hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                            Anterior
+                        </button>
+                        <span className="text-sm font-black text-gray-900">
+                            {currentPage} / {totalQuotationPages}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setCurrentPage((page) => Math.min(totalQuotationPages, page + 1))}
+                            disabled={currentPage >= totalQuotationPages}
+                            className="rounded-2xl border border-gray-200 px-5 py-3 text-xs font-black uppercase tracking-widest text-gray-600 transition-all hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                            Siguiente
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Location Map Modal */}
             {
