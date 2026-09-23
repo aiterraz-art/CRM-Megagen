@@ -39,6 +39,16 @@ const getLatestIsoDate = (...values: Array<string | null | undefined>) => values
         return new Date(current).getTime() > new Date(latest).getTime() ? current : latest;
     }, null);
 
+/**
+ * Ventana en la que un cliente todavia se considera recuperable.
+ *
+ * El panel mostraba a todo el que llevara mas de quince dias sin contacto, lo que sobre
+ * la cartera real son mas del ochenta por ciento de los clientes: una lista que nadie
+ * puede trabajar. Mas alla de este limite el cliente esta dormido y corresponde a una
+ * campaña de reactivacion, no al seguimiento diario.
+ */
+const RECOVERABLE_WINDOW_DAYS = 60;
+
 const isBillableOrderStatus = (status: string | null | undefined) =>
     String(status || '').toLowerCase() !== 'cancelled';
 
@@ -211,6 +221,9 @@ const Dashboard = () => {
     });
     const [selectedVisitForEvidence, setSelectedVisitForEvidence] = useState<any | null>(null);
     const [neglectedClients, setNeglectedClients] = useState<any[]>([]);
+    // Cartera sin trabajar: no es lo mismo que un cliente que se esta enfriando.
+    const [neverContactedCount, setNeverContactedCount] = useState(0);
+    const [dormantCount, setDormantCount] = useState(0);
     const [selectedDate, setSelectedDate] = useState(new Date());
 
     // Tasks State
@@ -441,7 +454,7 @@ const Dashboard = () => {
                             .maybeSingle(),
                         supabase
                             .from('vw_client_last_activity')
-                            .select('client_id, last_visit_at, last_order_at, last_quotation_at, last_call_at, last_email_at, last_whatsapp_at')
+                            .select('client_id, last_visit_at, last_order_at, last_quotation_at, last_call_at, last_email_at, last_whatsapp_at, lifetime_amount')
                     ]);
 
                     if (activityError) throw activityError;
@@ -449,6 +462,8 @@ const Dashboard = () => {
                     const warningDays = Number(followupSettingsRow?.active_warning_days || 15);
                     const now = new Date();
                     const lastActivityByClient = new Map<string, string | null>();
+
+                    const lifetimeAmountByClient = new Map<string, number>();
 
                     (activityRows || []).forEach((row: any) => {
                         if (!row?.client_id) return;
@@ -463,17 +478,48 @@ const Dashboard = () => {
                                 row.last_whatsapp_at
                             )
                         );
+                        lifetimeAmountByClient.set(row.client_id, Number(row.lifetime_amount || 0));
                     });
 
-                    const neglected = allClients.map(client => {
+                    const clientsWithActivity = allClients.map(client => {
                         const lastActivityAt = lastActivityByClient.get(client.id) || null;
                         const lastDate = lastActivityAt ? new Date(lastActivityAt) : null;
-                        const days = lastDate ? Math.floor((now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)) : 999;
-                        return { ...client, daysSinceLastVisit: days, lastVisitDate: lastDate };
-                    }).filter(c => c.daysSinceLastVisit >= warningDays)
-                        .sort((a, b) => b.daysSinceLastVisit - a.daysSinceLastVisit);
+                        const days = lastDate
+                            ? Math.floor((now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24))
+                            : null;
+                        return {
+                            ...client,
+                            daysSinceLastVisit: days ?? 999,
+                            lastVisitDate: lastDate,
+                            lifetimeAmount: lifetimeAmountByClient.get(client.id) || 0,
+                            hasEverBeenContacted: lastDate !== null
+                        };
+                    });
 
-                    setNeglectedClients(neglected);
+                    /**
+                     * El panel responde "a quien estoy a punto de perder", no "a quien tengo
+                     * abandonado". Por eso exige que el cliente haya tenido actividad antes y
+                     * acota la ventana: fuera de ella ya no se trata de seguimiento.
+                     *
+                     * Se ordena por facturacion historica, de modo que arriba queden los
+                     * clientes cuyo silencio cuesta mas dinero.
+                     */
+                    const atRisk = clientsWithActivity
+                        .filter(client => (
+                            client.hasEverBeenContacted
+                            && client.daysSinceLastVisit >= warningDays
+                            && client.daysSinceLastVisit <= RECOVERABLE_WINDOW_DAYS
+                        ))
+                        .sort((a, b) => (
+                            b.lifetimeAmount - a.lifetimeAmount
+                            || b.daysSinceLastVisit - a.daysSinceLastVisit
+                        ));
+
+                    setNeglectedClients(atRisk);
+                    setNeverContactedCount(clientsWithActivity.filter(client => !client.hasEverBeenContacted).length);
+                    setDormantCount(clientsWithActivity.filter(client => (
+                        client.hasEverBeenContacted && client.daysSinceLastVisit > RECOVERABLE_WINDOW_DAYS
+                    )).length);
                 }
             }
 
@@ -1372,22 +1418,52 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            {/* Neglected Clients Alert */}
-            {neglectedClients.length > 0 && (
-                <div className="premium-card bg-gradient-to-r from-red-600 to-red-700 text-white p-6 relative overflow-hidden group shadow-xl shadow-red-200">
-                    <div className="absolute top-0 right-0 p-6 opacity-20 group-hover:rotate-12 transition-transform">
-                        <AlertCircle size={60} />
-                    </div>
-                    <div className="relative flex items-center justify-between">
-                        <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1 opacity-80">Alerta de Fidelización</p>
-                            <h3 className="text-xl font-black">Tienes {neglectedClients.length} clientes desatendidos</h3>
-                            <p className="text-sm font-medium opacity-90 mt-1">Llevan más de 15 días sin una visita registrada.</p>
+            {/* Clientes en riesgo de perderse, y cartera sin trabajar */}
+            {(neglectedClients.length > 0 || neverContactedCount > 0) && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {neglectedClients.length > 0 && (
+                        <div className="lg:col-span-2 premium-card bg-gradient-to-r from-red-600 to-red-700 text-white p-6 relative overflow-hidden group shadow-xl shadow-red-200">
+                            <div className="absolute top-0 right-0 p-6 opacity-20 group-hover:rotate-12 transition-transform">
+                                <AlertCircle size={60} />
+                            </div>
+                            <div className="relative flex items-center justify-between gap-4">
+                                <div>
+                                    <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1 opacity-80">Estás a punto de perderlos</p>
+                                    <h3 className="text-xl font-black">{neglectedClients.length} cliente(s) enfriándose</h3>
+                                    <p className="text-sm font-medium opacity-90 mt-1">
+                                        Compraban y llevan entre 15 y {RECOVERABLE_WINDOW_DAYS} días sin contacto. Ordenados por lo que facturan.
+                                    </p>
+                                    {neglectedClients[0] && (
+                                        <p className="text-xs font-bold opacity-80 mt-2">
+                                            El más valioso: {neglectedClients[0].name} · ${Math.round(neglectedClients[0].lifetimeAmount).toLocaleString('es-CL')} · {neglectedClients[0].daysSinceLastVisit} días
+                                        </p>
+                                    )}
+                                </div>
+                                <Link to="/clients?filter=neglected" className="bg-white text-red-600 px-6 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-all flex items-center whitespace-nowrap shadow-lg">
+                                    Ver Lista
+                                </Link>
+                            </div>
                         </div>
-                        <Link to="/clients?filter=neglected" className="bg-white text-red-600 px-6 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-all flex items-center whitespace-nowrap shadow-lg">
-                            Ver Lista
-                        </Link>
-                    </div>
+                    )}
+
+                    {(neverContactedCount > 0 || dormantCount > 0) && (
+                        <div className="premium-card bg-white border border-gray-100 p-6 shadow-sm">
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-3">Fuera del seguimiento diario</p>
+                            <div className="space-y-3">
+                                <div>
+                                    <p className="text-2xl font-black text-gray-900">{neverContactedCount}</p>
+                                    <p className="text-xs font-bold text-gray-500">sin ningún contacto registrado</p>
+                                </div>
+                                <div>
+                                    <p className="text-2xl font-black text-gray-900">{dormantCount}</p>
+                                    <p className="text-xs font-bold text-gray-500">dormidos, más de {RECOVERABLE_WINDOW_DAYS} días</p>
+                                </div>
+                            </div>
+                            <p className="text-[11px] font-medium text-gray-400 mt-4 leading-tight">
+                                Son campañas de reactivación, no seguimiento del día a día.
+                            </p>
+                        </div>
+                    )}
                 </div>
             )}
 

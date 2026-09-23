@@ -49,6 +49,16 @@ visit_activity AS (
     WHERE client_id IS NOT NULL
       AND status = 'completed'
     GROUP BY client_id
+),
+billed_amount AS (
+    -- Facturacion historica del cliente, con el mismo criterio que usa el dashboard:
+    -- cuenta todo pedido que no este anulado. Permite ordenar por lo que vale cada
+    -- cliente en lugar de por cuanto tiempo lleva sin contacto.
+    SELECT client_id, sum(coalesce(total_amount, 0)) AS total
+    FROM public.orders
+    WHERE client_id IS NOT NULL
+      AND lower(coalesce(status, '')) <> 'cancelled'
+    GROUP BY client_id
 )
 SELECT
     c.id AS client_id,
@@ -57,14 +67,16 @@ SELECT
     call_activity.last_at AS last_call_at,
     email_activity.last_at AS last_email_at,
     whatsapp_activity.last_at AS last_whatsapp_at,
-    visit_activity.last_at AS last_visit_at
+    visit_activity.last_at AS last_visit_at,
+    coalesce(billed_amount.total, 0) AS lifetime_amount
 FROM public.clients c
 LEFT JOIN quotation_activity ON quotation_activity.client_id = c.id
 LEFT JOIN order_activity ON order_activity.client_id = c.id
 LEFT JOIN call_activity ON call_activity.client_id = c.id
 LEFT JOIN email_activity ON email_activity.client_id = c.id
 LEFT JOIN whatsapp_activity ON whatsapp_activity.client_id = c.id
-LEFT JOIN visit_activity ON visit_activity.client_id = c.id;
+LEFT JOIN visit_activity ON visit_activity.client_id = c.id
+LEFT JOIN billed_amount ON billed_amount.client_id = c.id;
 
 DO $$
 BEGIN
