@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Mail, MessageCircle, Phone, PhoneOff, Voicemail, X, HelpCircle } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useUser } from '../../contexts/UserContext';
+import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
 
 type ManagementType = 'call' | 'whatsapp' | 'email';
 type CallStatus = 'contestada' | 'no_contesto' | 'ocupado' | 'equivocado' | 'buzon';
@@ -42,14 +43,15 @@ const ClientManagementModal = ({ client, isOpen, onClose, onSaved }: ClientManag
     const [subject, setSubject] = useState('');
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
+    const [restoredOpen, setRestoredOpen] = useState(false);
+    const effectiveOpen = isOpen || restoredOpen;
+    const storageKey = `client-management:${client.id}`;
 
     const defaultDestination = useMemo(() => {
         if (managementType === 'email') return client.email || '';
         if (managementType === 'whatsapp') return client.phone || '';
         return client.phone || '';
     }, [client.email, client.phone, managementType]);
-
-    if (!isOpen) return null;
 
     const resetState = () => {
         setManagementType('call');
@@ -60,8 +62,51 @@ const ClientManagementModal = ({ client, isOpen, onClose, onSaved }: ClientManag
         setNotes('');
     };
 
+    useEffect(() => {
+        if (!effectiveOpen) return;
+
+        const savedDraft = loadPersistedModalDraft<{
+            managementType: ManagementType;
+            callStatus: CallStatus | null;
+            messageStatus: MessageStatus;
+            destination: string;
+            subject: string;
+            notes: string;
+        }>(storageKey);
+
+        if (savedDraft?.data) {
+            setManagementType(savedDraft.data.managementType || 'call');
+            setCallStatus(savedDraft.data.callStatus || null);
+            setMessageStatus(savedDraft.data.messageStatus || 'sent');
+            setDestination(savedDraft.data.destination || '');
+            setSubject(savedDraft.data.subject || '');
+            setNotes(savedDraft.data.notes || '');
+            if (!isOpen && savedDraft.isOpen !== false) {
+                setRestoredOpen(true);
+            }
+            return;
+        }
+
+        resetState();
+    }, [effectiveOpen, isOpen, storageKey]);
+
+    useEffect(() => {
+        if (!effectiveOpen) return;
+
+        savePersistedModalDraft(storageKey, {
+            managementType,
+            callStatus,
+            messageStatus,
+            destination,
+            subject,
+            notes
+        }, true);
+    }, [callStatus, destination, effectiveOpen, managementType, messageStatus, notes, storageKey, subject]);
+
     const handleClose = () => {
         resetState();
+        clearPersistedModalDraft(storageKey);
+        setRestoredOpen(false);
         onClose();
     };
 
@@ -122,6 +167,8 @@ const ClientManagementModal = ({ client, isOpen, onClose, onSaved }: ClientManag
             }
 
             onSaved();
+            clearPersistedModalDraft(storageKey);
+            setRestoredOpen(false);
             handleClose();
         } catch (error: any) {
             console.error('Error saving management log:', error);
@@ -130,6 +177,8 @@ const ClientManagementModal = ({ client, isOpen, onClose, onSaved }: ClientManag
             setLoading(false);
         }
     };
+
+    if (!effectiveOpen) return null;
 
     return (
         <div className="fixed inset-0 z-[115] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">

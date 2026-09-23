@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Calendar, Stethoscope, User } from 'lucide-react';
+import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
 
 interface VisitCheckoutModalProps {
+    isOpen: boolean;
     notes: string;
     onNotesChange: (notes: string) => void;
     onSave: () => void;
@@ -10,7 +12,7 @@ interface VisitCheckoutModalProps {
     saving: boolean;
     showLeadScore?: boolean;
     leadScore?: number | null;
-    onLeadScoreChange?: (score: number) => void;
+    onLeadScoreChange?: (score: number | null) => void;
     requireClientEmail?: boolean;
     clientEmail?: string;
     onClientEmailChange?: (email: string) => void;
@@ -19,9 +21,11 @@ interface VisitCheckoutModalProps {
     onDoctorNameChange?: (name: string) => void;
     doctorSpecialty?: string;
     onDoctorSpecialtyChange?: (specialty: string) => void;
+    persistenceKey?: string;
 }
 
 const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
+    isOpen,
     notes,
     onNotesChange,
     onSave,
@@ -38,8 +42,11 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
     doctorName = '',
     onDoctorNameChange,
     doctorSpecialty = '',
-    onDoctorSpecialtyChange
+    onDoctorSpecialtyChange,
+    persistenceKey
 }) => {
+    const [restoredOpen, setRestoredOpen] = useState(false);
+    const effectiveOpen = isOpen || restoredOpen;
     const requiresLeadScore = showLeadScore;
     const emailIsValid = /\S+@\S+\.\S+/.test(clientEmail.trim());
     const doctorDetailsReady = doctorName.trim().length > 0 && doctorSpecialty.trim().length > 0;
@@ -48,6 +55,69 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
         && (!requiresLeadScore || leadScore !== null)
         && (!requireClientEmail || emailIsValid)
         && (!requireDoctorDetails || doctorDetailsReady);
+
+    useEffect(() => {
+        if (!effectiveOpen || !persistenceKey) return;
+
+        const savedDraft = loadPersistedModalDraft<{
+            notes: string;
+            leadScore: number | null;
+            clientEmail: string;
+            doctorName: string;
+            doctorSpecialty: string;
+        }>(persistenceKey);
+
+        if (!savedDraft?.data) return;
+
+        onNotesChange(savedDraft.data.notes || '');
+        onLeadScoreChange?.(savedDraft.data.leadScore ?? null);
+        onClientEmailChange?.(savedDraft.data.clientEmail || '');
+        onDoctorNameChange?.(savedDraft.data.doctorName || '');
+        onDoctorSpecialtyChange?.(savedDraft.data.doctorSpecialty || '');
+
+        if (!isOpen && savedDraft.isOpen !== false) {
+            setRestoredOpen(true);
+        }
+    }, [
+        effectiveOpen,
+        isOpen,
+        onClientEmailChange,
+        onDoctorNameChange,
+        onDoctorSpecialtyChange,
+        onLeadScoreChange,
+        onNotesChange,
+        persistenceKey
+    ]);
+
+    useEffect(() => {
+        if (!effectiveOpen || !persistenceKey) return;
+
+        savePersistedModalDraft(persistenceKey, {
+            notes,
+            leadScore,
+            clientEmail,
+            doctorName,
+            doctorSpecialty
+        }, true);
+    }, [clientEmail, doctorName, doctorSpecialty, effectiveOpen, leadScore, notes, persistenceKey]);
+
+    const handleClose = () => {
+        if (persistenceKey) {
+            clearPersistedModalDraft(persistenceKey);
+        }
+        setRestoredOpen(false);
+        onClose();
+    };
+
+    const handleSave = () => {
+        if (persistenceKey) {
+            clearPersistedModalDraft(persistenceKey);
+        }
+        setRestoredOpen(false);
+        onSave();
+    };
+
+    if (!effectiveOpen) return null;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -153,14 +223,14 @@ const VisitCheckoutModal: React.FC<VisitCheckoutModalProps> = ({
 
                     <div className="grid grid-cols-2 gap-4 mt-6">
                         <button
-                            onClick={onClose}
+                            onClick={handleClose}
                             className="p-4 rounded-xl font-black text-gray-400 hover:bg-gray-100 transition-all uppercase text-xs tracking-widest"
                             disabled={saving}
                         >
                             Cancelar
                         </button>
                         <button
-                            onClick={onSave}
+                            onClick={handleSave}
                             disabled={!canConfirm}
                             className={`p-4 rounded-xl font-black text-white shadow-lg uppercase text-xs tracking-widest transition-all ${!canConfirm ? 'bg-gray-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 active:scale-95 shadow-red-200'}`}
                         >

@@ -278,27 +278,27 @@ const GlobalVisitTimer = () => {
                 </div>
             </div>
 
-            {showNotesModal && (
-                <VisitCheckoutModal
-                    notes={visitNotes}
-                    onNotesChange={setVisitNotes}
-                    leadScore={leadScore}
-                    onLeadScoreChange={setLeadScore}
-                    showLeadScore={requiresProspectCompletion}
-                    requireClientEmail={requiresProspectCompletion}
-                    clientEmail={checkoutClientEmail}
-                    onClientEmailChange={setCheckoutClientEmail}
-                    requireDoctorDetails={isColdVisitFlow}
-                    doctorName={checkoutDoctorName}
-                    onDoctorNameChange={setCheckoutDoctorName}
-                    doctorSpecialty={checkoutDoctorSpecialty}
-                    onDoctorSpecialtyChange={setCheckoutDoctorSpecialty}
-                    onSave={handleConfirmCheckout}
-                    onClose={() => setShowNotesModal(false)}
-                    onSchedule={() => setShowScheduleModal(true)}
-                    saving={finishing}
-                />
-            )}
+            <VisitCheckoutModal
+                isOpen={showNotesModal}
+                persistenceKey={activeVisit?.id ? `visit-checkout:${activeVisit.id}` : 'visit-checkout:active'}
+                notes={visitNotes}
+                onNotesChange={setVisitNotes}
+                leadScore={leadScore}
+                onLeadScoreChange={setLeadScore}
+                showLeadScore={requiresProspectCompletion}
+                requireClientEmail={requiresProspectCompletion}
+                clientEmail={checkoutClientEmail}
+                onClientEmailChange={setCheckoutClientEmail}
+                requireDoctorDetails={isColdVisitFlow}
+                doctorName={checkoutDoctorName}
+                onDoctorNameChange={setCheckoutDoctorName}
+                doctorSpecialty={checkoutDoctorSpecialty}
+                onDoctorSpecialtyChange={setCheckoutDoctorSpecialty}
+                onSave={handleConfirmCheckout}
+                onClose={() => setShowNotesModal(false)}
+                onSchedule={() => setShowScheduleModal(true)}
+                saving={finishing}
+            />
 
             <ScheduleVisitModal
                 isOpen={showScheduleModal}

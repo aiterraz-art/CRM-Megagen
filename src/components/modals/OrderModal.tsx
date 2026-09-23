@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { X, ShoppingCart, Plus, Minus, Search, Trash2 } from 'lucide-react';
+import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -35,14 +36,31 @@ const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, visitId, clien
     const [loading, setLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [saving, setSaving] = useState(false);
+    const [restoredOpen, setRestoredOpen] = useState(false);
+    const effectiveOpen = isOpen || restoredOpen;
+    const storageKey = `order-modal:${clientId}:${visitId || 'direct'}:${userId}`;
 
     useEffect(() => {
-        if (isOpen) {
+        if (effectiveOpen) {
             fetchProducts();
-            setCart([]);
-            setSearchTerm('');
+            const savedDraft = loadPersistedModalDraft<{ cart: OrderItem[]; searchTerm: string }>(storageKey);
+            if (savedDraft?.data) {
+                setCart(savedDraft.data.cart || []);
+                setSearchTerm(savedDraft.data.searchTerm || '');
+                if (!isOpen && savedDraft.isOpen !== false) {
+                    setRestoredOpen(true);
+                }
+            } else {
+                setCart([]);
+                setSearchTerm('');
+            }
         }
-    }, [isOpen]);
+    }, [effectiveOpen, isOpen, storageKey]);
+
+    useEffect(() => {
+        if (!effectiveOpen) return;
+        savePersistedModalDraft(storageKey, { cart, searchTerm }, true);
+    }, [cart, effectiveOpen, searchTerm, storageKey]);
 
     const fetchProducts = async () => {
         setLoading(true);
@@ -124,6 +142,8 @@ const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, visitId, clien
             // For now, just decreasing stock not implemented to keep RLS simple.
 
             if (onOrderCreated) onOrderCreated();
+            clearPersistedModalDraft(storageKey);
+            setRestoredOpen(false);
             onClose();
             alert('¡Pedido creado exitosamente!');
 
@@ -140,7 +160,13 @@ const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, visitId, clien
         p.sku?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    if (!isOpen) return null;
+    const handleClose = () => {
+        clearPersistedModalDraft(storageKey);
+        setRestoredOpen(false);
+        onClose();
+    };
+
+    if (!effectiveOpen) return null;
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -154,7 +180,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, visitId, clien
                         </h2>
                         <p className="text-xs text-gray-400 font-bold">Selecciona productos del inventario</p>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                    <button onClick={handleClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
                         <X size={20} className="text-gray-500" />
                     </button>
                 </div>
