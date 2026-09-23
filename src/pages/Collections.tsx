@@ -641,6 +641,68 @@ const Collections = () => {
             }
             setRejectedRows(parsed.rejected);
 
+            /**
+             * Confirmacion previa, obligatoria.
+             *
+             * La carga reemplaza el lote completo: todo documento que no venga en el
+             * archivo queda registrado como cobrado. Un archivo incompleto o equivocado
+             * borra deuda real, y eso ya ocurrio en produccion. Antes de aplicar nada se
+             * muestra exactamente cuanta deuda pasaria a cobrada.
+             */
+            const normalizarDocumento = (value: unknown) => String(value ?? '').trim().toLowerCase();
+
+            const documentosEntrantes = new Set(
+                parsed.valid.map((fila) => normalizarDocumento(fila.document_number))
+            );
+            const documentosRechazados = new Set(
+                parsed.rejected.map((fila) => normalizarDocumento(fila.document_number)).filter(Boolean)
+            );
+
+            const pasaranACobrados = allRows.filter(
+                (documento: any) => !documentosEntrantes.has(normalizarDocumento(documento.document_number))
+            );
+            const montoACobrados = pasaranACobrados.reduce(
+                (total: number, documento: any) => total + Number(documento.outstanding_amount || 0),
+                0
+            );
+            // Un documento ausente por una fila rechazada casi nunca esta cobrado: falta
+            // por un problema de formato. Se destaca aparte porque es el caso peligroso.
+            const ausentesPorRechazo = pasaranACobrados.filter(
+                (documento: any) => documentosRechazados.has(normalizarDocumento(documento.document_number))
+            ).length;
+
+            const lineas = [
+                `Vas a reemplazar la cobranza vigente con "${file.name}".`,
+                '',
+                `Documentos en el archivo: ${parsed.valid.length}`,
+                `Documentos vigentes hoy: ${allRows.length}`
+            ];
+
+            if (parsed.rejected.length > 0) {
+                lineas.push(`Filas rechazadas por formato: ${parsed.rejected.length}`);
+            }
+
+            if (pasaranACobrados.length > 0) {
+                lineas.push(
+                    '',
+                    `PASARAN A COBRADOS: ${pasaranACobrados.length} documento(s) por $${Math.round(montoACobrados).toLocaleString('es-CL')}`
+                );
+                if (ausentesPorRechazo > 0) {
+                    lineas.push(
+                        `ATENCION: ${ausentesPorRechazo} de ellos faltan por filas rechazadas, no porque se hayan pagado.`
+                    );
+                }
+                lineas.push('', 'Si el archivo está incompleto o no corresponde, esa deuda se dará por cobrada.');
+            } else {
+                lineas.push('', 'Ningún documento pasará a cobrado.');
+            }
+
+            lineas.push('', '¿Continuar?');
+
+            if (!window.confirm(lineas.join('\n'))) {
+                return;
+            }
+
             await uploadCollectionsSnapshot(supabase, {
                 fileName: file.name,
                 uploadedBy: profile?.id || null,
