@@ -4,6 +4,7 @@ import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2,
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import { ID_FILTER_CHUNK_SIZE, chunkArray } from '../utils/chunk';
 import {
     clearPersistedModalDraft,
     isPersistedDraftFresh,
@@ -563,79 +564,106 @@ const Quotations: React.FC = () => {
                 let locationsMap: Record<string, any> = {};
                 let ordersByQuotationId: Record<string, any> = {};
 
+                /**
+                 * Ejecuta una consulta filtrada por identificadores en bloques.
+                 *
+                 * Antes estas consultas enviaban los miles de identificadores de una sola
+                 * vez. Con mas de dos mil cotizaciones la URL supera los 70 KB y el
+                 * servidor la rechaza, de modo que los pedidos vinculados, las
+                 * aprobaciones de descuento y las ubicaciones dejaban de cargarse. Y como
+                 * el error se descartaba, la pantalla se mostraba incompleta sin avisar.
+                 */
+                const fetchByIdChunks = async <T,>(
+                    ids: string[],
+                    runQuery: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: any }>
+                ): Promise<T[]> => {
+                    const chunkResults = await Promise.all(
+                        chunkArray(ids, ID_FILTER_CHUNK_SIZE).map((chunk) => runQuery(chunk))
+                    );
+
+                    const rows: T[] = [];
+                    for (const { data, error } of chunkResults) {
+                        if (error) throw error;
+                        if (data) rows.push(...data);
+                    }
+                    return rows;
+                };
+
                 // Parallel fetches
                 const promises = [];
 
                 if (sellerIds.length > 0) {
                     promises.push(
-                        supabase
-                            .from('profiles')
-                            .select('id, email, full_name, role')
-                            .in('id', sellerIds)
-                            .then(({ data }) => {
-                                if (data) data.forEach(p => profilesMap[p.id] = p);
-                            })
+                        fetchByIdChunks<any>(sellerIds, (chunk) =>
+                            supabase
+                                .from('profiles')
+                                .select('id, email, full_name, role')
+                                .in('id', chunk)
+                        ).then((rows) => {
+                            rows.forEach((p) => profilesMap[p.id] = p);
+                        })
                     );
                 }
 
                 if (sellerCatalogIds.length > 0) {
                     promises.push(
-                        supabase
-                            .from('quotation_sellers')
-                            .select('id, name, email, linked_profile_id, active, created_at, created_by, updated_at')
-                            .in('id', sellerCatalogIds)
-                            .then(({ data }) => {
-                                if (data) {
-                                    data.forEach((seller) => {
-                                        sellerCatalogMap[seller.id] = seller as QuotationSellerDirectoryRow;
-                                    });
-                                }
-                            })
+                        fetchByIdChunks<QuotationSellerDirectoryRow>(sellerCatalogIds, (chunk) =>
+                            supabase
+                                .from('quotation_sellers')
+                                .select('id, name, email, linked_profile_id, active, created_at, created_by, updated_at')
+                                .in('id', chunk)
+                        ).then((rows) => {
+                            rows.forEach((seller) => {
+                                sellerCatalogMap[seller.id] = seller;
+                            });
+                        })
                     );
                 }
 
                 if (quotationIds.length > 0) {
                     promises.push(
-                        supabase
-                            .from('seller_locations')
-                            .select('quotation_id, lat, lng')
-                            .in('quotation_id', quotationIds)
-                            .then(({ data }) => {
-                                if (data) data.forEach(l => locationsMap[l.quotation_id] = l);
-                            })
+                        fetchByIdChunks<any>(quotationIds, (chunk) =>
+                            supabase
+                                .from('seller_locations')
+                                .select('quotation_id, lat, lng')
+                                .in('quotation_id', chunk)
+                        ).then((rows) => {
+                            rows.forEach((l) => locationsMap[l.quotation_id] = l);
+                        })
                     );
                     promises.push(
-                        supabase
-                            .from('approval_requests')
-                            .select('id, entity_id, status, approval_type, requested_at, payload')
-                            .eq('approval_type', 'extra_discount')
-                            .in('entity_id', quotationIds)
-                            .order('requested_at', { ascending: false })
-                            .then(({ data }) => {
-                                if (data) {
-                                    data.forEach((a: any) => {
-                                        if (!a.entity_id) return;
-                                        if (!locationsMap[`approval-${a.entity_id}`]) {
-                                            locationsMap[`approval-${a.entity_id}`] = a;
-                                        }
-                                    });
+                        // Cada bloque llega ordenado de mas reciente a mas antigua y los
+                        // bloques no comparten identificadores, de modo que conservar la
+                        // primera aparicion sigue dando la aprobacion mas reciente.
+                        fetchByIdChunks<any>(quotationIds, (chunk) =>
+                            supabase
+                                .from('approval_requests')
+                                .select('id, entity_id, status, approval_type, requested_at, payload')
+                                .eq('approval_type', 'extra_discount')
+                                .in('entity_id', chunk)
+                                .order('requested_at', { ascending: false })
+                        ).then((rows) => {
+                            rows.forEach((a: any) => {
+                                if (!a.entity_id) return;
+                                if (!locationsMap[`approval-${a.entity_id}`]) {
+                                    locationsMap[`approval-${a.entity_id}`] = a;
                                 }
-                            })
+                            });
+                        })
                     );
                     promises.push(
-                        supabase
-                            .from('orders')
-                            .select('id, folio, quotation_id, status')
-                            .in('quotation_id', quotationIds)
-                            .then(({ data }) => {
-                                if (data) {
-                                    data.forEach((order) => {
-                                        if (String(order.status || '').toLowerCase() === 'cancelled') return;
-                                        if (!order.quotation_id || ordersByQuotationId[order.quotation_id]) return;
-                                        ordersByQuotationId[order.quotation_id] = order;
-                                    });
-                                }
-                            })
+                        fetchByIdChunks<any>(quotationIds, (chunk) =>
+                            supabase
+                                .from('orders')
+                                .select('id, folio, quotation_id, status')
+                                .in('quotation_id', chunk)
+                        ).then((rows) => {
+                            rows.forEach((order) => {
+                                if (String(order.status || '').toLowerCase() === 'cancelled') return;
+                                if (!order.quotation_id || ordersByQuotationId[order.quotation_id]) return;
+                                ordersByQuotationId[order.quotation_id] = order;
+                            });
+                        })
                     );
                 }
 

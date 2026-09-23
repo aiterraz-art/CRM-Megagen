@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { Database } from '../types/supabase';
 import { Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
+import { ID_FILTER_CHUNK_SIZE, chunkArray } from '../utils/chunk';
 import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary, useMap } from '@vis.gl/react-google-maps';
 import ClientDetailModal from '../components/modals/ClientDetailModal';
 import { checkGPSConnection } from '../utils/gps';
@@ -241,14 +242,6 @@ const buildClientFormState = (assignedSellerId = '') => ({
     creditDays: 0,
     requiresDiscountApproval: true
 });
-
-const chunkArray = <T,>(items: T[], size: number) => {
-    const chunks: T[][] = [];
-    for (let index = 0; index < items.length; index += size) {
-        chunks.push(items.slice(index, index + size));
-    }
-    return chunks;
-};
 
 const getLatestIsoDate = (...values: Array<string | null | undefined>) => {
     return values
@@ -489,72 +482,30 @@ const ClientsContent = () => {
                 const latestEmailByClient: Record<string, string> = {};
                 const latestWhatsappByClient: Record<string, string> = {};
 
-                for (const chunk of chunkArray(clientIds, 200)) {
-                    const [
-                        { data: quotationsData, error: quotationsError },
-                        { data: ordersData, error: ordersError },
-                        { data: callsData, error: callsError },
-                        { data: emailsData, error: emailsError },
-                        { data: whatsappData, error: whatsappError }
-                    ] = await Promise.all([
+                // Una consulta por bloque contra la vista, y todos los bloques en paralelo.
+                // Antes eran cinco consultas por bloque, encadenadas en serie, que ademas
+                // traian el historial completo de cada cliente para quedarse solo con la
+                // fecha mas reciente de cada origen.
+                const activityChunks = await Promise.all(
+                    chunkArray(clientIds, ID_FILTER_CHUNK_SIZE).map((chunk) =>
                         supabase
-                            .from('quotations')
-                            .select('client_id, created_at')
-                            .in('client_id', chunk),
-                        supabase
-                            .from('orders')
-                            .select('client_id, created_at')
-                            .in('client_id', chunk),
-                        supabase
-                            .from('call_logs')
-                            .select('client_id, created_at')
-                            .in('client_id', chunk),
-                        supabase
-                            .from('email_logs')
-                            .select('client_id, created_at')
-                            .in('client_id', chunk),
-                        supabase
-                            .from('lead_message_logs')
-                            .select('client_id, created_at, channel, status')
+                            .from('vw_client_last_activity')
+                            .select('client_id, last_quotation_at, last_order_at, last_call_at, last_email_at, last_whatsapp_at')
                             .in('client_id', chunk)
-                            .eq('channel', 'whatsapp')
-                            .in('status', ['sent', 'opened_external'])
-                    ]);
+                    )
+                );
 
-                    if (quotationsError) throw quotationsError;
-                    if (ordersError) throw ordersError;
-                    if (callsError) throw callsError;
-                    if (emailsError) throw emailsError;
-                    if (whatsappError) throw whatsappError;
+                for (const { data: activityRows, error: activityError } of activityChunks) {
+                    if (activityError) throw activityError;
 
-                    (quotationsData || []).forEach((quotation) => {
-                        if (!quotation.client_id) return;
-                        const current = latestQuotationByClient[quotation.client_id];
-                        latestQuotationByClient[quotation.client_id] = getLatestIsoDate(current, quotation.created_at) || quotation.created_at;
-                    });
+                    (activityRows || []).forEach((row: any) => {
+                        if (!row?.client_id) return;
 
-                    (ordersData || []).forEach((order) => {
-                        if (!order.client_id) return;
-                        const current = latestOrderByClient[order.client_id];
-                        latestOrderByClient[order.client_id] = getLatestIsoDate(current, order.created_at) || order.created_at;
-                    });
-
-                    (callsData || []).forEach((call) => {
-                        if (!call.client_id) return;
-                        const current = latestCallByClient[call.client_id];
-                        latestCallByClient[call.client_id] = getLatestIsoDate(current, call.created_at) || call.created_at;
-                    });
-
-                    (emailsData || []).forEach((email) => {
-                        if (!email.client_id) return;
-                        const current = latestEmailByClient[email.client_id];
-                        latestEmailByClient[email.client_id] = getLatestIsoDate(current, email.created_at) || email.created_at;
-                    });
-
-                    (whatsappData || []).forEach((message) => {
-                        if (!message.client_id) return;
-                        const current = latestWhatsappByClient[message.client_id];
-                        latestWhatsappByClient[message.client_id] = getLatestIsoDate(current, message.created_at) || message.created_at;
+                        if (row.last_quotation_at) latestQuotationByClient[row.client_id] = row.last_quotation_at;
+                        if (row.last_order_at) latestOrderByClient[row.client_id] = row.last_order_at;
+                        if (row.last_call_at) latestCallByClient[row.client_id] = row.last_call_at;
+                        if (row.last_email_at) latestEmailByClient[row.client_id] = row.last_email_at;
+                        if (row.last_whatsapp_at) latestWhatsappByClient[row.client_id] = row.last_whatsapp_at;
                     });
                 }
 
