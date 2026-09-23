@@ -4,6 +4,12 @@ import { ShoppingBag, Plus, Search, FileText, ChevronRight, Clock, CheckCircle2,
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import {
+    clearPersistedModalDraft,
+    isPersistedDraftFresh,
+    loadPersistedModalDraft,
+    savePersistedModalDraft
+} from '../utils/modalDrafts';
 import { useVisit } from '../contexts/VisitContext';
 import { checkGPSConnection } from '../utils/gps';
 import { queueQuotationLocation } from '../services/locationQueue';
@@ -77,6 +83,19 @@ const DISPATCH_SERVICE_NAME_KEY = normalizeProductKey(DISPATCH_SERVICE_NAME);
 const DISPATCH_SERVICE_SKU_KEY = normalizeProductKey(DISPATCH_SERVICE_SKU);
 const ORDER_CONVERSION_TIMEOUT_MS = 60_000;
 const PAYMENT_PROOF_MODAL_DRAFT_KEY = 'quotation_payment_proof_modal';
+
+// El borrador de la cotizacion en construccion se guarda por usuario: en un dispositivo
+// compartido, el trabajo a medio hacer de una persona no debe abrirse en la sesion de otra.
+const buildQuotationDraftKey = (userId: string) => `quotations:builder:${userId}`;
+
+type QuotationBuilderDraft = {
+    client: any;
+    sourceVisitId: string | null;
+    items: any;
+    comments: string;
+    paymentTerms: any;
+    selectedSellerId: string | null;
+};
 const PAYMENT_PROOF_RESTORE_MESSAGE = 'La app se recargó mientras seleccionabas el comprobante. Debes volver a elegir el archivo antes de generar el pedido.';
 
 const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
@@ -861,46 +880,73 @@ const Quotations: React.FC = () => {
         };
     }, []);
 
-    // Persist Draft Logic
+    // Recupera la cotizacion en construccion tras una recarga real de la pagina, por
+    // ejemplo al cerrar y reabrir la aplicacion en el movil. Se aplica una sola vez.
+    const quotationDraftRestoredRef = useRef(false);
+    // El efecto de guardado se ejecuta en el mismo ciclo que el de restauracion, todavia
+    // con el modal marcado como cerrado. Sin esta marca borraria el borrador que se acaba
+    // de recuperar, antes de que el nuevo estado llegue a reflejarse.
+    const skipNextDraftClearRef = useRef(false);
     useEffect(() => {
-        // Load draft on mount
-        const savedDraft = localStorage.getItem('quotation_draft');
-        if (savedDraft) {
-            try {
-                const draft = JSON.parse(savedDraft);
-                if (draft.isOpen && !selectedClient && !editingQuotation) {
-                    setIsItemModalOpen(true);
-                    setSelectedClient(draft.client);
-                    setSelectedSourceVisitId(draft.sourceVisitId || null);
-                    setFormItems(draft.items);
-                    setFormComments(draft.comments);
-                    setPaymentTerms(draft.paymentTerms);
-                    setSelectedSellerId(draft.selectedSellerId || null);
-                }
-            } catch (e) {
-                console.error("Failed to load draft", e);
-            }
+        if (quotationDraftRestoredRef.current || !profile?.id) return;
+        if (selectedClient || editingQuotation) return;
+
+        quotationDraftRestoredRef.current = true;
+
+        const storageKey = buildQuotationDraftKey(profile.id);
+        const savedDraft = loadPersistedModalDraft<QuotationBuilderDraft>(storageKey);
+
+        if (!savedDraft || !isPersistedDraftFresh(savedDraft)) {
+            if (savedDraft) clearPersistedModalDraft(storageKey);
+            return;
         }
-    }, []);
+
+        if (savedDraft.isOpen === false || !savedDraft.data?.client) return;
+
+        skipNextDraftClearRef.current = true;
+        setIsItemModalOpen(true);
+        setSelectedClient(savedDraft.data.client);
+        setSelectedSourceVisitId(savedDraft.data.sourceVisitId || null);
+        setFormItems(savedDraft.data.items);
+        setFormComments(savedDraft.data.comments);
+        setPaymentTerms(savedDraft.data.paymentTerms);
+        setSelectedSellerId(savedDraft.data.selectedSellerId || null);
+    }, [editingQuotation, profile?.id, selectedClient]);
 
     useEffect(() => {
-        // Save draft on change (only if open and not editing an existing one)
+        if (!profile?.id) return;
+
+        const storageKey = buildQuotationDraftKey(profile.id);
+
+        // Solo se conserva la creacion. Al editar una cotizacion existente los datos ya
+        // estan en la base, de modo que no hay trabajo que perder si la pagina se recarga.
         if (isItemModalOpen && selectedClient && !editingQuotation) {
-            const draft = {
-                isOpen: true,
-                client: selectedClient,
-                sourceVisitId: selectedSourceVisitId,
-                items: formItems,
-                comments: formComments,
-                paymentTerms: paymentTerms,
-                selectedSellerId
-            };
-            localStorage.setItem('quotation_draft', JSON.stringify(draft));
-        } else if (!isItemModalOpen && !editingQuotation) {
-            // Clear draft if closed and not editing
-            localStorage.removeItem('quotation_draft');
+            savePersistedModalDraft<QuotationBuilderDraft>(
+                storageKey,
+                {
+                    client: selectedClient,
+                    sourceVisitId: selectedSourceVisitId,
+                    items: formItems,
+                    comments: formComments,
+                    paymentTerms,
+                    selectedSellerId
+                },
+                true
+            );
+            return;
         }
-    }, [isItemModalOpen, selectedClient, selectedSourceVisitId, formItems, formComments, paymentTerms, editingQuotation, selectedSellerId]);
+
+        // No se descarta mientras no se haya intentado restaurar: en el primer render el
+        // modal aun figura cerrado y se borraria el borrador que se acaba de recuperar.
+        if (!isItemModalOpen && !editingQuotation && quotationDraftRestoredRef.current) {
+            if (skipNextDraftClearRef.current) {
+                skipNextDraftClearRef.current = false;
+                return;
+            }
+
+            clearPersistedModalDraft(storageKey);
+        }
+    }, [isItemModalOpen, selectedClient, selectedSourceVisitId, formItems, formComments, paymentTerms, editingQuotation, selectedSellerId, profile?.id]);
 
     useEffect(() => {
         if (!selectedClient?.id || availableClients.length === 0) return;
@@ -1630,7 +1676,7 @@ const Quotations: React.FC = () => {
             setCreateError(null);
             setEditingQuotation(null);
             setSelectedSellerId((prev) => canAssignQuotationSeller(effectiveRole) ? prev : profile.id);
-            localStorage.removeItem('quotation_draft'); // Clear draft
+            if (profile?.id) clearPersistedModalDraft(buildQuotationDraftKey(profile.id));
             fetchQuotations();
 
         } catch (error: any) {

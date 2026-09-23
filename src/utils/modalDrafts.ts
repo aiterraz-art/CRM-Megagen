@@ -6,6 +6,29 @@ export interface PersistedModalDraft<T> {
 
 const canUseStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
+/** Antiguedad maxima por defecto de un borrador: un dia. */
+export const DEFAULT_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Indica si un borrador sigue vigente.
+ *
+ * Los borradores caducan para que uno olvidado no reaparezca dias despues delante de
+ * otra persona ni se confunda con trabajo en curso. Un borrador sin marca de tiempo
+ * proviene de una version anterior del formato y se da por vigente.
+ */
+export const isPersistedDraftFresh = (
+    draft: Pick<PersistedModalDraft<unknown>, 'updatedAt'> | null,
+    maxAgeMs: number = DEFAULT_DRAFT_MAX_AGE_MS
+): boolean => {
+    if (!draft) return false;
+    if (!draft.updatedAt) return true;
+
+    const savedAt = new Date(draft.updatedAt).getTime();
+    if (Number.isNaN(savedAt)) return true;
+
+    return Date.now() - savedAt <= maxAgeMs;
+};
+
 export const loadPersistedModalDraft = <T>(storageKey: string): PersistedModalDraft<T> | null => {
     if (!storageKey || !canUseStorage()) return null;
 

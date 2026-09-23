@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    DEFAULT_DRAFT_MAX_AGE_MS,
     clearPersistedModalDraft,
+    isPersistedDraftFresh,
     loadPersistedModalDraft,
     savePersistedModalDraft
 } from '../utils/modalDrafts';
@@ -16,9 +18,6 @@ import {
  * Usa el mismo formato de borrador que los modales del CRM, por lo que ambos
  * mecanismos son intercambiables.
  */
-
-/** Los borradores caducan para que uno olvidado no reaparezca dias despues. */
-const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export type PersistentFormControls = {
     /** Descarta el borrador y devuelve el formulario a su valor inicial. */
@@ -36,15 +35,6 @@ export type PersistentFormOptions = {
     maxAgeMs?: number;
 };
 
-const isDraftFresh = (updatedAt: string | undefined, maxAgeMs: number) => {
-    if (!updatedAt) return true;
-
-    const savedAt = new Date(updatedAt).getTime();
-    if (Number.isNaN(savedAt)) return true;
-
-    return Date.now() - savedAt <= maxAgeMs;
-};
-
 export const usePersistentFormState = <T,>(
     // Admite null mientras la clave no pueda construirse todavia, por ejemplo si aun no
     // se conoce el usuario. Mientras tanto el hook se comporta como un useState normal.
@@ -52,7 +42,7 @@ export const usePersistentFormState = <T,>(
     createInitialValue: () => T,
     options: PersistentFormOptions = {}
 ): [T, React.Dispatch<React.SetStateAction<T>>, PersistentFormControls] => {
-    const { isOpen, maxAgeMs = DEFAULT_MAX_AGE_MS } = options;
+    const { isOpen, maxAgeMs = DEFAULT_DRAFT_MAX_AGE_MS } = options;
 
     const [value, setValue] = useState<T>(createInitialValue);
     const [hasRestoredDraft, setHasRestoredDraft] = useState(false);
@@ -71,7 +61,7 @@ export const usePersistentFormState = <T,>(
 
         const savedDraft = loadPersistedModalDraft<T>(storageKey);
 
-        if (!savedDraft || !isDraftFresh(savedDraft.updatedAt, maxAgeMs)) {
+        if (!savedDraft || !isPersistedDraftFresh(savedDraft, maxAgeMs)) {
             if (savedDraft) clearPersistedModalDraft(storageKey);
             setHasRestoredDraft(false);
             setRestoredIsOpen(false);

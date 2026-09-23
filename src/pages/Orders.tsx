@@ -3,6 +3,12 @@ import { Link } from 'react-router-dom';
 import { Eye, FileText, History, PackageCheck, RefreshCw, RotateCcw, Search, ShoppingCart, Send, Truck } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
+import {
+    clearPersistedModalDraft,
+    isPersistedDraftFresh,
+    loadPersistedModalDraft,
+    savePersistedModalDraft
+} from '../utils/modalDrafts';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 import { generateOrderPdfFile, type OrderPdfData } from '../utils/orderPdf';
@@ -44,8 +50,16 @@ type EnrichedOrder = {
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString('es-CL')}`;
 const formatDate = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL') : '-';
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
-const ORDER_ITEMS_PREVIEW_STORAGE_KEY = 'orders.activeItemsPreviewOrderId';
-const COURIER_MODAL_DRAFT_STORAGE_KEY = 'orders.courierModalDraft';
+// Ambos borradores usaban sessionStorage, que el navegador descarta al cerrar la pestana
+// o la aplicacion en el movil, justo el caso en el que hacian falta.
+const ORDER_ITEMS_PREVIEW_STORAGE_KEY = 'orders:items-preview';
+const COURIER_MODAL_DRAFT_STORAGE_KEY = 'orders:courier-shipment';
+
+type CourierModalDraft = {
+    orderId: string;
+    courierProvider: CourierProvider;
+    trackingNumber: string;
+};
 const CHUNK_SIZE = 50;
 const PAGE_SIZE = 10;
 const isBillingBackofficeRole = (role: string | null | undefined) =>
@@ -208,8 +222,14 @@ const Orders = () => {
     const [orderItemsPreview, setOrderItemsPreview] = useState<OrderItemsPreviewItem[]>([]);
     const [orderItemsPreviewError, setOrderItemsPreviewError] = useState<string | null>(null);
     const [pendingItemsPreviewRestoreId, setPendingItemsPreviewRestoreId] = useState<string | null>(() => {
-        if (typeof window === 'undefined') return null;
-        return sessionStorage.getItem(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
+        const savedDraft = loadPersistedModalDraft<{ orderId: string }>(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
+
+        if (!savedDraft || !isPersistedDraftFresh(savedDraft)) {
+            if (savedDraft) clearPersistedModalDraft(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
+            return null;
+        }
+
+        return savedDraft.data?.orderId || null;
     });
     const [selectedOrderPdfOrder, setSelectedOrderPdfOrder] = useState<EnrichedOrder | null>(null);
     const [orderPdfPreviewState, setOrderPdfPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -223,17 +243,14 @@ const Orders = () => {
     const [courierModalError, setCourierModalError] = useState<string | null>(null);
     const [savingCourierOrderId, setSavingCourierOrderId] = useState<string | null>(null);
     const [pendingCourierModalRestoreId, setPendingCourierModalRestoreId] = useState<string | null>(() => {
-        if (typeof window === 'undefined') return null;
+        const savedDraft = loadPersistedModalDraft<CourierModalDraft>(COURIER_MODAL_DRAFT_STORAGE_KEY);
 
-        try {
-            const rawDraft = sessionStorage.getItem(COURIER_MODAL_DRAFT_STORAGE_KEY);
-            if (!rawDraft) return null;
-            const parsedDraft = JSON.parse(rawDraft) as { orderId?: string };
-            return parsedDraft?.orderId || null;
-        } catch {
-            sessionStorage.removeItem(COURIER_MODAL_DRAFT_STORAGE_KEY);
+        if (!savedDraft || !isPersistedDraftFresh(savedDraft)) {
+            if (savedDraft) clearPersistedModalDraft(COURIER_MODAL_DRAFT_STORAGE_KEY);
             return null;
         }
+
+        return savedDraft.data?.orderId || null;
     });
 
     const isSellerRole = effectiveRole === 'seller';
@@ -683,11 +700,10 @@ const Orders = () => {
     }, [loadOrderItemsPreview]);
 
     useEffect(() => {
-        if (typeof window === 'undefined') return;
         if (selectedItemsOrder?.id) {
-            sessionStorage.setItem(ORDER_ITEMS_PREVIEW_STORAGE_KEY, selectedItemsOrder.id);
+            savePersistedModalDraft(ORDER_ITEMS_PREVIEW_STORAGE_KEY, { orderId: selectedItemsOrder.id }, true);
         } else {
-            sessionStorage.removeItem(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
+            clearPersistedModalDraft(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
         }
     }, [selectedItemsOrder?.id]);
 
@@ -696,9 +712,7 @@ const Orders = () => {
 
         const restoredOrder = orders.find((order) => order.id === pendingItemsPreviewRestoreId);
         if (!restoredOrder) {
-            if (typeof window !== 'undefined') {
-                sessionStorage.removeItem(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
-            }
+            clearPersistedModalDraft(ORDER_ITEMS_PREVIEW_STORAGE_KEY);
             setPendingItemsPreviewRestoreId(null);
             return;
         }
@@ -849,9 +863,7 @@ const Orders = () => {
         setCourierProvider('chileexpress');
         setTrackingNumber('');
         setCourierModalError(null);
-        if (typeof window !== 'undefined') {
-            sessionStorage.removeItem(COURIER_MODAL_DRAFT_STORAGE_KEY);
-        }
+        clearPersistedModalDraft(COURIER_MODAL_DRAFT_STORAGE_KEY);
     }, []);
 
     const openCourierModal = useCallback((order: EnrichedOrder) => {
@@ -863,19 +875,16 @@ const Orders = () => {
     }, []);
 
     useEffect(() => {
-        if (typeof window === 'undefined') return;
+        if (!courierModalOrder) return;
 
-        if (!courierModalOrder) {
-            return;
-        }
-
-        sessionStorage.setItem(
+        savePersistedModalDraft<CourierModalDraft>(
             COURIER_MODAL_DRAFT_STORAGE_KEY,
-            JSON.stringify({
+            {
                 orderId: courierModalOrder.id,
                 courierProvider,
                 trackingNumber
-            })
+            },
+            true
         );
     }, [courierModalOrder, courierProvider, trackingNumber]);
 
@@ -884,24 +893,18 @@ const Orders = () => {
 
         const restoredOrder = orders.find((order) => order.id === pendingCourierModalRestoreId);
         if (!restoredOrder) {
-            if (typeof window !== 'undefined') {
-                sessionStorage.removeItem(COURIER_MODAL_DRAFT_STORAGE_KEY);
-            }
+            clearPersistedModalDraft(COURIER_MODAL_DRAFT_STORAGE_KEY);
             setPendingCourierModalRestoreId(null);
             return;
         }
 
         try {
-            const rawDraft = typeof window !== 'undefined'
-                ? sessionStorage.getItem(COURIER_MODAL_DRAFT_STORAGE_KEY)
-                : null;
-            const parsedDraft = rawDraft
-                ? (JSON.parse(rawDraft) as { courierProvider?: CourierProvider; trackingNumber?: string })
-                : null;
+            const savedDraft = loadPersistedModalDraft<CourierModalDraft>(COURIER_MODAL_DRAFT_STORAGE_KEY);
+            const draftData = isPersistedDraftFresh(savedDraft) ? savedDraft?.data : null;
 
             setCourierModalOrder(restoredOrder);
-            setCourierProvider(parsedDraft?.courierProvider === 'fedex' ? 'fedex' : 'chileexpress');
-            setTrackingNumber(String(parsedDraft?.trackingNumber || restoredOrder.tracking_number || '').trim());
+            setCourierProvider(draftData?.courierProvider === 'fedex' ? 'fedex' : 'chileexpress');
+            setTrackingNumber(String(draftData?.trackingNumber || restoredOrder.tracking_number || '').trim());
             setCourierModalError(null);
         } catch {
             openCourierModal(restoredOrder);
