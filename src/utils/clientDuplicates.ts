@@ -407,14 +407,44 @@ export const computeDuplicateClientGroups = (clients: ClientRow[]): DuplicateCli
     const unionFind = buildUnionFind(clients.length);
     const reasonsByPair = new Map<string, DuplicateReason[]>();
 
-    for (let index = 0; index < clients.length; index += 1) {
-        for (let candidateIndex = index + 1; candidateIndex < clients.length; candidateIndex += 1) {
-            const reasons = compareClientsForDuplicate(clients[index], clients[candidateIndex]);
-            if (!isStrongDuplicate(reasons)) continue;
-            unionFind.union(index, candidateIndex);
-            reasonsByPair.set(`${clients[index].id}:${clients[candidateIndex].id}`, reasons);
+    /**
+     * Solo se comparan clientes que comparten el nombre normalizado.
+     *
+     * compareClientsForDuplicate exige esa coincidencia antes que cualquier otra cosa
+     * ("if (!sameName) return reasons"), de modo que dos clientes con nombres distintos
+     * nunca llegan a acumular motivos y jamas forman un duplicado. Agrupar por ese nombre
+     * y comparar solo dentro de cada grupo da exactamente el mismo resultado que recorrer
+     * todos los pares, pero sin el coste cuadratico: con 5.000 clientes eran doce millones
+     * y medio de comparaciones, casi dieciocho segundos con la interfaz congelada.
+     *
+     * Los indices se agrupan en orden ascendente, asi que cada pareja se sigue generando
+     * con el indice menor primero y las claves de reasonsByPair no cambian.
+     */
+    const indicesByNormalizedName = new Map<string, number[]>();
+    clients.forEach((client, index) => {
+        const normalizedName = normalizeText(client.name);
+        if (!normalizedName) return;
+
+        const bucket = indicesByNormalizedName.get(normalizedName);
+        if (bucket) bucket.push(index);
+        else indicesByNormalizedName.set(normalizedName, [index]);
+    });
+
+    indicesByNormalizedName.forEach((indices) => {
+        if (indices.length < 2) return;
+
+        for (let position = 0; position < indices.length; position += 1) {
+            for (let candidatePosition = position + 1; candidatePosition < indices.length; candidatePosition += 1) {
+                const index = indices[position];
+                const candidateIndex = indices[candidatePosition];
+                const reasons = compareClientsForDuplicate(clients[index], clients[candidateIndex]);
+                if (!isStrongDuplicate(reasons)) continue;
+
+                unionFind.union(index, candidateIndex);
+                reasonsByPair.set(`${clients[index].id}:${clients[candidateIndex].id}`, reasons);
+            }
         }
-    }
+    });
 
     const grouped = new Map<number, ClientRow[]>();
     clients.forEach((client, index) => {
