@@ -28,3 +28,7 @@ yarn-error.log*
 # Secrets and sensitive data
 COOLIFY_ENV_COMPLETE.txt
 DATOS_ACCESO_OAUTH.md
+
+# Editor y cachés de herramientas
+.vscode
+supabase/.temp
