@@ -29,6 +29,15 @@ type CollectionProofRecord = {
 };
 
 const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
+
+/**
+ * Tope de filas que se traen al navegador.
+ *
+ * Los totales de la pantalla se calculan sobre lo cargado, de modo que alcanzar este tope
+ * no solo recorta la lista: falsea las cifras. Por eso se avisa de forma visible en lugar
+ * de dejar que el numero quede mal en silencio.
+ */
+const COLLECTIONS_ROW_LIMIT = 5000;
 const MAX_COLLECTION_PROOF_BYTES = 20 * 1024 * 1024;
 const ALLOWED_COLLECTION_PROOF_TYPES = new Set([
     'application/pdf',
@@ -100,6 +109,7 @@ const Collections = () => {
     const [uploading, setUploading] = useState(false);
 
     const [allRows, setAllRows] = useState<any[]>([]);
+    const [truncated, setTruncated] = useState(false);
     const [allPaidRows, setAllPaidRows] = useState<any[]>([]);
     const [allSummary, setAllSummary] = useState<any[]>([]);
     const [activeBatch, setActiveBatch] = useState<any>(null);
@@ -436,8 +446,8 @@ const Collections = () => {
         setError(null);
         try {
             const [rowsRes, paidRowsRes, summaryRes, batchRes] = await Promise.all([
-                supabase.from('vw_collections_pending_current').select('*').order('due_date', { ascending: true }).limit(5000),
-                supabase.from('vw_collections_paid_history').select('*').order('paid_detected_at', { ascending: false }).limit(5000),
+                supabase.from('vw_collections_pending_current').select('*').order('due_date', { ascending: true }).limit(COLLECTIONS_ROW_LIMIT),
+                supabase.from('vw_collections_paid_history').select('*').order('paid_detected_at', { ascending: false }).limit(COLLECTIONS_ROW_LIMIT),
                 supabase.from('vw_collections_seller_summary_current').select('*').limit(500),
                 supabase.from('collections_import_batches').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle()
             ]);
@@ -447,6 +457,9 @@ const Collections = () => {
 
             const loadedRows = rowsRes.data || [];
             const loadedPaidRows = paidRowsRes.data || [];
+            setTruncated(
+                loadedRows.length >= COLLECTIONS_ROW_LIMIT || loadedPaidRows.length >= COLLECTIONS_ROW_LIMIT
+            );
             setAllRows(loadedRows);
             setAllPaidRows(loadedPaidRows);
             setAllSummary(summaryRes.data || []);
@@ -1082,6 +1095,17 @@ const Collections = () => {
                 {rejectedRows.length > 0 && (
                     <div className="p-3 rounded-xl bg-amber-50 border border-amber-100 text-amber-700 text-sm">
                         {rejectedRows.length} fila(s) fueron rechazadas por validación estricta. Puedes descargar el detalle en "Exportar rechazadas".
+                    </div>
+                )}
+
+                {truncated && (
+                    <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
+                        <p className="text-sm font-black text-amber-900">Cifras incompletas</p>
+                        <p className="mt-1 text-xs font-medium text-amber-800">
+                            Se alcanzó el límite de {COLLECTIONS_ROW_LIMIT.toLocaleString('es-CL')} documentos por carga,
+                            así que la lista está recortada y los totales de abajo no reflejan el universo completo.
+                            Usa los filtros para acotar la vista o avisa para ampliar el límite.
+                        </p>
                     </div>
                 )}
 

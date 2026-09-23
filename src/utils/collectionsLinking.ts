@@ -85,11 +85,18 @@ export const buildCollectionsRutVariants = (rut: string | null | undefined) => {
     const body = normalized.slice(0, -1);
     const withHyphen = body ? `${body}-${dv}` : normalized;
 
-    return Array.from(new Set([
-        normalized,
-        withHyphen,
-        withHyphen.replace(/\B(?=(\d{3})+(?!\d))/g, '.'),
-    ].filter(Boolean)));
+    const conPuntos = withHyphen.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+    // El RUT se guarda tal como lo escribe el ERP y la comparacion en base distingue
+    // mayusculas, asi que un digito verificador en minuscula quedaba fuera de la busqueda
+    // y su deuda no aparecia en la ficha del cliente.
+    const variantes = [normalized, withHyphen, conPuntos];
+
+    return Array.from(new Set(
+        variantes
+            .flatMap((variante) => [variante, variante.toLowerCase()])
+            .filter(Boolean)
+    ));
 };
 
 const toComparableTime = (value: string | null | undefined) => {

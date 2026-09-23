@@ -83,6 +83,17 @@ const parseYear = (value: string) => {
 const buildDate = (year: number, month: number, day: number) => {
     const date = new Date(year, month - 1, day);
     if (Number.isNaN(date.getTime())) return null;
+
+    // new Date(2026, 1, 31) no falla: devuelve el 3 de marzo. Sin esta comprobacion, una
+    // fecha imposible como 31/02 se aceptaba como valida y entraba corrida al sistema.
+    if (
+        date.getFullYear() !== year
+        || date.getMonth() !== month - 1
+        || date.getDate() !== day
+    ) {
+        return null;
+    }
+
     return toIsoDate(date);
 };
 
@@ -119,15 +130,50 @@ const parseDate = (value: unknown): string | null => {
     return null;
 };
 
+/**
+ * Interpreta un monto en texto sin asumir una unica convencion.
+ *
+ * Antes se eliminaba todo punto y se convertia la coma en decimal, de modo que un valor
+ * exportado como "1234.56" se leia como 123456, cien veces mayor. Las celdas numericas no
+ * pasan por aqui, pero las de texto si.
+ */
 const parseNumber = (value: unknown): number => {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
-    const cleaned = String(value ?? '')
+
+    const raw = String(value ?? '')
         .replace(/\$/g, '')
         .replace(/\s/g, '')
-        .replace(/\./g, '')
-        .replace(/,/g, '.');
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
+        .trim();
+
+    if (!raw) return 0;
+
+    const negativo = /^\(.*\)$/.test(raw) || raw.startsWith('-');
+    const cuerpo = raw.replace(/^[-(]|\)$/g, '');
+
+    const tienePunto = cuerpo.includes('.');
+    const tieneComa = cuerpo.includes(',');
+
+    let normalizado = cuerpo;
+
+    if (tienePunto && tieneComa) {
+        // Manda el separador que aparece mas a la derecha: ese es el decimal.
+        const decimal = cuerpo.lastIndexOf(',') > cuerpo.lastIndexOf('.') ? ',' : '.';
+        const miles = decimal === ',' ? '.' : ',';
+        normalizado = cuerpo.split(miles).join('').replace(decimal, '.');
+    } else if (tieneComa) {
+        // Convencion local: la coma es decimal.
+        normalizado = cuerpo.replace(/,/g, '.');
+    } else if (tienePunto) {
+        const grupos = cuerpo.split('.');
+        const ultimo = grupos[grupos.length - 1];
+        // Varios puntos, o uno seguido de exactamente tres digitos, indican miles.
+        const esSeparadorDeMiles = grupos.length > 2 || (grupos.length === 2 && ultimo.length === 3);
+        normalizado = esSeparadorDeMiles ? grupos.join('') : cuerpo;
+    }
+
+    const n = Number(normalizado);
+    if (!Number.isFinite(n)) return 0;
+    return negativo ? -Math.abs(n) : n;
 };
 
 const getValueByAliases = (row: Record<string, unknown>, aliases: string[]) => {
@@ -191,6 +237,26 @@ const parseErpRows = (rows: unknown[][]) => {
     const b6190Index = findFirstColumn(headerMap, ERP_HEADER_ALIASES.bucket_61_90);
     const b3160Index = findFirstColumn(headerMap, ERP_HEADER_ALIASES.bucket_31_60);
     const b030Index = findFirstColumn(headerMap, ERP_HEADER_ALIASES.bucket_0_30);
+
+    /**
+     * El monto de cada documento es la suma de los cuatro tramos de antiguedad. Si el ERP
+     * renombra o deja de exportar uno, ese tramo sumaba cero y la deuda quedaba
+     * subestimada sin ningun aviso. Es preferible rechazar el archivo entero.
+     */
+    const tramosFaltantes = [
+        { nombre: 'mayor a 90 días', indice: gt90Index },
+        { nombre: '61 a 90 días', indice: b6190Index },
+        { nombre: '31 a 60 días', indice: b3160Index },
+        { nombre: '0 a 30 días', indice: b030Index }
+    ].filter((tramo) => tramo.indice < 0);
+
+    if (tramosFaltantes.length > 0) {
+        throw new Error(
+            `El archivo del ERP no trae ${tramosFaltantes.length === 1 ? 'la columna' : 'las columnas'} `
+            + `de ${tramosFaltantes.map((tramo) => tramo.nombre).join(', ')}. `
+            + 'Sin esos tramos la deuda quedaría subestimada, así que la carga se detuvo.'
+        );
+    }
 
     for (let offset = headerRowIndex + 1; offset < rows.length; offset += 1) {
         const row = rows[offset];
@@ -286,7 +352,10 @@ const parseLegacyRows = (rawRows: Record<string, unknown>[]) => {
         const documentNumber = String(docNumberRaw ?? '').trim();
         const dueDate = parseDate(dueDateRaw);
         const amount = parseNumber(amountRaw);
-        const outstanding = parseNumber(outstandingRaw);
+        // Distinguir "sin columna de saldo" de "saldo cero". Antes ambos casos caian en
+        // el mismo valor y un documento ya pagado se importaba debiendo el total.
+        const traeSaldo = outstandingRaw != null && String(outstandingRaw).trim() !== '';
+        const outstanding = traeSaldo ? parseNumber(outstandingRaw) : null;
         const statusNormalized = normalizeHeader(String(statusRaw ?? 'pending'));
         const statusValid = ['pending', 'partial', 'paid', 'overdue', 'disputed'].includes(statusNormalized);
 
@@ -295,7 +364,7 @@ const parseLegacyRows = (rawRows: Record<string, unknown>[]) => {
         if (!documentNumber) reasons.push('document_number vacío');
         if (!dueDate) reasons.push('due_date inválida');
         if (amount <= 0) reasons.push('amount inválido');
-        if (outstanding < 0) reasons.push('outstanding_amount negativo');
+        if (outstanding !== null && outstanding < 0) reasons.push('outstanding_amount negativo');
         if (statusRaw != null && String(statusRaw).trim() !== '' && !statusValid) reasons.push('status inválido');
 
         if (reasons.length > 0) {
@@ -333,13 +402,63 @@ const parseLegacyRows = (rawRows: Record<string, unknown>[]) => {
             issue_date: parseDate(issueDateRaw),
             due_date: dueDate as string,
             amount,
-            outstanding_amount: outstanding > 0 ? outstanding : amount,
+            outstanding_amount: outstanding === null ? amount : outstanding,
             status,
             notes: notesRaw ? String(notesRaw).trim() : null,
         });
     });
 
     return { valid, rejected };
+};
+
+/**
+ * Separa los documentos que repiten numero dentro del mismo archivo.
+ *
+ * El procedimiento de base cruza los lotes por numero de documento y aplica un DISTINCT,
+ * de modo que una repeticion se descartaba en silencio y esa deuda desaparecia. Aqui se
+ * conserva la primera aparicion y las siguientes se informan como rechazadas, para que
+ * quien carga vea que paso en lugar de perderlas sin rastro.
+ */
+const separarDocumentosRepetidos = (
+    valid: CollectionUploadRow[],
+    rejected: CollectionUploadRejected[]
+) => {
+    const vistos = new Map<string, number>();
+    const conservados: CollectionUploadRow[] = [];
+    const repetidos: CollectionUploadRejected[] = [];
+
+    valid.forEach((fila, indice) => {
+        const clave = String(fila.document_number || '').trim().toLowerCase();
+
+        if (!clave) {
+            conservados.push(fila);
+            return;
+        }
+
+        const primeraAparicion = vistos.get(clave);
+        if (primeraAparicion === undefined) {
+            vistos.set(clave, indice + 1);
+            conservados.push(fila);
+            return;
+        }
+
+        repetidos.push({
+            row_number: indice + 1,
+            reason: `documento ${fila.document_number} repetido en el archivo (ya aparece en la fila ${primeraAparicion}); solo se carga la primera aparición`,
+            client_name: fila.client_name,
+            client_rut: fila.client_rut || '',
+            document_number: fila.document_number,
+            due_date: fila.due_date,
+            amount: String(fila.amount),
+            seller_email: fila.seller_email || '',
+            seller_name: fila.seller_name || '',
+            document_type: fila.document_type,
+            outstanding_amount: String(fila.outstanding_amount),
+            status: fila.status
+        });
+    });
+
+    return { valid: conservados, rejected: [...rejected, ...repetidos] };
 };
 
 export const parseCollectionsImportFile = (buffer: ArrayBuffer) => {
@@ -351,14 +470,16 @@ export const parseCollectionsImportFile = (buffer: ArrayBuffer) => {
     const matrix = utils.sheet_to_json<(string | number | Date)[]>(worksheet, { header: 1, raw: true, defval: '', blankrows: false });
     const erpResult = parseErpRows(matrix as unknown[][]);
     if (erpResult.matched) {
-        return { ...erpResult, detectedFormat: 'erp' as const };
+        const sinRepetidos = separarDocumentosRepetidos(erpResult.valid, erpResult.rejected);
+        return { ...erpResult, ...sinRepetidos, detectedFormat: 'erp' as const };
     }
 
     const rawRows = utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
     if (rawRows.length === 0) throw new Error('El archivo no contiene datos.');
 
     const legacyResult = parseLegacyRows(rawRows);
-    return { ...legacyResult, detectedFormat: 'legacy' as const };
+    const sinRepetidos = separarDocumentosRepetidos(legacyResult.valid, legacyResult.rejected);
+    return { ...legacyResult, ...sinRepetidos, detectedFormat: 'legacy' as const };
 };
 
 export const buildCollectionsRpcRows = (
