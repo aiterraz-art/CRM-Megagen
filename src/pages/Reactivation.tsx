@@ -7,6 +7,7 @@ import { useUser } from '../contexts/UserContext';
 import KPICard from '../components/KPICard';
 import ReactivationAttemptModal from '../components/modals/ReactivationAttemptModal';
 import ReactivationDiscardModal from '../components/modals/ReactivationDiscardModal';
+import ReactivationConsole from '../components/ReactivationConsole';
 import {
     SEGMENT_LABELS, SEGMENT_STYLES, STATUS_LABELS, formatDays, formatMoney,
     type ReactivationSegment, type ReactivationStatus
@@ -53,6 +54,7 @@ const Reactivation = () => {
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
 
+    const [mainTab, setMainTab] = useState<'cases' | 'console'>('cases');
     const [attemptCase, setAttemptCase] = useState<CaseRow | null>(null);
     const [discardCase, setDiscardCase] = useState<CaseRow | null>(null);
 
@@ -156,6 +158,29 @@ const Reactivation = () => {
                 </button>
             </div>
 
+            {canManage && (
+                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        onClick={() => setMainTab('cases')}
+                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                            mainTab === 'cases' ? 'bg-rose-600 text-white' : 'bg-white border border-gray-100 text-gray-500'
+                        }`}
+                    >
+                        Mis casos
+                    </button>
+                    <button
+                        onClick={() => setMainTab('console')}
+                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                            mainTab === 'console' ? 'bg-slate-800 text-white' : 'bg-white border border-gray-100 text-gray-500'
+                        }`}
+                    >
+                        Reparto
+                    </button>
+                </div>
+            )}
+
+            {mainTab === 'console' ? <ReactivationConsole /> : (
+              <>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                 <KPICard title="Casos abiertos" value={String(totals.open)} icon={HeartPulse} color="rose"
                     detail="Asignados y sin cerrar" />
@@ -342,6 +367,9 @@ const Reactivation = () => {
                         </button>
                     </div>
                 </div>
+            )}
+
+              </>
             )}
 
             <ReactivationAttemptModal
