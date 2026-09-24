@@ -97,7 +97,7 @@ const TeamStats = () => {
     useEffect(() => {
         if (hasPermission('VIEW_TEAM_STATS') && currentUser) {
             fetchTeamData();
-            supabase.from('clients').select('id, name').then(({ data }) => setClients(data || []));
+            supabase.from('clients').select('id, name').is('archived_at', null).then(({ data }) => setClients(data || []));
         }
     }, [hasPermission, currentUser, selectedDate]);
 
@@ -527,6 +527,8 @@ const TeamStats = () => {
                     .from('clients')
                     .select('*')
                     .in('created_by', sellerIds)
+                    // La cartera archivada no cuenta para las estadisticas del equipo.
+                    .is('archived_at', null)
                     .order('name'),
                 supabase
                     .from('visits')
@@ -721,7 +723,7 @@ const TeamStats = () => {
             addSheet('Sellers_Scope', sellerIds.map((id) => ({ seller_id: id, vendedor: repMap[id] || id })));
 
             const clientsRows = await safeFetch('Clients', async () => {
-                const { data, error } = await supabase.from('clients').select('*').in('created_by', sellerIds).order('name');
+                const { data, error } = await supabase.from('clients').select('*').in('created_by', sellerIds).is('archived_at', null).order('name');
                 if (error) throw error;
                 return data || [];
             });

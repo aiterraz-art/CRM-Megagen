@@ -315,7 +315,7 @@ const ClientsContent = () => {
     const [mergingDuplicateGroupId, setMergingDuplicateGroupId] = useState<string | null>(null);
 
     const [viewMode, setViewMode] = useState<'all' | 'mine'>('all'); // For Admins
-    const [portfolioTab, setPortfolioTab] = useState<'portfolio' | 'pool'>('portfolio');
+    const [portfolioTab, setPortfolioTab] = useState<'portfolio' | 'pool' | 'archived'>('portfolio');
     const [clientTypeFilter, setClientTypeFilter] = useState<'all' | 'active' | 'prospect'>('all');
     const [sellerFilter, setSellerFilter] = useState<string>('all');
     const [poolAssigneeId, setPoolAssigneeId] = useState<string>('');
@@ -1966,7 +1966,9 @@ const ClientsContent = () => {
                     <p className="text-gray-500 font-medium mt-1">
                         {portfolioTab === 'pool'
                             ? 'Pool de Leads Libres (sin gestión por más de 30 días)'
-                            : (canViewAll ? 'Administración total de la cartera' : 'Tu cartera de clientes asignada')}
+                            : portfolioTab === 'archived'
+                                ? 'Clientes archivados, fuera de los indicadores de cartera'
+                                : (canViewAll ? 'Administración total de la cartera' : 'Tu cartera de clientes asignada')}
                     </p>
                     {lastRefreshAt && (
                         <p className="text-xs text-gray-400 mt-2">Última actualización: {new Date(lastRefreshAt).toLocaleString()}</p>
@@ -2190,6 +2192,12 @@ const ClientsContent = () => {
                         className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${portfolioTab === 'pool' ? 'bg-amber-500 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}
                     >
                         Pool de Leads Libres
+                    </button>
+                    <button
+                        onClick={() => setPortfolioTab('archived')}
+                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${portfolioTab === 'archived' ? 'bg-slate-700 text-white' : 'bg-white border border-gray-100 text-gray-500'}`}
+                    >
+                        Archivados
                     </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

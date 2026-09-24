@@ -426,7 +426,9 @@ const Dashboard = () => {
                 setTasks(tasksData || []);
 
                 // C. Neglected Clients
-                let clientsQuery = supabase.from('clients').select('id, name');
+                // Un cliente archivado ya no es cartera: no debe aparecer como descuidado
+                // ni engrosar los indicadores de la pantalla.
+                let clientsQuery = supabase.from('clients').select('id, name').is('archived_at', null);
                 if (!hasPermission('VIEW_ALL_CLIENTS')) {
                     clientsQuery = clientsQuery.eq('created_by', profile.id);
                 }
