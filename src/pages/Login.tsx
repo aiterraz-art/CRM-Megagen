@@ -1,25 +1,32 @@
-import { supabase } from '../services/supabase';
-import { GOOGLE_SCOPES } from '../services/googleService';
+import { useEffect, useState } from 'react';
+import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+import { GOOGLE_SIGN_IN_UNAVAILABLE_MESSAGE, startGoogleSignIn } from '../services/googleService';
 
 const Login = () => {
-    const handleGoogleLogin = async () => {
-        const authRedirectUrl = (import.meta.env.VITE_AUTH_REDIRECT_URL || `${window.location.origin}/`).trim();
-        const { error } = await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                // Force frontend callback target (prevents falling back to Supabase host root)
-                redirectTo: authRedirectUrl,
-                queryParams: {
-                    access_type: 'offline',
-                    prompt: 'consent select_account',
-                    include_granted_scopes: 'true',
-                },
-                scopes: GOOGLE_SCOPES
-            }
-        });
+    const [signingIn, setSigningIn] = useState(false);
+    const [signInFailed, setSignInFailed] = useState(false);
 
-        if (error) {
-            console.error('Error al iniciar sesión con Google:', error.message);
+    // Coming back from Google via the back button restores this page from the bfcache
+    // with the spinner still on; reset it so the button is usable again.
+    useEffect(() => {
+        const onPageShow = (event: PageTransitionEvent) => {
+            if (event.persisted) setSigningIn(false);
+        };
+        window.addEventListener('pageshow', onPageShow);
+        return () => window.removeEventListener('pageshow', onPageShow);
+    }, []);
+
+    const handleGoogleLogin = async () => {
+        if (signingIn) return;
+        setSigningIn(true);
+        setSignInFailed(false);
+        // Force frontend callback target (prevents falling back to Supabase host root)
+        const authRedirectUrl = (import.meta.env.VITE_AUTH_REDIRECT_URL || `${window.location.origin}/`).trim();
+        const { ok } = await startGoogleSignIn(authRedirectUrl);
+        // On success the browser is already navigating to Google; keep the spinner.
+        if (!ok) {
+            setSignInFailed(true);
+            setSigningIn(false);
         }
     };
 
@@ -42,12 +49,28 @@ const Login = () => {
                 </div>
 
                 <div className="space-y-4">
+                    {signInFailed && (
+                        <div role="alert" className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left animate-in fade-in duration-300">
+                            <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                                <p className="text-sm font-bold text-amber-800">Conexión interrumpida</p>
+                                <p className="text-xs font-medium text-amber-700">{GOOGLE_SIGN_IN_UNAVAILABLE_MESSAGE}</p>
+                            </div>
+                        </div>
+                    )}
                     <button
                         onClick={handleGoogleLogin}
-                        className="w-full flex items-center justify-center space-x-4 bg-white border border-gray-100 py-5 px-8 rounded-[2rem] font-bold text-gray-700 hover:bg-gray-50 transition-all active:scale-95 shadow-sm hover:shadow-xl hover:shadow-indigo-50 border-gray-100"
+                        disabled={signingIn}
+                        className="w-full disabled:opacity-70 disabled:cursor-wait flex items-center justify-center space-x-4 bg-white border border-gray-100 py-5 px-8 rounded-[2rem] font-bold text-gray-700 hover:bg-gray-50 transition-all active:scale-95 shadow-sm hover:shadow-xl hover:shadow-indigo-50 border-gray-100"
                     >
-                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
-                        Inicio de Sesión
+                        {signingIn ? (
+                            <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                        ) : signInFailed ? (
+                            <RefreshCw className="w-6 h-6 text-gray-500" />
+                        ) : (
+                            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
+                        )}
+                        <span>{signingIn ? 'Conectando...' : signInFailed ? 'Reintentar' : 'Inicio de Sesión'}</span>
                     </button>
 
                     <p className="text-[10px] text-center text-gray-400 font-bold uppercase tracking-[0.1em] mt-4">

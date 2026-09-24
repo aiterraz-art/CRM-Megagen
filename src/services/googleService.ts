@@ -7,6 +7,59 @@ export const GOOGLE_SCOPES = [
     'https://www.googleapis.com/auth/gmail.send'
 ].join(' ');
 
+export const GOOGLE_SIGN_IN_UNAVAILABLE_MESSAGE =
+    'No pudimos conectar con Google en este momento. Espera unos segundos e inténtalo de nuevo.';
+
+const AUTHORIZE_PROBE_TIMEOUT_MS = 12_000;
+
+/**
+ * Starts the Google OAuth redirect, but first probes the auth server's authorize
+ * endpoint. When the server itself fails (e.g. it can't reach Google), GoTrue
+ * answers with a raw JSON 400 page; probing lets us show a friendly message instead
+ * of sending the user there. Any ambiguous probe result falls back to redirecting.
+ */
+export const startGoogleSignIn = async (redirectTo: string): Promise<{ ok: boolean }> => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+            redirectTo,
+            skipBrowserRedirect: true,
+            queryParams: {
+                access_type: 'offline',
+                prompt: 'consent select_account',
+                include_granted_scopes: 'true',
+            },
+            scopes: GOOGLE_SCOPES,
+        }
+    });
+
+    if (error || !data?.url) {
+        console.error('Error al iniciar sesión con Google:', error?.message);
+        return { ok: false };
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), AUTHORIZE_PROBE_TIMEOUT_MS);
+    try {
+        const probe = await fetch(data.url, { redirect: 'manual', signal: controller.signal });
+        // A healthy authorize endpoint redirects to Google (opaque redirect); a readable
+        // 4xx/5xx means the auth server failed before it could send the user to Google.
+        if (probe.type !== 'opaqueredirect' && probe.status >= 400) {
+            const body = await probe.text().catch(() => '');
+            console.error('Servidor de autenticación no disponible:', probe.status, body);
+            return { ok: false };
+        }
+    } catch (probeError) {
+        // CORS, timeouts or network hiccups on the probe are inconclusive: keep the old behavior.
+        console.warn('No se pudo verificar el servidor de autenticación, redirigiendo igual:', probeError);
+    } finally {
+        window.clearTimeout(timer);
+    }
+
+    window.location.assign(data.url);
+    return { ok: true };
+};
+
 type GoogleConnectionStatus = {
     googleEmail: string | null;
     hasRefreshToken: boolean;
@@ -218,18 +271,9 @@ export const googleService = {
     },
 
     async startReconnect(returnTo = window.location.href) {
-        return supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                redirectTo: returnTo,
-                queryParams: {
-                    access_type: 'offline',
-                    prompt: 'consent select_account',
-                    include_granted_scopes: 'true',
-                },
-                scopes: GOOGLE_SCOPES,
-            }
-        });
+        const result = await startGoogleSignIn(returnTo);
+        if (!result.ok) window.alert(GOOGLE_SIGN_IN_UNAVAILABLE_MESSAGE);
+        return result;
     },
 
     clearCachedToken() {
