@@ -3,6 +3,7 @@ import { CheckCircle2, Mail, MessageCircle, Phone, PhoneOff, Voicemail, X, HelpC
 import { supabase } from '../../services/supabase';
 import { useUser } from '../../contexts/UserContext';
 import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
+import { logClientInteraction } from '../../utils/clientInteractions';
 
 type ManagementType = 'call' | 'whatsapp' | 'email';
 type CallStatus = 'contestada' | 'no_contesto' | 'ocupado' | 'equivocado' | 'buzon';
@@ -138,33 +139,15 @@ const ClientManagementModal = ({ client, isOpen, onClose, onSaved }: ClientManag
 
         setLoading(true);
         try {
-            if (managementType === 'call') {
-                const { error } = await supabase.from('call_logs').insert({
-                    client_id: client.id,
-                    user_id: profile.id,
-                    status: callStatus,
-                    notes: notes || null
-                } as any);
-                if (error) throw error;
-            } else if (managementType === 'whatsapp') {
-                const { error } = await supabase.from('lead_message_logs').insert({
-                    client_id: client.id,
-                    user_id: profile.id,
-                    channel: 'whatsapp',
-                    destination: finalDestination,
-                    status: messageStatus,
-                    error_message: notes || null
-                });
-                if (error) throw error;
-            } else {
-                const { error } = await (supabase.from('email_logs') as any).insert({
-                    client_id: client.id,
-                    user_id: profile.id,
-                    subject: subject || 'Correo registrado manualmente',
-                    snippet: notes || null
-                });
-                if (error) throw error;
-            }
+            await logClientInteraction({
+                clientId: client.id,
+                userId: profile.id,
+                channel: managementType,
+                status: managementType === 'call' ? callStatus : messageStatus,
+                destination: finalDestination,
+                subject,
+                notes
+            });
 
             onSaved();
             clearPersistedModalDraft(storageKey);

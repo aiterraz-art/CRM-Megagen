@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { AlertTriangle, LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw } from 'lucide-react';
+import { AlertTriangle, HeartPulse, LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -24,6 +24,7 @@ type MenuContext = {
     canViewSupplierPayables: boolean;
     canViewKitLoans: boolean;
     canViewSizeChanges: boolean;
+    canViewReactivation: boolean;
 };
 
 type MenuEntry = {
@@ -119,6 +120,14 @@ const allMenuEntries: MenuEntry[] = [
         icon: <Trophy size={20} />,
         group: 'comercial',
         visibleWhen: () => true,
+    },
+    {
+        id: 'reactivation',
+        label: 'Reactivación',
+        path: '/reactivation',
+        icon: <HeartPulse size={20} />,
+        group: 'comercial',
+        visibleWhen: ({ effectiveRole, canViewReactivation }) => effectiveRole !== 'driver' && canViewReactivation,
     },
     {
         id: 'collections',
@@ -304,6 +313,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const canViewSupplierPayables = hasPermission('VIEW_SUPPLIER_PAYABLES') || hasPermission('MANAGE_SUPPLIER_PAYABLES');
     const canViewKitLoans = hasPermission('VIEW_KIT_LOANS');
     const canViewSizeChanges = hasPermission('VIEW_SIZE_CHANGES');
+    const canViewReactivation = hasPermission('VIEW_REACTIVATION') || hasPermission('MANAGE_REACTIVATION');
     const shouldTrackPendingLostReasons = realRole === 'seller' && effectiveRole === 'seller' && Boolean(profile?.id);
 
     const menuContext = useMemo(
@@ -315,8 +325,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             canViewSupplierPayables,
             canViewKitLoans,
             canViewSizeChanges,
+            canViewReactivation,
         }),
-        [effectiveRole, isSupervisor, canViewProcurement, canViewPurchaseOrders, canViewSupplierPayables, canViewKitLoans, canViewSizeChanges]
+        [effectiveRole, isSupervisor, canViewProcurement, canViewPurchaseOrders, canViewSupplierPayables, canViewKitLoans, canViewSizeChanges, canViewReactivation]
     );
 
     const visibleMenuEntries = useMemo(

@@ -50,6 +50,7 @@ const Procurement = loadable(() => import('./pages/Procurement'));
 const KitLoans = loadable(() => import('./pages/KitLoans'));
 const PurchaseOrders = loadable(() => import('./pages/PurchaseOrders'));
 const SupplierPayables = loadable(() => import('./pages/SupplierPayables'));
+const Reactivation = loadable(() => import('./pages/Reactivation'));
 
 const ScreenLoader = () => (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -234,6 +235,7 @@ const AppRoutesWithRecovery = ({ session }: { session: Session | null }) => {
                         <Route path="size-changes" element={<PermissionGuard permission="VIEW_SIZE_CHANGES"><SizeChanges /></PermissionGuard>} />
                         <Route path="orders" element={<Orders />} />
                         <Route path="conversions" element={<ConversionsRanking />} />
+                        <Route path="reactivation" element={<AnyPermissionGuard permissions={['VIEW_REACTIVATION', 'MANAGE_REACTIVATION']}><Reactivation /></AnyPermissionGuard>} />
                         <Route path="routes" element={<NonFacturadorGuard><SellerRoutes /></NonFacturadorGuard>} />
                         <Route path="inventory" element={<Inventory />} />
                         <Route path="procurement" element={<PermissionGuard permission="VIEW_PROCUREMENT"><Procurement /></PermissionGuard>} />
