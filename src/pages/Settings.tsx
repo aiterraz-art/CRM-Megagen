@@ -4,7 +4,6 @@ import { useUser } from '../contexts/UserContext';
 import { Shield, User, Search, CheckCircle, Ban, Edit, Save, AlertTriangle, Trash2, Mail } from 'lucide-react';
 import { Profile } from '../contexts/UserContext';
 import { googleService } from '../services/googleService';
-import WooStockSyncCard from '../components/WooStockSyncCard';
 import { Database } from '../types/supabase';
 import {
     ASSIGNABLE_ROLES,
@@ -1423,8 +1422,6 @@ const Settings: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-
-                        {canManageGlobalSettings && <WooStockSyncCard />}
                     </div>
                 </div>
             )

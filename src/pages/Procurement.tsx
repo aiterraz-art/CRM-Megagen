@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import WooStockSyncCard from '../components/WooStockSyncCard';
 import {
     AlertTriangle,
     CheckCircle2,
@@ -30,7 +31,7 @@ type RequestPriority = ProductRequestRow['priority'];
 type RequestStatus = ProductRequestRow['status'];
 type ShipmentStatus = ShipmentRow['status'];
 type ShipmentMode = ShipmentRow['transport_mode'];
-type ProcurementTab = 'requests' | 'shipments';
+type ProcurementTab = 'requests' | 'shipments' | 'webstore';
 type RotationMetric = Database['public']['Functions']['get_inventory_rotation_metrics']['Returns'][number];
 
 type ProcurementLocationState = {
@@ -1143,7 +1144,7 @@ const Procurement: React.FC = () => {
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white p-2 shadow-sm">
-                <div className="grid grid-cols-2 gap-2">
+                <div className={`grid gap-2 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
                     <button
                         onClick={() => setActiveTab('shipments')}
                         className={`rounded-2xl px-4 py-3 text-sm font-black transition-all ${activeTab === 'shipments' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
@@ -1156,6 +1157,14 @@ const Procurement: React.FC = () => {
                     >
                         Solicitudes de Productos
                     </button>
+                    {isAdmin && (
+                        <button
+                            onClick={() => setActiveTab('webstore')}
+                            className={`rounded-2xl px-4 py-3 text-sm font-black transition-all ${activeTab === 'webstore' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                            Tienda Web
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -1774,6 +1783,10 @@ const Procurement: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* El stock que viaja a la tienda sale del inventario, por eso la
+                sincronización vive en abastecimiento y no en Configuración. */}
+            {activeTab === 'webstore' && isAdmin && <WooStockSyncCard />}
 
             {showShipmentModal && canManageProcurement && (
                 <div className="fixed inset-0 z-[225] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeShipmentModal}>
