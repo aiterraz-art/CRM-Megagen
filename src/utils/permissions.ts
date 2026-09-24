@@ -60,7 +60,11 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
     { key: 'MANAGE_KIT_LOANS', label: 'Gestionar Kits', desc: 'Permite registrar kits, despachar préstamos y cerrar devoluciones.' },
     { key: 'VIEW_SIZE_CHANGES', label: 'Ver Cambios de Medida', desc: 'Acceso al módulo comercial de solicitudes de cambio de medida.' },
     { key: 'CREATE_SIZE_CHANGES', label: 'Crear Cambios de Medida', desc: 'Permite crear solicitudes de cambio para clientes.' },
-    { key: 'MANAGE_SIZE_CHANGES', label: 'Gestionar Cambios de Medida', desc: 'Permite enviar, cerrar y cancelar cambios de medida.' }
+    { key: 'MANAGE_SIZE_CHANGES', label: 'Gestionar Cambios de Medida', desc: 'Permite enviar, cerrar y cancelar cambios de medida.' },
+    { key: 'VIEW_REACTIVATION', label: 'Ver Reactivación', desc: 'Acceso al módulo y a los casos de reactivación asignados a uno mismo.' },
+    { key: 'MANAGE_REACTIVATION', label: 'Gestionar Reactivación', desc: 'Repartir casos entre vendedores, reasignarlos y cerrarlos por descarte.' },
+    { key: 'VIEW_ALL_REACTIVATION', label: 'Ver Toda la Reactivación', desc: 'Ver los casos de todo el equipo, no solo los propios.' },
+    { key: 'ARCHIVE_CLIENTS', label: 'Archivar Clientes', desc: 'Archivar clientes sin valor y reasignar la cartera de vendedores dados de baja.' }
 ];
 
 export const PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((permission) => permission.key);
@@ -81,7 +85,7 @@ export const isBillingBackofficeRole = (role: string | null | undefined): boolea
     return normalizedRole === 'facturador' || normalizedRole === 'tesorero';
 };
 
-const CHIEF_PERMISSIONS = ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES'];
+const CHIEF_PERMISSIONS = ['MANAGE_INVENTORY', 'VIEW_METAS', 'MANAGE_METAS', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'IMPORT_CLIENTS', 'VIEW_TEAM_STATS', 'VIEW_OPERATIONS', 'MANAGE_SLA', 'MANAGE_APPROVALS', 'VIEW_TEAM_CALENDARS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES', 'VIEW_REACTIVATION', 'MANAGE_REACTIVATION', 'VIEW_ALL_REACTIVATION', 'ARCHIVE_CLIENTS'];
 
 /**
  * Semilla de permisos por rol. Solo se aplica cuando la base de datos no puede
@@ -94,7 +98,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     bodega: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
     facturador: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES', 'VIEW_PURCHASE_ORDERS', 'MANAGE_PURCHASE_ORDERS'],
     tesorero: ['UPLOAD_EXCEL', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'MANAGE_DISPATCH', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'VIEW_OPERATIONS', 'MANAGE_COLLECTIONS', 'VIEW_KIT_LOANS', 'MANAGE_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'MANAGE_SIZE_CHANGES'],
-    seller: ['VIEW_METAS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES'],
+    seller: ['VIEW_METAS', 'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES', 'VIEW_REACTIVATION'],
     driver: ['EXECUTE_DELIVERY']
 };
 
