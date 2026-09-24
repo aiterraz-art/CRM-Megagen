@@ -47,6 +47,7 @@ const Collections = loadable(() => import('./pages/Collections'));
 const MyDeliveries = loadable(() => import('./pages/MyDeliveries'));
 const ConversionsRanking = loadable(() => import('./pages/ConversionsRanking'));
 const Procurement = loadable(() => import('./pages/Procurement'));
+const WebStore = loadable(() => import('./pages/WebStore'));
 const KitLoans = loadable(() => import('./pages/KitLoans'));
 const PurchaseOrders = loadable(() => import('./pages/PurchaseOrders'));
 const SupplierPayables = loadable(() => import('./pages/SupplierPayables'));
@@ -239,6 +240,7 @@ const AppRoutesWithRecovery = ({ session }: { session: Session | null }) => {
                         <Route path="routes" element={<NonFacturadorGuard><SellerRoutes /></NonFacturadorGuard>} />
                         <Route path="inventory" element={<Inventory />} />
                         <Route path="procurement" element={<PermissionGuard permission="VIEW_PROCUREMENT"><Procurement /></PermissionGuard>} />
+                        <Route path="web-store" element={<WebStore />} />
                         <Route path="purchase-orders" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
                         <Route path="suppliers" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
                         <Route path="supplier-payables" element={<AnyPermissionGuard permissions={['VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES']}><SupplierPayables /></AnyPermissionGuard>} />

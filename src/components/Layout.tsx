@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { AlertTriangle, HeartPulse, LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw } from 'lucide-react';
+import { AlertTriangle, HeartPulse, LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw, Globe } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -232,6 +232,14 @@ const allMenuEntries: MenuEntry[] = [
         icon: <Users size={20} />,
         group: 'procurement',
         visibleWhen: ({ canViewPurchaseOrders }) => canViewPurchaseOrders,
+    },
+    {
+        id: 'web-store',
+        label: 'Tienda Web',
+        path: '/web-store',
+        icon: <Globe size={20} />,
+        group: 'procurement',
+        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin',
     },
     {
         id: 'kit-loans',
