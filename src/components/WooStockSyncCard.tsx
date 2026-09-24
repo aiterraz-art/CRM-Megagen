@@ -12,6 +12,15 @@ type WooHealth = {
     pg_net: boolean;
     credentials: Record<string, boolean>;
     store_url: string | null;
+    connection: {
+        ok: boolean;
+        verified_at: string;
+        store_url: string | null;
+        store_name: string | null;
+        products_count: number | null;
+        consumer_key_suffix: string | null;
+        error: string | null;
+    } | null;
     last_scan_at: string | null;
     catalog_size: number;
     approved: number;
@@ -62,7 +71,6 @@ const WooStockSyncCard: React.FC = () => {
     const [storeUrl, setStoreUrl] = useState('');
     const [consumerKey, setConsumerKey] = useState('');
     const [consumerSecret, setConsumerSecret] = useState('');
-    const [connectionOk, setConnectionOk] = useState(false);
     const [showReview, setShowReview] = useState(false);
     const [reviewKey, setReviewKey] = useState(0);
 
@@ -121,14 +129,12 @@ const WooStockSyncCard: React.FC = () => {
 
         setConsumerKey('');
         setConsumerSecret('');
-        setConnectionOk(false);
         return 'Configuración guardada. Prueba la conexión.';
     });
 
     const handleTest = () => run('test', async () => {
         const result = await invokeFunction('test');
-        setConnectionOk(true);
-        return `Conexión correcta: la tienda tiene ${result.productos_en_tienda ?? 0} productos. No se modificó nada.`;
+        return `Conexión correcta${result.tienda ? ` con ${result.tienda}` : ''}: ${result.productos_en_tienda ?? 0} productos. No se modificó nada.`;
     });
 
     const handleScan = () => run('scan', async () => {
@@ -168,6 +174,7 @@ const WooStockSyncCard: React.FC = () => {
     const creds = health?.credentials ?? {};
     const configured = Boolean(creds.store_url && creds.consumer_key && creds.consumer_secret);
     const scanned = Boolean(health?.last_scan_at);
+    const connection = health?.connection ?? null;
     const button = 'py-3 px-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed';
 
     return (
@@ -188,7 +195,34 @@ const WooStockSyncCard: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <Step n={1} title="Conectar la tienda" done={configured && connectionOk}>
+                <Step n={1} title="Conectar la tienda" done={configured && Boolean(connection?.ok)}>
+                    {connection?.ok ? (
+                        <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3 space-y-1">
+                            <p className="text-sm font-black text-emerald-700">
+                                Conectado{connection.store_name ? ` a ${connection.store_name}` : ''}
+                            </p>
+                            <p className="text-xs text-emerald-800 font-medium break-all">{connection.store_url}</p>
+                            <p className="text-xs text-emerald-800 font-medium">
+                                {connection.consumer_key_suffix && <>Clave activa: <span className="font-mono">ck_…{connection.consumer_key_suffix}</span> · </>}
+                                {connection.products_count ?? 0} productos en la tienda
+                            </p>
+                            <p className="text-[11px] text-emerald-700/70 font-medium">
+                                Verificada el {new Date(connection.verified_at).toLocaleString('es-CL')}
+                            </p>
+                        </div>
+                    ) : connection && !connection.ok ? (
+                        <div className="rounded-xl bg-rose-50 border border-rose-100 p-3 space-y-1">
+                            <p className="text-sm font-black text-rose-700">Sin conexión</p>
+                            <p className="text-xs text-rose-700 font-medium break-words">{connection.error}</p>
+                            <p className="text-[11px] text-rose-700/70 font-medium">
+                                Última prueba: {new Date(connection.verified_at).toLocaleString('es-CL')}
+                            </p>
+                        </div>
+                    ) : configured ? (
+                        <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
+                            <p className="text-xs text-amber-700 font-bold">Claves guardadas sin verificar. Presiona "Probar conexión".</p>
+                        </div>
+                    ) : null}
                     <input
                         value={storeUrl}
                         onChange={(e) => setStoreUrl(e.target.value)}

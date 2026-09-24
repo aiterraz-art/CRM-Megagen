@@ -226,6 +226,9 @@ const handleScan = async (supabase: SupabaseClient, config: WooConfig) => {
   const { data, error } = await supabase.rpc("finalize_woo_catalog_snapshot", { p_scan_id: scanId });
   if (error) throw new Error(`No se pudo cerrar el escaneo: ${error.message}`);
 
+  // Un escaneo completo también demuestra que la conexión funciona.
+  await recordConnection(supabase, true, { storeName: await fetchStoreName(config), productsCount: products.length });
+
   log("escaneo terminado", { productos: products.length, variaciones: variations });
   return json({ ok: true, productos: products.length, variaciones: variations, ...(data ?? {}) });
 };
@@ -406,13 +409,46 @@ const isAdminRequest = async (req: Request) => {
 // Rutas
 // ---------------------------------------------------------------------------
 
-const handleTest = async (config: WooConfig) => {
-  assertStoreConfig(config);
-  const { headers } = await wooRequest(config, "GET", "products", { per_page: "1", status: "any" });
-  return json({
-    ok: true,
-    productos_en_tienda: Number(headers.get("x-wp-total") ?? 0),
+// El nombre del sitio sale del índice público de WordPress. Es un dato de
+// cortesía para reconocer la tienda: si no responde, la conexión sigue siendo
+// válida.
+const fetchStoreName = async (config: WooConfig) => {
+  try {
+    const response = await fetch(`${config.storeUrl}/wp-json/`, { headers: { accept: "application/json" } });
+    const payload = await response.json().catch(() => null);
+    return payload?.name ? String(payload.name) : null;
+  } catch {
+    return null;
+  }
+};
+
+const recordConnection = async (
+  supabase: SupabaseClient,
+  ok: boolean,
+  detail: { storeName?: string | null; productsCount?: number | null; error?: string } = {},
+) => {
+  const { error } = await supabase.rpc("record_woo_connection_status", {
+    p_ok: ok,
+    p_store_name: detail.storeName ?? null,
+    p_products_count: detail.productsCount ?? null,
+    p_error: detail.error ?? null,
   });
+  if (error) log("no se pudo registrar el estado de la conexión", { error: error.message });
+};
+
+const handleTest = async (supabase: SupabaseClient, config: WooConfig) => {
+  assertStoreConfig(config);
+  try {
+    const { headers } = await wooRequest(config, "GET", "products", { per_page: "1", status: "any" });
+    const productsCount = Number(headers.get("x-wp-total") ?? 0);
+    const storeName = await fetchStoreName(config);
+    await recordConnection(supabase, true, { storeName, productsCount });
+    return json({ ok: true, tienda: storeName, productos_en_tienda: productsCount });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordConnection(supabase, false, { error: message });
+    throw error;
+  }
 };
 
 const handleRun = async (supabase: SupabaseClient, config: WooConfig, fromDispatch: boolean) => {
@@ -462,7 +498,7 @@ serve(async (req) => {
     // solo puede enviar lo que ya está aprobado.
     if (task === "test" || task === "scan") {
       if (!fromAdmin) return json({ error: "forbidden" }, 403);
-      return task === "test" ? await handleTest(config) : await handleScan(supabase, config);
+      return task === "test" ? await handleTest(supabase, config) : await handleScan(supabase, config);
     }
 
     if (task === "run") {
