@@ -102,6 +102,14 @@ const WooStockSyncCard: React.FC = () => {
     const handleSave = () => run('save', async () => {
         const url = storeUrl.trim().replace(/\/+$/, '');
         if (!url.startsWith('https://')) throw new Error('La URL de la tienda debe comenzar con https://');
+        // WooCommerce entrega ambas claves juntas y es fácil pegar la misma
+        // dos veces; el prefijo distingue una de otra.
+        if (consumerKey.trim() && !consumerKey.trim().startsWith('ck_')) {
+            throw new Error('La Consumer Key debe comenzar con ck_');
+        }
+        if (consumerSecret.trim() && !consumerSecret.trim().startsWith('cs_')) {
+            throw new Error('El Consumer Secret debe comenzar con cs_ (parece que pegaste la Consumer Key).');
+        }
 
         await setCredential('store_url', url);
         if (consumerKey.trim()) await setCredential('consumer_key', consumerKey.trim());
