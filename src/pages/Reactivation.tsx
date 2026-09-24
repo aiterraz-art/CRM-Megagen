@@ -8,6 +8,7 @@ import KPICard from '../components/KPICard';
 import ReactivationAttemptModal from '../components/modals/ReactivationAttemptModal';
 import ReactivationDiscardModal from '../components/modals/ReactivationDiscardModal';
 import ReactivationConsole from '../components/ReactivationConsole';
+import TaskModal from '../components/TaskModal';
 import {
     SEGMENT_LABELS, SEGMENT_STYLES, STATUS_LABELS, formatDays, formatMoney,
     type ReactivationSegment, type ReactivationStatus
@@ -57,6 +58,7 @@ const Reactivation = () => {
     const [mainTab, setMainTab] = useState<'cases' | 'console'>('cases');
     const [attemptCase, setAttemptCase] = useState<CaseRow | null>(null);
     const [discardCase, setDiscardCase] = useState<CaseRow | null>(null);
+    const [taskCase, setTaskCase] = useState<CaseRow | null>(null);
 
     useEffect(() => {
         const temporizador = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
@@ -329,6 +331,13 @@ const Reactivation = () => {
                                                 Registrar intento
                                             </button>
                                             <button
+                                                onClick={() => setTaskCase(row)}
+                                                className="rounded-xl border border-gray-200 px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-600 transition-all hover:bg-gray-50"
+                                                title="Agendar seguimiento"
+                                            >
+                                                Agendar
+                                            </button>
+                                            <button
                                                 onClick={() => setDiscardCase(row)}
                                                 className="rounded-xl border border-gray-200 p-3 text-gray-400 transition-all hover:bg-rose-50 hover:text-rose-600"
                                                 title="Descartar caso"
@@ -377,6 +386,13 @@ const Reactivation = () => {
                 isOpen={Boolean(attemptCase)}
                 onClose={() => setAttemptCase(null)}
                 onSaved={() => void fetchCases()}
+            />
+
+            <TaskModal
+                isOpen={Boolean(taskCase)}
+                onClose={() => setTaskCase(null)}
+                onTaskAdded={() => void fetchCases()}
+                prefilledClientId={taskCase?.client_id}
             />
 
             <ReactivationDiscardModal

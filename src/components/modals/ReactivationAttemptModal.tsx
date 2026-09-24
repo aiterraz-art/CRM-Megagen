@@ -4,6 +4,7 @@ import { supabase } from '../../services/supabase';
 import { useUser } from '../../contexts/UserContext';
 import { logClientInteraction } from '../../utils/clientInteractions';
 import { clearPersistedModalDraft, loadPersistedModalDraft, savePersistedModalDraft } from '../../utils/modalDrafts';
+import { normalizeChileanPhone, renderTemplate } from '../../utils/messageTemplates';
 import {
     ATTEMPT_CHANNELS,
     ATTEMPT_OUTCOMES,
@@ -36,6 +37,10 @@ const ReactivationAttemptModal = ({ caseRow, isOpen, onClose, onSaved }: Props) 
     const [notes, setNotes] = useState('');
     const [nextActionAt, setNextActionAt] = useState('');
     const [saving, setSaving] = useState(false);
+    // Las plantillas son las mismas que administra el módulo de mensajes: aquí solo se
+    // filtran por canal y se usan para no partir de una hoja en blanco.
+    const [templates, setTemplates] = useState<any[]>([]);
+    const [templateId, setTemplateId] = useState('');
 
     const storageKey = caseRow ? `reactivation-attempt:${caseRow.id}` : '';
 
@@ -67,6 +72,50 @@ const ReactivationAttemptModal = ({ caseRow, isOpen, onClose, onSaved }: Props) 
         if (!isOpen || !storageKey) return;
         savePersistedModalDraft(storageKey, { channel, outcome, notes, nextActionAt }, true);
     }, [isOpen, storageKey, channel, outcome, notes, nextActionAt]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        void (async () => {
+            const { data } = await supabase
+                .from('lead_message_templates')
+                .select('id, name, channel, subject, body')
+                .eq('is_active', true)
+                .order('name');
+            setTemplates(data || []);
+        })();
+    }, [isOpen]);
+
+    const plantillasDelCanal = templates.filter((plantilla) => (
+        plantilla.channel === 'both' || plantilla.channel === (channel === 'email' ? 'email' : 'whatsapp')
+    ));
+
+    const aplicarPlantilla = (id: string) => {
+        setTemplateId(id);
+        const plantilla = templates.find((item) => item.id === id);
+        if (!plantilla || !caseRow) return;
+
+        // El cuerpo se deja en las notas para que el vendedor pueda ajustarlo antes de
+        // enviarlo, y para que quede registrado tal como se envió.
+        setNotes(renderTemplate(plantilla.body || '', {
+            clinic_name: caseRow.client_name,
+            doctor_name: '',
+            seller_name: profile?.full_name || profile?.email || '',
+            company_name: String(import.meta.env.VITE_COMPANY_NAME || ''),
+            client_phone: caseRow.client_phone || '',
+            client_email: caseRow.client_email || ''
+        }));
+    };
+
+    const enviarPorWhatsApp = () => {
+        if (!caseRow) return;
+        const telefono = normalizeChileanPhone(caseRow.client_phone);
+        if (!telefono) {
+            alert('Este cliente no tiene un teléfono válido registrado.');
+            return;
+        }
+        window.open(`https://wa.me/${telefono}?text=${encodeURIComponent(notes)}`, '_blank', 'noopener');
+    };
 
     if (!isOpen || !caseRow) return null;
 
@@ -183,6 +232,35 @@ const ReactivationAttemptModal = ({ caseRow, isOpen, onClose, onSaved }: Props) 
                             ))}
                         </div>
                     </div>
+
+                    {plantillasDelCanal.length > 0 && (channel === 'whatsapp' || channel === 'email') && (
+                        <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                                Plantilla
+                            </label>
+                            <div className="mt-2 flex gap-2">
+                                <select
+                                    value={templateId}
+                                    onChange={(event) => aplicarPlantilla(event.target.value)}
+                                    className="flex-1 p-4 bg-gray-50 focus:bg-white rounded-2xl font-bold text-gray-700 outline-none"
+                                >
+                                    <option value="">Sin plantilla</option>
+                                    {plantillasDelCanal.map((plantilla) => (
+                                        <option key={plantilla.id} value={plantilla.id}>{plantilla.name}</option>
+                                    ))}
+                                </select>
+                                {channel === 'whatsapp' && notes.trim() && (
+                                    <button
+                                        type="button"
+                                        onClick={enviarPorWhatsApp}
+                                        className="rounded-2xl bg-green-600 px-5 py-4 text-xs font-black uppercase tracking-widest text-white hover:bg-green-700"
+                                    >
+                                        Abrir
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     <div>
                         <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Notas</label>

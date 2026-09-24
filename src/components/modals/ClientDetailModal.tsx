@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, MapPin, Phone, Mail, Building2, FileText, ShoppingBag, Clock, FileSpreadsheet, Pencil, CalendarRange, CheckCircle2, AlertTriangle, Send, MessageCircle } from 'lucide-react';
+import { X, MapPin, Phone, Mail, Building2, FileText, ShoppingBag, Clock, FileSpreadsheet, Pencil, CalendarRange, CheckCircle2, AlertTriangle, Send, MessageCircle, HeartPulse } from 'lucide-react';
 import { supabase } from '../../services/supabase';
+import { ATTEMPT_CHANNELS, ATTEMPT_OUTCOMES } from '../../utils/reactivation';
 import { Database } from '../../types/supabase';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { useNavigate } from 'react-router-dom';
@@ -29,7 +30,16 @@ interface ClientDetailModalProps {
 }
 
 type ClientDetailTab = 'overview' | 'history' | 'visits' | 'quotations' | 'sent_quotations' | 'orders' | 'collections' | 'emails' | 'calls' | 'messages';
-type ClientHistoryKind = 'visit' | 'quotation' | 'order' | 'call' | 'email' | 'whatsapp';
+// Etiquetas en español de los catálogos del módulo de reactivación, indexadas para poder
+// traducir el canal y el resultado al pintar la línea de tiempo.
+const ATTEMPT_CHANNEL_LABELS: Record<string, string> = Object.fromEntries(
+    ATTEMPT_CHANNELS.map((opcion) => [opcion.value, opcion.label.toLowerCase()])
+);
+const ATTEMPT_OUTCOME_LABELS: Record<string, string> = Object.fromEntries(
+    ATTEMPT_OUTCOMES.map((opcion) => [opcion.value, opcion.label])
+);
+
+type ClientHistoryKind = 'visit' | 'quotation' | 'order' | 'call' | 'email' | 'whatsapp' | 'reactivation';
 type ClientHistoryItem = {
     id: string;
     kind: ClientHistoryKind;
@@ -80,6 +90,13 @@ const formatQuotationStatusLabel = (status: string | null | undefined) => {
 
 const getHistoryKindMeta = (kind: ClientHistoryKind) => {
     switch (kind) {
+        case 'reactivation':
+            return {
+                label: 'Reactivación',
+                icon: HeartPulse,
+                iconClassName: 'bg-rose-50 text-rose-600',
+                badgeClassName: 'bg-rose-50 text-rose-700'
+            };
         case 'visit':
             return {
                 label: 'Visita',
@@ -212,6 +229,10 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
             .select('id, folio, status, total_amount, created_at, comments')
             .eq('client_id', client.id)
             .order('created_at', { ascending: false });
+        const reactivationQuery = (supabase.from('client_reactivation_attempts') as any)
+            .select('id, channel, outcome, notes, created_at, user_id')
+            .eq('client_id', client.id)
+            .order('created_at', { ascending: false });
         let ordersQuery = supabase
             .from('orders')
             .select('id, folio, status, total_amount, created_at')
@@ -249,14 +270,18 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
             ordersResult,
             callsResult,
             emailsResult,
-            messagesResult
+            messagesResult,
+            reactivationResult
         ] = await Promise.all([
             visitsQuery,
             quotationsQuery,
             ordersQuery,
             callsQuery,
             emailsQuery,
-            messagesQuery
+            messagesQuery,
+            // Los intentos de reactivacion son parte de la historia del cliente: sin ellos
+            // el historial muestra que se le llamo, pero no por que ni con que resultado.
+            reactivationQuery
         ]);
 
         const warnings = [
@@ -265,7 +290,8 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
             ordersResult.error ? `Ventas: ${extractErrorMessage(ordersResult.error)}` : null,
             callsResult.error ? `Llamadas: ${extractErrorMessage(callsResult.error)}` : null,
             emailsResult.error ? `Correos: ${extractErrorMessage(emailsResult.error)}` : null,
-            messagesResult.error ? `WhatsApp: ${extractErrorMessage(messagesResult.error)}` : null
+            messagesResult.error ? `WhatsApp: ${extractErrorMessage(messagesResult.error)}` : null,
+            reactivationResult.error ? `Reactivación: ${extractErrorMessage(reactivationResult.error)}` : null
         ].filter((warning): warning is string => Boolean(warning));
 
         const visitsData = visitsResult.data || [];
@@ -274,12 +300,14 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
         const callsData = callsResult.data || [];
         const emailsData = emailsResult.data || [];
         const messagesData = messagesResult.data || [];
+        const reactivationData = reactivationResult.data || [];
 
         const actorNameMap = await fetchActorNameMap([
             ...visitsData.map((item: any) => item.sales_rep_id),
             ...callsData.map((item: any) => item.user_id),
             ...emailsData.map((item: any) => item.user_id),
-            ...messagesData.map((item: any) => item.user_id)
+            ...messagesData.map((item: any) => item.user_id),
+            ...reactivationData.map((item: any) => item.user_id)
         ]);
 
         const items = [
@@ -327,6 +355,15 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 subtitle: item.snippet || 'Sin detalle',
                 actor: item.user_id ? actorNameMap[item.user_id] || 'Usuario' : null,
                 status: 'Enviado'
+            }))),
+            ...(reactivationData.map((item: any) => ({
+                id: `reactivation-${item.id}`,
+                kind: 'reactivation' as const,
+                date: item.created_at,
+                title: `Intento de reactivación por ${ATTEMPT_CHANNEL_LABELS[item.channel] || item.channel}`,
+                subtitle: item.notes || ATTEMPT_OUTCOME_LABELS[item.outcome] || 'Sin detalle',
+                actor: item.user_id ? actorNameMap[item.user_id] || 'Usuario' : null,
+                status: ATTEMPT_OUTCOME_LABELS[item.outcome] || item.outcome
             }))),
             ...(messagesData.map((item: any) => ({
                 id: `whatsapp-${item.id}`,

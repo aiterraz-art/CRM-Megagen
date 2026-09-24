@@ -224,6 +224,7 @@ const Dashboard = () => {
     // Cartera sin trabajar: no es lo mismo que un cliente que se esta enfriando.
     const [neverContactedCount, setNeverContactedCount] = useState(0);
     const [dormantCount, setDormantCount] = useState(0);
+    const [reactivationSummary, setReactivationSummary] = useState({ open: 0, wonMonth: 0, wonAmount: 0 });
     const [selectedDate, setSelectedDate] = useState(new Date());
 
     // Tasks State
@@ -447,7 +448,8 @@ const Dashboard = () => {
                      */
                     const [
                         { data: followupSettingsRow },
-                        { data: activityRows, error: activityError }
+                        { data: activityRows, error: activityError },
+                        { data: reactivationRows }
                     ] = await Promise.all([
                         supabase
                             .from('client_followup_settings')
@@ -456,10 +458,26 @@ const Dashboard = () => {
                             .maybeSingle(),
                         supabase
                             .from('vw_client_last_activity')
-                            .select('client_id, last_visit_at, last_order_at, last_quotation_at, last_call_at, last_email_at, last_whatsapp_at, lifetime_amount')
+                            .select('client_id, last_visit_at, last_order_at, last_quotation_at, last_call_at, last_email_at, last_whatsapp_at, lifetime_amount'),
+                        supabase.rpc('search_reactivation_cases_paged', {
+                            p_actor_id: profile.id,
+                            p_view_all: false,
+                            p_status: 'open',
+                            p_segment: 'all',
+                            p_search: '',
+                            p_limit: 1,
+                            p_offset: 0
+                        } as any)
                     ]);
 
                     if (activityError) throw activityError;
+
+                    const resumenReactivacion = (reactivationRows || []) as any[];
+                    setReactivationSummary({
+                        open: Number(resumenReactivacion[0]?.open_count || 0),
+                        wonMonth: Number(resumenReactivacion[0]?.won_month_count || 0),
+                        wonAmount: Number(resumenReactivacion[0]?.won_month_amount || 0)
+                    });
 
                     const warningDays = Number(followupSettingsRow?.active_warning_days || 15);
                     const now = new Date();
@@ -1420,6 +1438,28 @@ const Dashboard = () => {
                 </div>
             </div>
 
+            {reactivationSummary.open > 0 && (
+                <div className="premium-card bg-gradient-to-r from-emerald-600 to-emerald-700 text-white p-6 shadow-xl shadow-emerald-100">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1 opacity-80">Tu trabajo de reactivación</p>
+                            <h3 className="text-xl font-black">
+                                {reactivationSummary.open} caso(s) abiertos
+                                {reactivationSummary.wonMonth > 0 && ` · ${reactivationSummary.wonMonth} recuperado(s) este mes`}
+                            </h3>
+                            {reactivationSummary.wonAmount > 0 && (
+                                <p className="text-sm font-medium opacity-90 mt-1">
+                                    ${Math.round(reactivationSummary.wonAmount).toLocaleString('es-CL')} en ventas recuperadas este mes.
+                                </p>
+                            )}
+                        </div>
+                        <Link to="/reactivation" className="bg-white text-emerald-700 px-6 py-3 rounded-xl font-bold text-sm hover:bg-emerald-50 transition-all whitespace-nowrap shadow-lg">
+                            Abrir bandeja
+                        </Link>
+                    </div>
+                </div>
+            )}
+
             {/* Clientes en riesgo de perderse, y cartera sin trabajar */}
             {(neglectedClients.length > 0 || neverContactedCount > 0) && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1441,8 +1481,8 @@ const Dashboard = () => {
                                         </p>
                                     )}
                                 </div>
-                                <Link to="/clients?filter=neglected" className="bg-white text-red-600 px-6 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-all flex items-center whitespace-nowrap shadow-lg">
-                                    Ver Lista
+                                <Link to="/reactivation" className="bg-white text-red-600 px-6 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-all flex items-center whitespace-nowrap shadow-lg">
+                                    Trabajarlos
                                 </Link>
                             </div>
                         </div>
@@ -1464,6 +1504,12 @@ const Dashboard = () => {
                             <p className="text-[11px] font-medium text-gray-400 mt-4 leading-tight">
                                 Son campañas de reactivación, no seguimiento del día a día.
                             </p>
+                            <Link
+                                to="/reactivation"
+                                className="mt-3 inline-block text-[11px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800"
+                            >
+                                Ir a Reactivación
+                            </Link>
                         </div>
                     )}
                 </div>
