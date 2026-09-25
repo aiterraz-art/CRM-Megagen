@@ -36,6 +36,7 @@ const Settings: React.FC = () => {
     const canAccessIntegrations = isAdmin || hasPermission('MANAGE_INTEGRATIONS');
     const canAccessClientFollowupSettings = isAdmin || hasPermission('MANAGE_SALES_FLOW');
     const canManageWebStore = isAdmin || hasPermission('MANAGE_WEB_STORE');
+    const canManageOrderNotifications = isAdmin || hasPermission('MANAGE_ORDER_NOTIFICATIONS');
     const canAccessSettings = canAccessUserAdmin || canAccessPermissionMatrix || canAccessIntegrations;
     const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'owner@company.com';
     const [users, setUsers] = useState<Profile[]>([]);
@@ -698,7 +699,7 @@ const Settings: React.FC = () => {
     useEffect(() => {
         if (activeTab === 'integrations') {
             fetchGoogleStatus();
-            fetchOrderNotificationSettings();
+            if (canManageOrderNotifications) fetchOrderNotificationSettings();
         }
         if (activeTab === 'clients') {
             fetchClientFollowupSettings();
@@ -1319,6 +1320,7 @@ const Settings: React.FC = () => {
                             </p>
                         </div>
 
+                        {canManageOrderNotifications && (
                         <div className="bg-white rounded-3xl border border-gray-100 p-8 shadow-sm hover:shadow-md transition-shadow">
                             <div className="flex items-center gap-4 mb-6">
                                 <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-bold text-2xl">
@@ -1455,6 +1457,7 @@ const Settings: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+                        )}
 
                         {canManageWebStore && <WooConnectionCard />}
                     </div>

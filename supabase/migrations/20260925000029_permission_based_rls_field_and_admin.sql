@@ -4,11 +4,13 @@
 --
 -- Permisos nuevos (misma asignacion que los roles tenian por nombre):
 --   VIEW_TEAM_ACTIVITY y MANAGE_TEAM_ACTIVITY: admin, jefe, facturador, tesorero.
+--   MANAGE_ORDER_NOTIFICATIONS: solo admin (destinatarios de los correos de pedidos).
 
 INSERT INTO public.role_permissions (role, permission)
 VALUES
     ('admin', 'VIEW_TEAM_ACTIVITY'), ('jefe', 'VIEW_TEAM_ACTIVITY'), ('facturador', 'VIEW_TEAM_ACTIVITY'), ('tesorero', 'VIEW_TEAM_ACTIVITY'),
-    ('admin', 'MANAGE_TEAM_ACTIVITY'), ('jefe', 'MANAGE_TEAM_ACTIVITY'), ('facturador', 'MANAGE_TEAM_ACTIVITY'), ('tesorero', 'MANAGE_TEAM_ACTIVITY')
+    ('admin', 'MANAGE_TEAM_ACTIVITY'), ('jefe', 'MANAGE_TEAM_ACTIVITY'), ('facturador', 'MANAGE_TEAM_ACTIVITY'), ('tesorero', 'MANAGE_TEAM_ACTIVITY'),
+    ('admin', 'MANAGE_ORDER_NOTIFICATIONS')
 ON CONFLICT (role, permission) DO NOTHING;
 
 DROP POLICY IF EXISTS "Visits select own or manager" ON public.visits;
@@ -181,8 +183,8 @@ ON public.order_notification_settings
 AS PERMISSIVE
 FOR ALL
 TO authenticated
-USING ((SELECT public.auth_user_has_permission('MANAGE_INTEGRATIONS')))
-WITH CHECK ((SELECT public.auth_user_has_permission('MANAGE_INTEGRATIONS')));
+USING ((SELECT public.auth_user_has_permission('MANAGE_ORDER_NOTIFICATIONS')))
+WITH CHECK ((SELECT public.auth_user_has_permission('MANAGE_ORDER_NOTIFICATIONS')));
 
 DROP POLICY IF EXISTS "Admins read order notification settings" ON public.order_notification_settings;
 CREATE POLICY "Admins read order notification settings"
@@ -190,7 +192,7 @@ ON public.order_notification_settings
 AS PERMISSIVE
 FOR SELECT
 TO authenticated
-USING ((SELECT public.auth_user_has_permission('MANAGE_INTEGRATIONS')));
+USING ((SELECT public.auth_user_has_permission('MANAGE_ORDER_NOTIFICATIONS')));
 
 DROP POLICY IF EXISTS "Push subscriptions select own or manager" ON public.push_subscriptions;
 CREATE POLICY "Push subscriptions select own or manager"

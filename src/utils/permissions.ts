@@ -160,6 +160,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
     // Administración
     { key: 'MANAGE_USERS', module: 'admin', label: 'Gestionar Usuarios', desc: 'Invitar usuarios y editar roles y estados de perfiles.' },
     { key: 'MANAGE_PERMISSIONS', module: 'admin', label: 'Matriz Permisos', desc: 'Configurar los accesos de cada rol y las excepciones por persona.' },
+    { key: 'MANAGE_ORDER_NOTIFICATIONS', module: 'admin', label: 'Configurar Correos de Pedidos', desc: 'Definir quién recibe los correos de pedidos al convertir cotizaciones.' },
     { key: 'MANAGE_INTEGRATIONS', module: 'admin', label: 'Gestionar Integraciones', desc: 'Configurar Google, correos de notificación e integraciones.' }
 ];
 
