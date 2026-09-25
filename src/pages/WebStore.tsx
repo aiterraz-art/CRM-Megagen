@@ -107,6 +107,11 @@ const WebStore: React.FC = () => {
     const configured = isWooConfigured(health);
     const connection = health?.connection ?? null;
     const connected = configured && Boolean(connection?.ok);
+    // Con claves guardadas pero sin una verificación registrada, la conexión
+    // puede estar perfectamente bien: solo nadie la ha probado todavía. No se
+    // presenta como caída, y el escaneo sirve de prueba porque la registra.
+    const unverified = configured && !connection;
+    const failed = configured && Boolean(connection) && !connection?.ok;
     const scanned = Boolean(health?.last_scan_at);
     const button = 'py-3 px-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed';
 
@@ -136,11 +141,24 @@ const WebStore: React.FC = () => {
                     )}
                     <Link to="/settings" className="ml-auto text-xs font-bold text-emerald-700 hover:underline">Cambiar conexión</Link>
                 </div>
+            ) : failed ? (
+                <div className="rounded-2xl bg-rose-50 border border-rose-100 px-5 py-4">
+                    <p className="text-sm font-black text-rose-700">La última prueba de conexión falló.</p>
+                    <p className="text-xs text-rose-700 font-medium mt-1 break-words">{connection?.error}</p>
+                    <p className="text-xs text-rose-700 font-medium mt-1">
+                        Revisa las claves en{' '}
+                        <Link to="/settings" className="font-bold underline">Configuración → Integraciones</Link>.
+                    </p>
+                </div>
+            ) : unverified ? (
+                <div className="rounded-2xl bg-slate-50 border border-slate-200 px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <p className="text-sm font-black text-slate-700">Conexión configurada, sin verificar</p>
+                    <p className="text-xs text-slate-500 font-medium break-all">{health?.store_url}</p>
+                    <Link to="/settings" className="ml-auto text-xs font-bold text-slate-600 hover:underline">Probar conexión</Link>
+                </div>
             ) : (
                 <div className="rounded-2xl bg-amber-50 border border-amber-100 px-5 py-4">
-                    <p className="text-sm font-black text-amber-700">
-                        {connection && !connection.ok ? 'La conexión con la tienda falló.' : 'La tienda aún no está conectada.'}
-                    </p>
+                    <p className="text-sm font-black text-amber-700">La tienda aún no está conectada.</p>
                     <p className="text-xs text-amber-700 font-medium mt-1">
                         Configura y prueba la conexión en{' '}
                         <Link to="/settings" className="font-bold underline">Configuración → Integraciones</Link>.
@@ -159,7 +177,7 @@ const WebStore: React.FC = () => {
                         </p>
                     )}
                     <div className="flex gap-2">
-                        <button onClick={handleScan} disabled={busy !== null || !connected} className={`${button} flex-1 border border-indigo-200 text-indigo-600 hover:bg-indigo-50`}>
+                        <button onClick={handleScan} disabled={busy !== null || !(connected || unverified)} className={`${button} flex-1 border border-indigo-200 text-indigo-600 hover:bg-indigo-50`}>
                             {busy === 'scan' ? 'Leyendo la tienda...' : scanned ? 'Volver a escanear' : 'Escanear tienda'}
                         </button>
                         <button onClick={() => setShowReview((v) => !v)} disabled={!scanned} className={`${button} flex-1 border border-slate-200 text-slate-700 hover:bg-slate-50`}>
