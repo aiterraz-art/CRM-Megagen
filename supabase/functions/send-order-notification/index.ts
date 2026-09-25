@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createSupabaseClients, getAuthenticatedUser, refreshGoogleAccessTokenForUser, sendRawGmailMessage, encodeUtf8Base64, bytesToBase64 } from "../_shared/google-oauth.ts";
+import { userHasPermission } from "../_shared/permissions.ts";
 
 const ORDER_NOTIFICATION_SENDER_EMAIL = (Deno.env.get("ORDER_NOTIFICATION_SENDER_EMAIL") ?? "").trim().toLowerCase();
 const PAYMENT_PROOFS_BUCKET = "payment-proofs";
@@ -25,10 +26,6 @@ type OrderNotificationSettings = {
 };
 
 const normalizeEmail = (value: string | null | undefined) => String(value || "").trim().toLowerCase();
-const isBillingBackofficeRole = (role: string | null | undefined) => {
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  return normalizedRole === "facturador" || normalizedRole === "tesorero";
-};
 
 const formatMoney = (value: number | null | undefined) => `$${Number(value || 0).toLocaleString("es-CL")}`;
 
@@ -163,8 +160,8 @@ serve(async (req) => {
       .single();
     if (orderError || !order) throw orderError || new Error("Order not found");
 
-    const actorRole = normalizeEmail(actorProfile.role).replace(/[^a-z_]/g, "") || String(actorProfile.role || "").trim().toLowerCase();
-    const isAllowedActor = order.user_id === authUser.id || actorRole === "admin" || isBillingBackofficeRole(actorRole);
+    const isAllowedActor = order.user_id === authUser.id
+      || await userHasPermission(serviceClient, authUser.id, "RESEND_ORDER_EMAIL");
     if (!isAllowedActor) {
       throw new Error("No tienes permisos para enviar este pedido a facturación");
     }

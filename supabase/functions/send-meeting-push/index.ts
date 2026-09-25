@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
+import { userHasPermission } from "../_shared/permissions.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
@@ -54,9 +55,8 @@ serve(async (req) => {
       throw new Error("Caller profile not found");
     }
 
-    const callerRole = String(callerProfile.role || "").trim().toLowerCase();
-    if (!["admin", "manager", "jefe"].includes(callerRole)) {
-      return new Response(JSON.stringify({ error: "Only admin or jefe can send meeting push" }), {
+    if (!await userHasPermission(serviceClient, callerProfile.id, "SEND_TEAM_PUSH")) {
+      return new Response(JSON.stringify({ error: "No tienes permiso para enviar avisos al equipo" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

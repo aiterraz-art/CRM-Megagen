@@ -6,6 +6,7 @@ import {
   refreshGoogleAccessTokenForUser,
   sendRawGmailMessage,
 } from "../_shared/google-oauth.ts";
+import { userHasPermission } from "../_shared/permissions.ts";
 
 const SIZE_CHANGE_NOTIFICATION_SENDER_EMAIL = (
   Deno.env.get("SIZE_CHANGE_NOTIFICATION_SENDER_EMAIL") ??
@@ -104,12 +105,9 @@ serve(async (req) => {
       .single();
     if (requestError || !request) throw requestError || new Error("Size change request not found");
 
-    const actorRole = String(actorProfile.role || "").trim().toLowerCase();
     const isAllowedActor = request.seller_id === authUser.id
       || request.created_by === authUser.id
-      || actorRole === "admin"
-      || actorRole === "facturador"
-      || actorRole === "tesorero";
+      || await userHasPermission(serviceClient, authUser.id, "MANAGE_SIZE_CHANGES");
     if (!isAllowedActor) {
       throw new Error("No tienes permisos para notificar este cambio de medida");
     }

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { usersWithPermission } from "../_shared/permissions.ts";
 import webpush from "npm:web-push@3.6.7";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -50,21 +51,15 @@ serve(async (req) => {
       });
     }
 
-    const [{ data: requester }, { data: quotation }, { data: managerRecipients, error: recipientsError }] = await Promise.all([
+    const [{ data: requester }, { data: quotation }, managerRecipientIds] = await Promise.all([
       supabase.from("profiles").select("full_name, email").eq("id", approval.requester_id).maybeSingle(),
       supabase
         .from("quotations")
         .select("folio, seller_id, seller_email_snapshot, seller_name_snapshot, clients(name)")
         .eq("id", approval.entity_id)
         .maybeSingle(),
-      supabase
-        .from("profiles")
-        .select("id")
-        .in("role", ["admin", "jefe"])
-        .eq("status", "active"),
+      usersWithPermission(supabase, "MANAGE_APPROVALS"),
     ]);
-
-    if (recipientsError) throw recipientsError;
 
     const quotationSellerId = (quotation as any)?.seller_id || null;
     const quotationSellerEmail = String((quotation as any)?.seller_email_snapshot || "").trim().toLowerCase();
@@ -80,7 +75,7 @@ serve(async (req) => {
     }
 
     const recipientIds = approval.status === "pending"
-      ? (managerRecipients || []).map((r) => r.id)
+      ? managerRecipientIds
       : (resolvedSellerRecipientId ? [resolvedSellerRecipientId] : (approval.requester_id ? [approval.requester_id] : []));
 
     if (recipientIds.length === 0) {

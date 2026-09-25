@@ -6,6 +6,7 @@ import {
   sendRawGmailMessage,
   encodeUtf8Base64,
 } from "../_shared/google-oauth.ts";
+import { userHasPermission } from "../_shared/permissions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -139,9 +140,7 @@ serve(async (req) => {
       .single();
     if (actorError || !actorProfile) throw actorError || new Error("Actor profile not found");
 
-    const normalizedRole = String(actorProfile.role || "").trim().toLowerCase();
-    const isAllowedActor = normalizedRole === "admin" || normalizedRole === "bodega";
-    if (!isAllowedActor) {
+    if (!await userHasPermission(serviceClient, actorId, "SEND_PURCHASE_ORDER_EMAIL")) {
       throw new Error("No tienes permisos para enviar órdenes de compra");
     }
 

@@ -19,6 +19,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createSupabaseClients, getAuthenticatedUser } from "../_shared/google-oauth.ts";
+import { userHasPermission } from "../_shared/permissions.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -398,8 +399,7 @@ const isAdminRequest = async (req: Request) => {
   try {
     const { userClient, serviceClient: service } = createSupabaseClients(authHeader);
     const user = await getAuthenticatedUser(userClient);
-    const { data } = await service.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    return String(data?.role ?? "").toLowerCase() === "admin";
+    return await userHasPermission(service, user.id, "MANAGE_WEB_STORE");
   } catch {
     return false;
   }
