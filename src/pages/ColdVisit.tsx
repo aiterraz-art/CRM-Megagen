@@ -5,7 +5,7 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { useVisit } from '../contexts/VisitContext';
 import { queueVisitCheckinLocation } from '../services/locationQueue';
-import { MapPin, Building2, ChevronRight, ClipboardList, ShoppingCart, Stethoscope, Users } from 'lucide-react';
+import { MapPin, Building2, ChevronRight, ClipboardList, ShoppingCart, Stethoscope, Users, Search, Lock, Plus } from 'lucide-react';
 import { saveClientWithDeduplication } from '../utils/clientDuplicates';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -23,6 +23,21 @@ type PendingColdVisitItem = {
     address: string | null;
     doctor_name: string | null;
 };
+
+type ExistingClientMatch = {
+    id: string;
+    name: string;
+    rut: string | null;
+    address: string | null;
+    comuna: string | null;
+    ownerName: string;
+    isMine: boolean;
+};
+
+const MIN_CLIENT_SEARCH_LENGTH = 2;
+
+// PostgREST separa condiciones de .or() con comas y parentesis: se quitan del termino.
+const sanitizeClientSearchTerm = (value: string) => value.replace(/[,()*%\\]/g, ' ').trim();
 
 const normalizeRole = (role: string | null | undefined) => (role || '').trim().toLowerCase();
 const isSellerLikeRole = (role: string | null | undefined) => {
@@ -87,6 +102,13 @@ const ColdVisit = () => {
     const [gpsReady, setGpsReady] = useState(false);
     const [pendingVisits, setPendingVisits] = useState<PendingColdVisitItem[]>([]);
     const [pendingLoading, setPendingLoading] = useState(true);
+    const [clientSearch, setClientSearch] = useState('');
+    const [debouncedClientSearch, setDebouncedClientSearch] = useState('');
+    const [clientMatches, setClientMatches] = useState<ExistingClientMatch[]>([]);
+    const [clientSearchLoading, setClientSearchLoading] = useState(false);
+    const [clientSearchError, setClientSearchError] = useState<string | null>(null);
+    // The cold visit form only appears once the seller confirms the clinic is not listed.
+    const [showColdVisitForm, setShowColdVisitForm] = useState(Boolean(initialDraft.clinicName));
 
     const isSellerSelfView = !hasPermission('VIEW_TEAM_STATS');
     const canViewAllTeamVisits = hasPermission('VIEW_ALL_TEAM_STATS');
@@ -113,6 +135,114 @@ const ColdVisit = () => {
         loadLocation();
         return () => { mounted = false; };
     }, []);
+
+    useEffect(() => {
+        const timeoutId = window.setTimeout(() => setDebouncedClientSearch(sanitizeClientSearchTerm(clientSearch)), 350);
+        return () => window.clearTimeout(timeoutId);
+    }, [clientSearch]);
+
+    // Busca en todas las carteras: las propias (y todas, con VIEW_ALL_CLIENTS) por RLS, y las
+    // de otros vendedores por search_clients_readonly, que solo expone datos basicos y el dueno.
+    useEffect(() => {
+        if (!profile?.id || debouncedClientSearch.length < MIN_CLIENT_SEARCH_LENGTH) {
+            setClientMatches([]);
+            setClientSearchError(null);
+            setClientSearchLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        const searchClients = async () => {
+            setClientSearchLoading(true);
+            setClientSearchError(null);
+            const pattern = `%${debouncedClientSearch}%`;
+
+            const [visibleResult, otherPortfoliosResult] = await Promise.all([
+                supabase
+                    .from('clients')
+                    .select('id, name, rut, address, comuna, created_by, pending_seller_email')
+                    .or(`name.ilike.${pattern},rut.ilike.${pattern}`)
+                    .order('name', { ascending: true })
+                    .limit(20),
+                supabase.rpc('search_clients_readonly', { p_search: debouncedClientSearch })
+            ]);
+            if (cancelled) return;
+
+            if (visibleResult.error) {
+                console.error('Error searching clients for cold visit:', visibleResult.error);
+                setClientSearchError('No se pudo buscar clientes. Intenta nuevamente.');
+                setClientMatches([]);
+                setClientSearchLoading(false);
+                return;
+            }
+            if (otherPortfoliosResult.error) {
+                console.warn('Error searching other portfolios for cold visit:', otherPortfoliosResult.error);
+            }
+
+            const visibleRows = (visibleResult.data || []) as any[];
+            const ownerIds = Array.from(new Set(
+                visibleRows.map((row) => row.created_by).filter((id): id is string => Boolean(id) && id !== profile.id)
+            ));
+            const ownerNames: Record<string, string> = {};
+            if (ownerIds.length > 0) {
+                const { data: owners } = await supabase.from('profiles').select('id, full_name, email').in('id', ownerIds);
+                if (cancelled) return;
+                (owners || []).forEach((owner: any) => {
+                    ownerNames[owner.id] = getSellerDisplayName(owner);
+                });
+            }
+
+            const matches = new Map<string, ExistingClientMatch>();
+            visibleRows.forEach((row) => {
+                const isMine = row.created_by === profile.id;
+                matches.set(row.id, {
+                    id: row.id,
+                    name: row.name,
+                    rut: row.rut || null,
+                    address: row.address || null,
+                    comuna: row.comuna || null,
+                    isMine,
+                    ownerName: isMine
+                        ? 'Tu cartera'
+                        : (row.created_by && ownerNames[row.created_by]) || row.pending_seller_email || (row.created_by ? 'Otro vendedor' : 'Sin vendedor asignado')
+                });
+            });
+            ((otherPortfoliosResult.data || []) as any[]).forEach((row) => {
+                if (matches.has(row.id)) return;
+                matches.set(row.id, {
+                    id: row.id,
+                    name: row.name,
+                    rut: row.rut || null,
+                    address: row.address || null,
+                    comuna: row.comuna || null,
+                    isMine: false,
+                    ownerName: row.seller_name || 'Otro vendedor'
+                });
+            });
+
+            setClientMatches(Array.from(matches.values()).sort((a, b) => Number(b.isMine) - Number(a.isMine) || a.name.localeCompare(b.name)));
+            setClientSearchLoading(false);
+        };
+
+        void searchClients();
+        return () => { cancelled = true; };
+    }, [debouncedClientSearch, profile?.id]);
+
+    const handleVisitExistingClient = (client: ExistingClientMatch) => {
+        if (!client.isMine) return;
+        if (activeVisit) {
+            alert('Ya tienes una visita en curso. Debes finalizarla antes de iniciar una nueva.');
+            if (activeVisit.client_id) navigate(`/visit/${activeVisit.client_id}`);
+            return;
+        }
+        localStorage.removeItem(COLD_VISIT_DRAFT_KEY);
+        navigate(`/visit/${client.id}`);
+    };
+
+    const openColdVisitForm = () => {
+        setShowColdVisitForm(true);
+        if (!clinicName.trim()) setClinicName(clientSearch.trim());
+    };
 
     useEffect(() => {
         localStorage.setItem(COLD_VISIT_DRAFT_KEY, JSON.stringify({
@@ -345,76 +475,150 @@ const ColdVisit = () => {
                     <Stethoscope size={32} />
                 </div>
                 <h1 className="text-3xl font-black text-gray-900 tracking-tight">Visita en Frío</h1>
-                <p className="text-gray-400 font-medium mt-2">Registra un nuevo prospecto y comienza la visita de inmediato.</p>
+                <p className="text-gray-400 font-medium mt-2">Busca primero si la clínica ya existe. Si no está, registra el prospecto y comienza la visita.</p>
             </div>
 
-            <div className="max-w-xl mx-auto">
-                <form onSubmit={handleStartColdVisit} className="premium-card p-8 space-y-6">
-
-                    {/* Clinic Name */}
-                    <div className="space-y-2">
-                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Nombre Clínica / Lugar</label>
-                        <div className="relative group">
-                            <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-blue-500 transition-colors" size={20} />
-                            <input
-                                type="text"
-                                value={clinicName}
-                                onChange={(e) => setClinicName(e.target.value)}
-                                className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-blue-50 focus:border-blue-100 outline-none transition-all placeholder:text-gray-300 placeholder:font-medium"
-                                placeholder="Ej. Clínica Dental Centro"
-                                required
-                            />
-                        </div>
+            <div className="max-w-xl mx-auto space-y-4">
+                <div className="premium-card p-6 space-y-2">
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Buscar cliente existente</label>
+                    <div className="relative group">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-blue-500 transition-colors" size={20} />
+                        <input
+                            type="text"
+                            value={clientSearch}
+                            onChange={(e) => setClientSearch(e.target.value)}
+                            className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-blue-50 focus:border-blue-100 outline-none transition-all placeholder:text-gray-300 placeholder:font-medium"
+                            placeholder="Nombre de la clínica o RUT"
+                        />
                     </div>
-
-                    {/* Address (Optional) */}
-                    <div className="space-y-2">
-                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Dirección (Opcional)</label>
-                        <div className="relative group">
-                            <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-blue-500 transition-colors" size={20} />
-                            <input
-                                type="text"
-                                value={address}
-                                onChange={(e) => setAddress(e.target.value)}
-                                className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-blue-50 focus:border-blue-100 outline-none transition-all placeholder:text-gray-300 placeholder:font-medium"
-                                placeholder="Ej. Av. Providencia 1234"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="pt-4">
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-blue-200 active:scale-95 transition-all flex items-center justify-center hover:bg-blue-700 disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                            {loading ? (
-                                <span className="flex items-center">
-                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
-                                    Creando...
-                                </span>
-                            ) : (
-                                <>
-                                    Iniciar Visita <ChevronRight className="ml-2" />
-                                </>
-                            )}
-                        </button>
-                    </div>
-
-                </form>
-
-                <div className="text-center mt-6">
-                    <p className="text-xs text-gray-400 font-medium">
-                        Se requiere GPS para iniciar visita en frío y registrar ubicación real.
-                    </p>
-                    <p className="text-[11px] text-gray-500 font-bold mt-2">
-                        Al finalizar la visita será obligatorio ingresar nombre del doctor y su especialidad.
-                    </p>
-                    <p className={`text-[10px] font-bold mt-1 flex items-center justify-center ${gpsReady ? 'text-green-500' : 'text-amber-500'}`}>
-                        <MapPin size={10} className="mr-1" /> {gpsReady ? 'GPS Activo' : 'GPS no disponible'}
-                    </p>
                 </div>
+
+                {debouncedClientSearch.length >= MIN_CLIENT_SEARCH_LENGTH && (
+                    <div className="premium-card overflow-hidden">
+                        {clientSearchLoading ? (
+                            <p className="p-6 text-center text-sm font-bold text-gray-400">Buscando...</p>
+                        ) : clientSearchError ? (
+                            <p className="p-6 text-center text-sm font-bold text-red-500">{clientSearchError}</p>
+                        ) : clientMatches.length === 0 ? (
+                            <p className="p-6 text-center text-sm font-bold text-gray-400">No hay clientes que coincidan.</p>
+                        ) : (
+                            <ul className="divide-y divide-gray-100">
+                                {clientMatches.map((client) => (
+                                    <li key={client.id} className="p-5 flex items-center justify-between gap-4">
+                                        <div className="min-w-0">
+                                            <p className="font-black text-gray-900 truncate">{client.name}</p>
+                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs font-bold text-gray-400">
+                                                {client.rut && <span>{client.rut}</span>}
+                                                {(client.comuna || client.address) && <span className="truncate">{client.comuna || client.address}</span>}
+                                            </div>
+                                            <span className={`inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${client.isMine ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                {client.isMine ? <Users size={11} /> : <Lock size={11} />}
+                                                {client.isMine ? 'Tu cartera' : `Pertenece a ${client.ownerName}`}
+                                            </span>
+                                        </div>
+                                        {client.isMine ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleVisitExistingClient(client)}
+                                                className="shrink-0 inline-flex items-center gap-1 px-4 py-3 rounded-2xl bg-blue-600 text-white text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all"
+                                            >
+                                                Iniciar visita <ChevronRight size={14} />
+                                            </button>
+                                        ) : (
+                                            <span className="shrink-0 px-3 py-2 rounded-2xl bg-gray-50 text-gray-400 text-[10px] font-black uppercase tracking-widest text-center">
+                                                No disponible
+                                            </span>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        {!clientSearchLoading && !showColdVisitForm && (
+                            <button
+                                type="button"
+                                onClick={openColdVisitForm}
+                                className="w-full p-5 border-t border-gray-100 flex items-center justify-center gap-2 text-sm font-black text-blue-600 hover:bg-blue-50 transition-all"
+                            >
+                                <Plus size={16} /> No está en el listado: registrar visita en frío
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {!showColdVisitForm && debouncedClientSearch.length < MIN_CLIENT_SEARCH_LENGTH && (
+                    <p className="text-center text-xs font-bold text-gray-400">Escribe al menos {MIN_CLIENT_SEARCH_LENGTH} caracteres para buscar.</p>
+                )}
             </div>
+
+            {showColdVisitForm && (
+                <div className="max-w-xl mx-auto">
+                    <form onSubmit={handleStartColdVisit} className="premium-card p-8 space-y-6">
+
+                        {/* Clinic Name */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Nombre Clínica / Lugar</label>
+                            <div className="relative group">
+                                <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-blue-500 transition-colors" size={20} />
+                                <input
+                                    type="text"
+                                    value={clinicName}
+                                    onChange={(e) => setClinicName(e.target.value)}
+                                    className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-blue-50 focus:border-blue-100 outline-none transition-all placeholder:text-gray-300 placeholder:font-medium"
+                                    placeholder="Ej. Clínica Dental Centro"
+                                    required
+                                />
+                            </div>
+                        </div>
+
+                        {/* Address (Optional) */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-1">Dirección (Opcional)</label>
+                            <div className="relative group">
+                                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-blue-500 transition-colors" size={20} />
+                                <input
+                                    type="text"
+                                    value={address}
+                                    onChange={(e) => setAddress(e.target.value)}
+                                    className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-blue-50 focus:border-blue-100 outline-none transition-all placeholder:text-gray-300 placeholder:font-medium"
+                                    placeholder="Ej. Av. Providencia 1234"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="pt-4">
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-blue-200 active:scale-95 transition-all flex items-center justify-center hover:bg-blue-700 disabled:opacity-70 disabled:cursor-not-allowed"
+                            >
+                                {loading ? (
+                                    <span className="flex items-center">
+                                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                                        Creando...
+                                    </span>
+                                ) : (
+                                    <>
+                                        Iniciar Visita <ChevronRight className="ml-2" />
+                                    </>
+                                )}
+                            </button>
+                        </div>
+
+                    </form>
+
+                    <div className="text-center mt-6">
+                        <p className="text-xs text-gray-400 font-medium">
+                            Se requiere GPS para iniciar visita en frío y registrar ubicación real.
+                        </p>
+                        <p className="text-[11px] text-gray-500 font-bold mt-2">
+                            Al finalizar la visita será obligatorio ingresar nombre del doctor y su especialidad.
+                        </p>
+                        <p className={`text-[10px] font-bold mt-1 flex items-center justify-center ${gpsReady ? 'text-green-500' : 'text-amber-500'}`}>
+                            <MapPin size={10} className="mr-1" /> {gpsReady ? 'GPS Activo' : 'GPS no disponible'}
+                        </p>
+                    </div>
+                </div>
+            )}
 
             <section className="space-y-5">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
