@@ -265,12 +265,12 @@ const ShipmentProgressTrack: React.FC<{ shipment: ShipmentRow }> = ({ shipment }
 const Procurement: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { profile, hasPermission, effectiveRole } = useUser();
+    const { profile, hasPermission } = useUser();
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
     const canRequestProducts = hasPermission('REQUEST_PRODUCTS');
     const canManageProcurement = hasPermission('MANAGE_PROCUREMENT');
-    const isAdmin = effectiveRole === 'admin';
-    const canViewStockAnalytics = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canReceiveImports = hasPermission('RECEIVE_IMPORTS');
+    const canViewStockAnalytics = hasPermission('VIEW_INVENTORY_ANALYTICS');
 
     const [activeTab, setActiveTab] = useState<ProcurementTab>('shipments');
     const [loading, setLoading] = useState(true);
@@ -987,7 +987,7 @@ const Procurement: React.FC = () => {
     };
 
     const handleMarkShipmentReceived = async (shipment: ShipmentRow) => {
-        if (!isAdmin) return;
+        if (!canReceiveImports) return;
 
         const confirmed = window.confirm(`¿Marcar ${shipment.supplier_name} como importación recibida?`);
         if (!confirmed) return;
@@ -1509,7 +1509,7 @@ const Procurement: React.FC = () => {
                                                         <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-black uppercase tracking-wide ${SHIPMENT_STATUS_STYLES[shipment.status as ShipmentStatus]}`}>
                                                             {SHIPMENT_STATUS_LABELS[shipment.status as ShipmentStatus]}
                                                         </span>
-                                                        {isAdmin && shipment.status !== 'received' && shipment.status !== 'in_warehouse' && (
+                                                        {canReceiveImports && shipment.status !== 'received' && shipment.status !== 'in_warehouse' && (
                                                             <button
                                                                 type="button"
                                                                 onClick={(event) => {

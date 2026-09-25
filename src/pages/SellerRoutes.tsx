@@ -81,7 +81,7 @@ const pointDescription = (point: RoutePoint) => {
 };
 
 const SellerRoutes = () => {
-    const { isSupervisor, effectiveRole } = useUser();
+    const { hasPermission } = useUser();
     const [users, setUsers] = useState<Array<{ id: string; email: string | null; full_name: string | null }>>([]);
     const [selectedUser, setSelectedUser] = useState<string>('');
     const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -211,7 +211,7 @@ const SellerRoutes = () => {
         return `Historial (${points.length}) · Q:${quotations} IN:${checkins} OUT:${checkouts}`;
     }, [points]);
 
-    if (effectiveRole === 'seller' || !isSupervisor) return <Navigate to="/" />;
+    if (!hasPermission('VIEW_TEAM_STATS')) return <Navigate to="/" />;
     if (!apiKey) return <div className="p-8">Missing Google Maps API Key</div>;
 
     return (

@@ -7,6 +7,7 @@ import { googleService } from './services/googleService';
 import { Session } from '@supabase/supabase-js';
 import { UserProvider } from './contexts/UserContext';
 import { useUser } from './contexts/UserContext';
+import { isBillingBackofficeRole } from './utils/permissions';
 import { VisitProvider } from './contexts/VisitContext';
 import { startLocationQueueWorker } from './services/locationQueue';
 import { lazyRetry } from './utils/lazyRetry';
@@ -61,9 +62,6 @@ const ScreenLoader = () => (
 
 const LAST_APP_ROUTE_KEY = 'crm_last_app_route';
 
-const isBillingBackofficeRole = (role: string | null | undefined) =>
-    role === 'facturador' || role === 'tesorero';
-
 const DashboardWrapper = () => {
     const { effectiveRole } = useUser();
     if (effectiveRole === 'driver') return <DriverDashboard />;
@@ -72,41 +70,9 @@ const DashboardWrapper = () => {
     return <Dashboard />;
 };
 
-const NonSellerGuard = ({ children }: { children: JSX.Element }) => {
-    const { effectiveRole, loading } = useUser();
-    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
-    if (effectiveRole === 'seller') return <Navigate to="/" replace />;
-    return children;
-};
-
-const NonFacturadorGuard = ({ children }: { children: JSX.Element }) => {
-    const { effectiveRole, loading } = useUser();
-    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
-    if (isBillingBackofficeRole(effectiveRole)) return <Navigate to="/" replace />;
-    return children;
-};
-
-const LeadModuleGuard = ({ children }: { children: JSX.Element }) => {
-    const { effectiveRole, loading } = useUser();
-    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
-    if (!(effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'seller')) {
-        return <Navigate to="/" replace />;
-    }
-    return children;
-};
-
-const MetaLeadsGuard = ({ children }: { children: JSX.Element }) => {
-    const { effectiveRole, loading } = useUser();
-    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
-    if (!(effectiveRole === 'admin' || effectiveRole === 'seller')) {
-        return <Navigate to="/" replace />;
-    }
-    return children;
-};
-
 const PermissionGuard = ({ permission, children }: { permission: string; children: JSX.Element }) => {
-    const { hasPermission, loading } = useUser();
-    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
+    const { hasPermission, loading, permissionsLoading } = useUser();
+    if (loading || permissionsLoading) return <div className="p-10 text-center">Cargando perfil...</div>;
     if (!hasPermission(permission)) {
         return <Navigate to="/" replace />;
     }
@@ -114,8 +80,8 @@ const PermissionGuard = ({ permission, children }: { permission: string; childre
 };
 
 const AnyPermissionGuard = ({ permissions, children }: { permissions: string[]; children: JSX.Element }) => {
-    const { hasPermission, loading } = useUser();
-    if (loading) return <div className="p-10 text-center">Cargando perfil...</div>;
+    const { hasPermission, loading, permissionsLoading } = useUser();
+    if (loading || permissionsLoading) return <div className="p-10 text-center">Cargando perfil...</div>;
     if (!permissions.some((permission) => hasPermission(permission))) {
         return <Navigate to="/" replace />;
     }
@@ -225,37 +191,37 @@ const AppRoutesWithRecovery = ({ session }: { session: Session | null }) => {
                         </AuthGuard>
                     ) : <Navigate to="/login" />}>
                         <Route index element={<RoleBasedDashboard />} />
-                        <Route path="cold-visit" element={<NonFacturadorGuard><ColdVisit /></NonFacturadorGuard>} />
-                        <Route path="map" element={<NonFacturadorGuard><MapView /></NonFacturadorGuard>} />
+                        <Route path="cold-visit" element={<PermissionGuard permission="VIEW_VISITS"><ColdVisit /></PermissionGuard>} />
+                        <Route path="map" element={<PermissionGuard permission="VIEW_MAP"><MapView /></PermissionGuard>} />
                         <Route path="visit/:clientId" element={<VisitLog />} />
-                        <Route path="visits" element={<NonFacturadorGuard><VisitHistory /></NonFacturadorGuard>} />
-                        <Route path="schedule" element={<Schedule />} />
-                        <Route path="clients" element={<Clients />} />
-                        <Route path="quotations" element={<Quotations />} />
-                        <Route path="quotations/:quotationId/order-proof" element={<QuotationOrderProof />} />
+                        <Route path="visits" element={<PermissionGuard permission="VIEW_VISITS"><VisitHistory /></PermissionGuard>} />
+                        <Route path="schedule" element={<PermissionGuard permission="VIEW_SCHEDULE"><Schedule /></PermissionGuard>} />
+                        <Route path="clients" element={<PermissionGuard permission="VIEW_CLIENTS"><Clients /></PermissionGuard>} />
+                        <Route path="quotations" element={<PermissionGuard permission="VIEW_QUOTATIONS"><Quotations /></PermissionGuard>} />
+                        <Route path="quotations/:quotationId/order-proof" element={<PermissionGuard permission="VIEW_QUOTATIONS"><QuotationOrderProof /></PermissionGuard>} />
                         <Route path="size-changes" element={<PermissionGuard permission="VIEW_SIZE_CHANGES"><SizeChanges /></PermissionGuard>} />
                         <Route path="orders" element={<Orders />} />
                         <Route path="conversions" element={<ConversionsRanking />} />
                         <Route path="reactivation" element={<AnyPermissionGuard permissions={['VIEW_REACTIVATION', 'MANAGE_REACTIVATION']}><Reactivation /></AnyPermissionGuard>} />
-                        <Route path="routes" element={<NonFacturadorGuard><SellerRoutes /></NonFacturadorGuard>} />
-                        <Route path="inventory" element={<Inventory />} />
+                        <Route path="routes" element={<PermissionGuard permission="VIEW_TEAM_STATS"><SellerRoutes /></PermissionGuard>} />
+                        <Route path="inventory" element={<PermissionGuard permission="VIEW_INVENTORY"><Inventory /></PermissionGuard>} />
                         <Route path="procurement" element={<PermissionGuard permission="VIEW_PROCUREMENT"><Procurement /></PermissionGuard>} />
-                        <Route path="web-store" element={<WebStore />} />
+                        <Route path="web-store" element={<PermissionGuard permission="MANAGE_WEB_STORE"><WebStore /></PermissionGuard>} />
                         <Route path="purchase-orders" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
                         <Route path="suppliers" element={<PermissionGuard permission="VIEW_PURCHASE_ORDERS"><PurchaseOrders /></PermissionGuard>} />
                         <Route path="supplier-payables" element={<AnyPermissionGuard permissions={['VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES']}><SupplierPayables /></AnyPermissionGuard>} />
                         <Route path="kit-loans" element={<PermissionGuard permission="VIEW_KIT_LOANS"><KitLoans /></PermissionGuard>} />
-                        <Route path="team" element={<NonFacturadorGuard><NonSellerGuard><TeamStats /></NonSellerGuard></NonFacturadorGuard>} />
-                        <Route path="pipeline" element={<NonFacturadorGuard><Pipeline /></NonFacturadorGuard>} />
-                        <Route path="lead-pipeline" element={<LeadModuleGuard><LeadPipeline /></LeadModuleGuard>} />
-                        <Route path="meta-leads" element={<MetaLeadsGuard><MetaLeads /></MetaLeadsGuard>} />
-                        <Route path="lead-messages" element={<LeadModuleGuard><LeadMessages /></LeadModuleGuard>} />
-                        <Route path="dispatch" element={<Dispatch />} />
-                        <Route path="delivery" element={<DeliveryRoute />} />
-                        <Route path="delivery/:orderId/proof" element={<DeliveryProofCapture />} />
-                        <Route path="my-deliveries" element={<MyDeliveries />} />
-                        <Route path="operations" element={<OperationsCenter />} />
-                        <Route path="collections" element={<Collections />} />
+                        <Route path="team" element={<PermissionGuard permission="VIEW_TEAM_STATS"><TeamStats /></PermissionGuard>} />
+                        <Route path="pipeline" element={<PermissionGuard permission="VIEW_PIPELINE"><Pipeline /></PermissionGuard>} />
+                        <Route path="lead-pipeline" element={<PermissionGuard permission="VIEW_LEADS"><LeadPipeline /></PermissionGuard>} />
+                        <Route path="meta-leads" element={<PermissionGuard permission="VIEW_META_LEADS"><MetaLeads /></PermissionGuard>} />
+                        <Route path="lead-messages" element={<PermissionGuard permission="VIEW_LEADS"><LeadMessages /></PermissionGuard>} />
+                        <Route path="dispatch" element={<PermissionGuard permission="MANAGE_DISPATCH"><Dispatch /></PermissionGuard>} />
+                        <Route path="delivery" element={<PermissionGuard permission="EXECUTE_DELIVERY"><DeliveryRoute /></PermissionGuard>} />
+                        <Route path="delivery/:orderId/proof" element={<PermissionGuard permission="EXECUTE_DELIVERY"><DeliveryProofCapture /></PermissionGuard>} />
+                        <Route path="my-deliveries" element={<PermissionGuard permission="VIEW_DELIVERY_STATUS"><MyDeliveries /></PermissionGuard>} />
+                        <Route path="operations" element={<PermissionGuard permission="VIEW_OPERATIONS"><OperationsCenter /></PermissionGuard>} />
+                        <Route path="collections" element={<PermissionGuard permission="VIEW_COLLECTIONS"><Collections /></PermissionGuard>} />
                         <Route path="settings" element={<Settings />} />
                     </Route>
 

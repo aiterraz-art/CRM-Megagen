@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx';
 import { grossToNet } from '../utils/amounts';
 
 const TeamStats = () => {
-    const { hasPermission, loading: userLoading, profile: currentUser, effectiveRole } = useUser();
+    const { hasPermission, loading: userLoading, profile: currentUser } = useUser();
     const [teamData, setTeamData] = useState<any[]>([]);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [stats, setStats] = useState({
@@ -35,8 +35,7 @@ const TeamStats = () => {
     const [exportSellerId, setExportSellerId] = useState<'all' | string>('all');
     const [exporting, setExporting] = useState(false);
     const [cleaningLeads, setCleaningLeads] = useState(false);
-    const normalizedCurrentRole = (effectiveRole || '').toLowerCase();
-    const canCleanGhostLeads = normalizedCurrentRole === 'admin' || normalizedCurrentRole === 'jefe' || normalizedCurrentRole === 'manager';
+    const canCleanGhostLeads = hasPermission('ARCHIVE_CLIENTS');
 
     const handleOpenGoalModal = async (rep: any) => {
         setSelectedRep(rep);
@@ -114,7 +113,7 @@ const TeamStats = () => {
         const goalYear = monthStart.getFullYear();
 
         let query = supabase.from('profiles').select('*');
-        const canViewAllTeam = normalizedCurrentRole === 'admin' || normalizedCurrentRole === 'jefe';
+        const canViewAllTeam = hasPermission('VIEW_ALL_TEAM_STATS');
 
         if (!canViewAllTeam) {
             query = query.eq('supervisor_id', currentUser!.id);

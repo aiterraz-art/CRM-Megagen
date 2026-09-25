@@ -27,8 +27,8 @@ type Attachment = {
 };
 
 const LeadMessages = () => {
-    const { effectiveRole } = useUser();
-    const canManage = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const { hasPermission } = useUser();
+    const canManage = hasPermission('MANAGE_LEAD_TEMPLATES');
 
     const [loading, setLoading] = useState(true);
     const [templates, setTemplates] = useState<Template[]>([]);

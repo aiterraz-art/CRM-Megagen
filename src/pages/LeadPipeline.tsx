@@ -75,7 +75,7 @@ const isMetaLead = (notes: string | null) => {
 };
 
 const LeadPipeline = () => {
-    const { profile, effectiveRole } = useUser();
+    const { profile, hasPermission } = useUser();
     const [loading, setLoading] = useState(true);
     const [leads, setLeads] = useState<LeadClient[]>([]);
     const [profiles, setProfiles] = useState<Array<{ id: string; full_name: string | null; email: string | null }>>([]);
@@ -94,7 +94,7 @@ const LeadPipeline = () => {
     const [selectedTemplateByLead, setSelectedTemplateByLead] = useState<Record<string, string>>({});
     const [previewOpenByLead, setPreviewOpenByLead] = useState<Record<string, boolean>>({});
 
-    const canViewAll = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canViewAll = hasPermission('VIEW_ALL_LEADS');
 
     const sellerName = useMemo(() => {
         return profile?.full_name || profile?.email?.split('@')[0] || 'Asesor Comercial';

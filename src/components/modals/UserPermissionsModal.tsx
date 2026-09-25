@@ -3,6 +3,7 @@ import { CheckCircle, Ban, Search, Shield, X } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import {
     PERMISSION_CATALOG,
+    PERMISSION_MODULES,
     type PermissionOverrideEffect,
     fetchRolePermissionRows,
     fetchUserPermissionOverrides,
@@ -144,10 +145,16 @@ const UserPermissionsModal = ({ user, isOpen, onClose }: Props) => {
                             />
                         </div>
 
-                        <div className="flex-1 overflow-y-auto -mx-2 px-2 divide-y divide-gray-100">
+                        <div className="flex-1 overflow-y-auto -mx-2 px-2">
                             {loading ? (
                                 <p className="p-10 text-center text-gray-400 font-bold uppercase tracking-widest animate-pulse">Cargando...</p>
-                            ) : visiblePermissions.map((permission) => {
+                            ) : PERMISSION_MODULES.map((module) => {
+                                const modulePermissions = visiblePermissions.filter((permission) => permission.module === module.id);
+                                if (modulePermissions.length === 0) return null;
+                                return (
+                                    <div key={module.id} className="divide-y divide-gray-100">
+                                        <p className="pt-6 pb-2 text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600">{module.label}</p>
+                                        {modulePermissions.map((permission) => {
                                 const choice = choices[permission.key] || 'role';
                                 const fromRole = rolePermissions.includes(permission.key);
                                 const effective = choice === 'role' ? fromRole : choice === 'grant';
@@ -186,6 +193,9 @@ const UserPermissionsModal = ({ user, isOpen, onClose }: Props) => {
                                                 );
                                             })}
                                         </div>
+                                    </div>
+                                );
+                                        })}
                                     </div>
                                 );
                             })}

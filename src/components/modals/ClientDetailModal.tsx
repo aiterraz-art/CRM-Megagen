@@ -154,7 +154,7 @@ const extractErrorMessage = (error: unknown) => {
 
 const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailModalProps) => {
     const navigate = useNavigate();
-    const { profile, effectiveRole } = useUser();
+    const { profile, hasPermission } = useUser();
     const [activeTab, setActiveTab] = useState<ClientDetailTab>('overview');
     const [stats, setStats] = useState({
         totalVisits: 0,
@@ -189,7 +189,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const mySellerEmail = normalizeCollectionSellerEmail(profile?.email);
 
     const canViewCollectionRow = (row: any) => {
-        if (effectiveRole !== 'seller') return true;
+        if (hasPermission('VIEW_ALL_COLLECTIONS')) return true;
         const sellerId = row?.seller_id || null;
         const sellerEmail = normalizeCollectionSellerEmail(row?.seller_email);
         return (profile?.id && sellerId === profile.id) || (mySellerEmail && sellerEmail === mySellerEmail);

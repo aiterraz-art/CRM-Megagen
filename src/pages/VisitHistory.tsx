@@ -270,7 +270,7 @@ const LiveDuration = ({ start }: { start: string }) => {
 
 const VisitHistory = () => {
     const navigate = useNavigate();
-    const { profile, isSupervisor, effectiveRole, hasPermission } = useUser();
+    const { profile, effectiveRole, hasPermission } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [visits, setVisits] = useState<VisitHistoryItem[]>([]);
     const [sellerOptions, setSellerOptions] = useState<SellerOption[]>([]);
@@ -280,21 +280,10 @@ const VisitHistory = () => {
     const [filters, setFilters] = useState<VisitFilters>(() => parseFiltersFromSearchParams(searchParams));
     const [selectedVisit, setSelectedVisit] = useState<VisitHistoryItem | null>(null);
 
-    const isSellerSelfView = effectiveRole === 'seller';
-    const canViewAllTeamVisits = effectiveRole === 'admin'
-        || effectiveRole === 'jefe'
-        || hasPermission('VIEW_ALL_TEAM_STATS');
-    const canViewVisitSummary = effectiveRole === 'admin'
-        || effectiveRole === 'jefe'
-        || effectiveRole === 'seller'
-        || isSupervisor
-        || hasPermission('VIEW_TEAM_STATS')
-        || canViewAllTeamVisits;
-    const canConvertColdVisitToSale = effectiveRole === 'seller'
-        || effectiveRole === 'admin'
-        || effectiveRole === 'jefe'
-        || hasPermission('MANAGE_CLIENTS')
-        || hasPermission('VIEW_ALL_CLIENTS');
+    const isSellerSelfView = !hasPermission('VIEW_TEAM_STATS');
+    const canViewAllTeamVisits = hasPermission('VIEW_ALL_TEAM_STATS');
+    const canViewVisitSummary = hasPermission('VIEW_VISITS') || hasPermission('VIEW_TEAM_STATS');
+    const canConvertColdVisitToSale = hasPermission('CONVERT_COLD_VISITS');
 
     useEffect(() => {
         const nextFilters = parseFiltersFromSearchParams(searchParams);

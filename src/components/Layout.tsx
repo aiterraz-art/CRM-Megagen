@@ -17,15 +17,7 @@ interface LayoutProps {
 type MenuGroupId = 'comercial' | 'prospection' | 'procurement' | 'logistics' | 'management';
 
 type MenuContext = {
-    effectiveRole: string | null | undefined;
-    isSupervisor: boolean;
-    canViewProcurement: boolean;
-    canViewPurchaseOrders: boolean;
-    canViewSupplierPayables: boolean;
-    canViewKitLoans: boolean;
-    canViewSizeChanges: boolean;
-    canViewReactivation: boolean;
-    canManageAccess: boolean;
+    can: (permission: string) => boolean;
 };
 
 type MenuEntry = {
@@ -42,9 +34,6 @@ type MenuGroup = {
     id: MenuGroupId;
     label: string;
 };
-
-const isBillingBackofficeRole = (role: string | null | undefined) =>
-    role === 'facturador' || role === 'tesorero';
 
 const menuGroups: MenuGroup[] = [
     { id: 'comercial', label: 'Comercial' },
@@ -71,7 +60,7 @@ const allMenuEntries: MenuEntry[] = [
         icon: <Settings size={20} />,
         group: null,
         isPinned: true,
-        visibleWhen: ({ effectiveRole, canManageAccess }) => (effectiveRole === 'facturador' || effectiveRole === 'tesorero') && !canManageAccess,
+        visibleWhen: ({ can }) => can('MANAGE_INTEGRATIONS') && !can('MANAGE_USERS') && !can('MANAGE_PERMISSIONS'),
     },
     {
         id: 'schedule',
@@ -80,7 +69,7 @@ const allMenuEntries: MenuEntry[] = [
         icon: <Calendar size={20} />,
         group: null,
         isPinned: true,
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_SCHEDULE'),
     },
     {
         id: 'clients',
@@ -88,7 +77,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/clients',
         icon: <Users size={20} />,
         group: 'comercial',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_CLIENTS'),
     },
     {
         id: 'quotations',
@@ -96,7 +85,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/quotations',
         icon: <ShoppingBag size={20} />,
         group: 'comercial',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_QUOTATIONS'),
     },
     {
         id: 'size-changes',
@@ -104,7 +93,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/size-changes',
         icon: <RefreshCw size={20} />,
         group: 'comercial',
-        visibleWhen: ({ effectiveRole, canViewSizeChanges }) => effectiveRole !== 'driver' && canViewSizeChanges,
+        visibleWhen: ({ can }) => can('VIEW_SIZE_CHANGES'),
     },
     {
         id: 'orders',
@@ -128,7 +117,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/reactivation',
         icon: <HeartPulse size={20} />,
         group: 'comercial',
-        visibleWhen: ({ effectiveRole, canViewReactivation }) => effectiveRole !== 'driver' && canViewReactivation,
+        visibleWhen: ({ can }) => can('VIEW_REACTIVATION') || can('MANAGE_REACTIVATION'),
     },
     {
         id: 'collections',
@@ -136,7 +125,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/collections',
         icon: <CircleDollarSign size={20} />,
         group: 'comercial',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_COLLECTIONS'),
     },
     {
         id: 'cold-visit',
@@ -144,7 +133,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/cold-visit',
         icon: <Stethoscope size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_VISITS'),
     },
     {
         id: 'map',
@@ -152,7 +141,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/map',
         icon: <MapIcon size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_MAP'),
     },
     {
         id: 'visits',
@@ -160,7 +149,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/visits',
         icon: <ClipboardList size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_VISITS'),
     },
     {
         id: 'pipeline',
@@ -168,7 +157,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/pipeline',
         icon: <LayoutDashboard size={20} className="rotate-90" />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_PIPELINE'),
     },
     {
         id: 'lead-pipeline',
@@ -176,7 +165,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/lead-pipeline',
         icon: <Target size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_LEADS'),
     },
     {
         id: 'meta-leads',
@@ -184,7 +173,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/meta-leads',
         icon: <Megaphone size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'seller',
+        visibleWhen: ({ can }) => can('VIEW_META_LEADS'),
     },
     {
         id: 'lead-messages',
@@ -192,7 +181,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/lead-messages',
         icon: <MessageSquare size={20} />,
         group: 'prospection',
-        visibleWhen: ({ effectiveRole }) => !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_LEADS'),
     },
     {
         id: 'inventory',
@@ -200,7 +189,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/inventory',
         icon: <Package size={20} />,
         group: 'procurement',
-        visibleWhen: ({ effectiveRole }) => effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_INVENTORY'),
     },
     {
         id: 'procurement',
@@ -208,7 +197,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/procurement',
         icon: <ShipWheel size={20} />,
         group: 'procurement',
-        visibleWhen: ({ effectiveRole, canViewProcurement }) => effectiveRole !== 'driver' && canViewProcurement,
+        visibleWhen: ({ can }) => can('VIEW_PROCUREMENT'),
     },
     {
         id: 'dispatch',
@@ -216,7 +205,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/dispatch',
         icon: <Truck size={20} />,
         group: 'logistics',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole),
+        visibleWhen: ({ can }) => can('MANAGE_DISPATCH'),
     },
     {
         id: 'purchase-orders',
@@ -224,7 +213,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/purchase-orders',
         icon: <ShoppingBag size={20} />,
         group: 'procurement',
-        visibleWhen: ({ canViewPurchaseOrders }) => canViewPurchaseOrders,
+        visibleWhen: ({ can }) => can('VIEW_PURCHASE_ORDERS') || can('MANAGE_PURCHASE_ORDERS'),
     },
     {
         id: 'suppliers',
@@ -232,7 +221,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/suppliers',
         icon: <Users size={20} />,
         group: 'procurement',
-        visibleWhen: ({ canViewPurchaseOrders }) => canViewPurchaseOrders,
+        visibleWhen: ({ can }) => can('VIEW_PURCHASE_ORDERS') || can('MANAGE_PURCHASE_ORDERS'),
     },
     {
         id: 'web-store',
@@ -240,7 +229,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/web-store',
         icon: <Globe size={20} />,
         group: 'procurement',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin',
+        visibleWhen: ({ can }) => can('MANAGE_WEB_STORE'),
     },
     {
         id: 'kit-loans',
@@ -248,7 +237,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/kit-loans',
         icon: <Package size={20} />,
         group: 'logistics',
-        visibleWhen: ({ effectiveRole, canViewKitLoans }) => effectiveRole !== 'driver' && canViewKitLoans,
+        visibleWhen: ({ can }) => can('VIEW_KIT_LOANS'),
     },
     {
         id: 'delivery',
@@ -256,7 +245,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/delivery',
         icon: <Truck size={20} />,
         group: 'logistics',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'driver',
+        visibleWhen: ({ can }) => can('EXECUTE_DELIVERY'),
     },
     {
         id: 'routes',
@@ -264,7 +253,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/routes',
         icon: <MapIcon size={20} className="text-indigo-400" />,
         group: 'logistics',
-        visibleWhen: ({ effectiveRole, isSupervisor }) => isSupervisor && effectiveRole !== 'seller' && !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_TEAM_STATS'),
     },
     {
         id: 'my-deliveries',
@@ -272,7 +261,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/my-deliveries',
         icon: <Truck size={20} />,
         group: 'logistics',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'seller',
+        visibleWhen: ({ can }) => can('VIEW_DELIVERY_STATUS'),
     },
     {
         id: 'operations',
@@ -280,7 +269,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/operations',
         icon: <ActivitySquare size={20} />,
         group: 'management',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin' || effectiveRole === 'jefe',
+        visibleWhen: ({ can }) => can('VIEW_OPERATIONS'),
     },
     {
         id: 'team',
@@ -288,7 +277,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/team',
         icon: <ShieldCheck size={20} />,
         group: 'management',
-        visibleWhen: ({ effectiveRole, isSupervisor }) => isSupervisor && effectiveRole !== 'seller' && !isBillingBackofficeRole(effectiveRole) && effectiveRole !== 'driver',
+        visibleWhen: ({ can }) => can('VIEW_TEAM_STATS'),
     },
     {
         id: 'settings',
@@ -296,7 +285,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/settings',
         icon: <Settings size={20} />,
         group: 'management',
-        visibleWhen: ({ effectiveRole, canManageAccess }) => effectiveRole === 'admin' || canManageAccess,
+        visibleWhen: ({ can }) => can('MANAGE_USERS') || can('MANAGE_PERMISSIONS'),
     },
     {
         id: 'supplier-payables',
@@ -304,42 +293,25 @@ const allMenuEntries: MenuEntry[] = [
         path: '/supplier-payables',
         icon: <CircleDollarSign size={20} />,
         group: 'management',
-        visibleWhen: ({ canViewSupplierPayables }) => canViewSupplierPayables,
+        visibleWhen: ({ can }) => can('VIEW_SUPPLIER_PAYABLES') || can('MANAGE_SUPPLIER_PAYABLES'),
     },
 ];
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { profile, isSupervisor, effectiveRole, realRole, simulatedRole, setSimulatedRole, hasPermission } = useUser();
+    const { profile, effectiveRole, realRole, simulatedRole, setSimulatedRole, permissions } = useUser();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [openGroupId, setOpenGroupId] = useState<MenuGroupId | null>(null);
     const [pendingLostReasonCount, setPendingLostReasonCount] = useState(0);
     const [showLostReasonAlert, setShowLostReasonAlert] = useState(false);
     const [lostReasonAlertAcknowledged, setLostReasonAlertAcknowledged] = useState(false);
-    const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
-    const canViewPurchaseOrders = hasPermission('VIEW_PURCHASE_ORDERS') || hasPermission('MANAGE_PURCHASE_ORDERS');
-    const canManageAccess = hasPermission('MANAGE_USERS') || hasPermission('MANAGE_PERMISSIONS');
-    const canViewSupplierPayables = hasPermission('VIEW_SUPPLIER_PAYABLES') || hasPermission('MANAGE_SUPPLIER_PAYABLES');
-    const canViewKitLoans = hasPermission('VIEW_KIT_LOANS');
-    const canViewSizeChanges = hasPermission('VIEW_SIZE_CHANGES');
-    const canViewReactivation = hasPermission('VIEW_REACTIVATION') || hasPermission('MANAGE_REACTIVATION');
     const shouldTrackPendingLostReasons = realRole === 'seller' && effectiveRole === 'seller' && Boolean(profile?.id);
 
-    const menuContext = useMemo(
-        () => ({
-            effectiveRole,
-            isSupervisor,
-            canViewProcurement,
-            canViewPurchaseOrders,
-            canViewSupplierPayables,
-            canViewKitLoans,
-            canViewSizeChanges,
-            canViewReactivation,
-            canManageAccess,
-        }),
-        [effectiveRole, isSupervisor, canViewProcurement, canViewPurchaseOrders, canViewSupplierPayables, canViewKitLoans, canViewSizeChanges, canViewReactivation, canManageAccess]
-    );
+    const menuContext = useMemo<MenuContext>(() => {
+        const granted = new Set(permissions);
+        return { can: (permission) => granted.has(permission) };
+    }, [permissions]);
 
     const visibleMenuEntries = useMemo(
         () => allMenuEntries.filter((entry) => entry.visibleWhen(menuContext)),

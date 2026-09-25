@@ -10,6 +10,7 @@ import { Database } from '../types/supabase';
 import {
     ASSIGNABLE_ROLES,
     PERMISSION_CATALOG,
+    PERMISSION_MODULES,
     buildRolePermissionMatrix,
     fetchRolePermissionRows,
     normalizeRole
@@ -27,14 +28,14 @@ type QuotationSellerRow = Database['public']['Tables']['quotation_sellers']['Row
 
 const Settings: React.FC = () => {
     const { profile, effectiveRole, hasPermission } = useUser();
-    const isBillingBackoffice = effectiveRole === 'facturador' || effectiveRole === 'tesorero';
-    const canManageGlobalSettings = effectiveRole === 'admin';
     // El admin se evalua por rol porque siempre tiene todos los permisos y asi no depende
     // de que la carga asincrona de permisos haya terminado al elegir la pestana inicial.
-    const canAccessUserAdmin = canManageGlobalSettings || hasPermission('MANAGE_USERS');
-    const canAccessPermissionMatrix = canManageGlobalSettings || hasPermission('MANAGE_PERMISSIONS');
-    const canAccessIntegrations = canManageGlobalSettings || isBillingBackoffice;
-    const canAccessClientFollowupSettings = canManageGlobalSettings;
+    const isAdmin = effectiveRole === 'admin';
+    const canAccessUserAdmin = isAdmin || hasPermission('MANAGE_USERS');
+    const canAccessPermissionMatrix = isAdmin || hasPermission('MANAGE_PERMISSIONS');
+    const canAccessIntegrations = isAdmin || hasPermission('MANAGE_INTEGRATIONS');
+    const canAccessClientFollowupSettings = isAdmin || hasPermission('MANAGE_SALES_FLOW');
+    const canManageWebStore = isAdmin || hasPermission('MANAGE_WEB_STORE');
     const canAccessSettings = canAccessUserAdmin || canAccessPermissionMatrix || canAccessIntegrations;
     const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'owner@company.com';
     const [users, setUsers] = useState<Profile[]>([]);
@@ -753,7 +754,7 @@ const Settings: React.FC = () => {
                 <div>
                     <h2 className="text-4xl font-black text-gray-900 tracking-tight">Configuración Global</h2>
                     <p className="text-gray-400 font-medium mt-1 text-lg">
-                        {canManageGlobalSettings
+                        {canAccessUserAdmin
                             ? 'Control maestro de accesos y permisos'
                             : 'Integraciones operativas para correo, Google y órdenes de compra'}
                     </p>
@@ -1097,7 +1098,12 @@ const Settings: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {permissionList.map(perm => (
+                                {PERMISSION_MODULES.map(module => (
+                                    <React.Fragment key={module.id}>
+                                    <tr>
+                                        <td colSpan={roles.length + 1} className="px-6 pt-8 pb-2 text-xs font-black uppercase tracking-[0.2em] text-indigo-600">{module.label}</td>
+                                    </tr>
+                                {permissionList.filter(perm => perm.module === module.id).map(perm => (
                                     <tr key={perm.key} className="group hover:bg-gray-50/50 transition-colors">
                                         <td className="p-6">
                                             <p className="font-black text-gray-800 text-sm leading-none">{perm.label}</p>
@@ -1121,6 +1127,8 @@ const Settings: React.FC = () => {
                                             );
                                         })}
                                     </tr>
+                                ))}
+                                    </React.Fragment>
                                 ))}
                             </tbody>
                         </table>
@@ -1448,7 +1456,7 @@ const Settings: React.FC = () => {
                             </div>
                         </div>
 
-                        {canManageGlobalSettings && <WooConnectionCard />}
+                        {canManageWebStore && <WooConnectionCard />}
                     </div>
                 </div>
             )

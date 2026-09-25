@@ -75,7 +75,7 @@ const reverseGeocodeAddress = async (lat: number, lng: number): Promise<string |
 
 const ColdVisit = () => {
     const navigate = useNavigate();
-    const { profile, effectiveRole, hasPermission, isSupervisor } = useUser();
+    const { profile, hasPermission } = useUser();
     const { startVisit, activeVisit } = useVisit();
     const initialDraft = loadColdVisitDraft();
 
@@ -88,16 +88,9 @@ const ColdVisit = () => {
     const [pendingVisits, setPendingVisits] = useState<PendingColdVisitItem[]>([]);
     const [pendingLoading, setPendingLoading] = useState(true);
 
-    const isSellerSelfView = effectiveRole === 'seller';
-    const canViewAllTeamVisits = effectiveRole === 'admin'
-        || effectiveRole === 'jefe'
-        || hasPermission('VIEW_ALL_TEAM_STATS');
-    const canViewVisitSummary = effectiveRole === 'admin'
-        || effectiveRole === 'jefe'
-        || effectiveRole === 'seller'
-        || isSupervisor
-        || hasPermission('VIEW_TEAM_STATS')
-        || canViewAllTeamVisits;
+    const isSellerSelfView = !hasPermission('VIEW_TEAM_STATS');
+    const canViewAllTeamVisits = hasPermission('VIEW_ALL_TEAM_STATS');
+    const canViewVisitSummary = hasPermission('VIEW_VISITS') || hasPermission('VIEW_TEAM_STATS');
 
     // Get location on mount
     useEffect(() => {
@@ -230,7 +223,7 @@ const ColdVisit = () => {
         };
 
         void fetchPendingColdVisits();
-    }, [profile?.id, effectiveRole, hasPermission, isSupervisor, canViewAllTeamVisits, canViewVisitSummary, isSellerSelfView]);
+    }, [profile?.id, hasPermission, canViewAllTeamVisits, canViewVisitSummary, isSellerSelfView]);
 
     const openColdVisitList = (visit?: PendingColdVisitItem) => {
         const params = new URLSearchParams();

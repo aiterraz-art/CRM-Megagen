@@ -26,8 +26,8 @@ const Step: React.FC<{ n: number; title: string; done: boolean; children: React.
 );
 
 const WebStore: React.FC = () => {
-    const { effectiveRole } = useUser();
-    const isAdmin = effectiveRole === 'admin';
+    const { hasPermission } = useUser();
+    const isAdmin = hasPermission('MANAGE_WEB_STORE');
 
     const [health, setHealth] = useState<WooHealth | null>(null);
     const [busy, setBusy] = useState<BusyKind | null>(null);

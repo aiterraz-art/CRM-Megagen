@@ -298,9 +298,6 @@ const OrderFlowPills: React.FC<{ row: OrderFlowSnapshot & { status?: string | nu
     );
 };
 
-const isBillingBackofficeRole = (role: string | null | undefined) =>
-    role === 'facturador' || role === 'tesorero';
-
 const routeStatusLabel = (status: string) => {
     const normalized = normalizeText(status).toLowerCase();
     if (normalized === 'completed') return 'Completada';
@@ -365,8 +362,8 @@ const parseRpcValidationErrors = (error: any): DispatchImportError[] | null => {
 };
 
 const Dispatch: React.FC = () => {
-    const { effectiveRole, hasPermission } = useUser();
-    const canManageDispatch = hasPermission('MANAGE_DISPATCH') || effectiveRole === 'admin' || isBillingBackofficeRole(effectiveRole);
+    const { hasPermission } = useUser();
+    const canManageDispatch = hasPermission('MANAGE_DISPATCH');
 
     const [activeTab, setActiveTab] = useState<DispatchTab>('queue');
     const [loading, setLoading] = useState(true);

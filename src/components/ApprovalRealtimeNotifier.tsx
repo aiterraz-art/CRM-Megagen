@@ -14,11 +14,11 @@ type ApprovalToast = {
 
 export default function ApprovalRealtimeNotifier() {
     const navigate = useNavigate();
-    const { profile, realRole } = useUser();
+    const { profile, realRole, hasPermission } = useUser();
     const [toasts, setToasts] = useState<ApprovalToast[]>([]);
     const seenIdsRef = useRef<Set<string>>(new Set());
 
-    const canReceivePendingRequests = realRole === 'admin' || realRole === 'jefe';
+    const canReceivePendingRequests = hasPermission('MANAGE_APPROVALS');
     const canReceiveDiscountResolution = realRole === 'seller';
     const canReceive = canReceivePendingRequests || canReceiveDiscountResolution;
 
@@ -141,7 +141,7 @@ export default function ApprovalRealtimeNotifier() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [canReceive, navigate, profile?.id]);
+    }, [canReceive, canReceivePendingRequests, navigate, profile?.id]);
 
     useEffect(() => {
         if (toasts.length === 0) return;

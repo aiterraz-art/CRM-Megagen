@@ -85,7 +85,7 @@ type LostReasonDialogState = {
 };
 
 const Pipeline = () => {
-    const { profile, effectiveRole } = useUser();
+    const { profile, effectiveRole, hasPermission } = useUser();
     const [quotations, setQuotations] = useState<Quotation[]>([]);
     const [loading, setLoading] = useState(true);
     const [fetchError, setFetchError] = useState<string | null>(null);
@@ -100,11 +100,11 @@ const Pipeline = () => {
     const [savingLostReason, setSavingLostReason] = useState(false);
     const [selectedLostPreview, setSelectedLostPreview] = useState<any | null>(null);
     const [loadingLostPreviewId, setLoadingLostPreviewId] = useState<string | null>(null);
-    const canViewAllPipeline = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canViewAllPipeline = hasPermission('VIEW_ALL_TEAM_STATS');
 
     useEffect(() => {
         fetchPipeline();
-    }, [profile?.id, effectiveRole]);
+    }, [profile?.id, effectiveRole, canViewAllPipeline]);
 
     const fetchPipeline = async () => {
         try {

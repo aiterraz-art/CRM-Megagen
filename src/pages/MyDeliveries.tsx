@@ -43,7 +43,7 @@ type ProfileRow = {
 const OFFICE_LOCATION = { lat: -33.3768, lng: -70.6725 };
 
 const StatusContent: React.FC = () => {
-    const { profile, effectiveRole } = useUser();
+    const { profile, hasPermission } = useUser();
     const [orders, setOrders] = useState<OrderRow[]>([]);
     const [routeItems, setRouteItems] = useState<RouteItemRow[]>([]);
     const [loading, setLoading] = useState(true);
@@ -202,7 +202,7 @@ const StatusContent: React.FC = () => {
         })();
     }, [routesLibrary, orders]);
 
-    if (effectiveRole !== 'seller' && effectiveRole !== 'admin' && effectiveRole !== 'jefe') {
+    if (!hasPermission('VIEW_DELIVERY_STATUS')) {
         return <div className="p-8 font-bold text-gray-500">Acceso denegado.</div>;
     }
 

@@ -54,16 +54,16 @@ const createEmptyNewProduct = () => ({
 
 const Inventory = () => {
     const navigate = useNavigate();
-    const { hasPermission, effectiveRole, profile } = useUser();
-    const isSellerReadOnly = effectiveRole === 'seller';
-    const canViewAnalytics = effectiveRole === 'admin' || effectiveRole === 'jefe';
-    const canManageInventory = !isSellerReadOnly && hasPermission('MANAGE_INVENTORY');
-    const canManagePricing = !isSellerReadOnly && hasPermission('MANAGE_PRICING');
-    const canManageStocklessOrders = effectiveRole === 'admin' || effectiveRole === 'bodega';
+    const { hasPermission, profile } = useUser();
+    const canViewInventoryValue = hasPermission('VIEW_INVENTORY_VALUE');
+    const canViewAnalytics = hasPermission('VIEW_INVENTORY_ANALYTICS');
+    const canManageInventory = hasPermission('MANAGE_INVENTORY');
+    const canManagePricing = hasPermission('MANAGE_PRICING');
+    const canManageStocklessOrders = hasPermission('MANAGE_STOCKLESS_SALES');
     const canManageStockControls = canManageInventory && canViewAnalytics;
-    const canUploadInventory = !isSellerReadOnly && hasPermission('UPLOAD_EXCEL');
+    const canUploadInventory = hasPermission('UPLOAD_EXCEL');
     const canRequestProducts = hasPermission('REQUEST_PRODUCTS');
-    const canDownloadCatalog = effectiveRole === 'admin' || effectiveRole === 'jefe';
+    const canDownloadCatalog = hasPermission('DOWNLOAD_CATALOG');
     const canShowActions = canManageInventory || canRequestProducts;
 
     const [items, setItems] = useState<InventoryItem[]>([]);
@@ -1545,9 +1545,9 @@ const Inventory = () => {
                 <div className="premium-card border-l-4 border-l-emerald-500 p-6">
                     <div className="flex items-start justify-between">
                         <div>
-                            <p className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-400">{isSellerReadOnly ? 'Unidades Totales' : 'Valor Inventario'}</p>
+                            <p className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-400">{!canViewInventoryValue ? 'Unidades Totales' : 'Valor Inventario'}</p>
                             <h3 className="text-3xl font-black text-gray-900">
-                                {isSellerReadOnly
+                                {!canViewInventoryValue
                                     ? `${totalUnits.toLocaleString()} uds`
                                     : `$${items.reduce((accumulator, item) => accumulator + (item.price || 0) * (item.stock_qty || 0), 0).toLocaleString()}`}
                             </h3>
@@ -1563,7 +1563,7 @@ const Inventory = () => {
                 <div>
                     <h2 className="mb-1 text-3xl font-extrabold text-gray-900">Gestión de Inventario</h2>
                     <p className="font-medium text-gray-400">
-                        {isSellerReadOnly
+                        {!canViewInventoryValue
                             ? 'Consulta de stock disponible por producto'
                             : 'Control de stock, rotación y trazabilidad de inventario'}
                     </p>
@@ -1728,7 +1728,7 @@ const Inventory = () => {
                                         <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Producto</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-gray-400">SKU</th>
                                         <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-gray-400">Stock</th>
-                                        {!isSellerReadOnly && <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-gray-400">Precio</th>}
+                                        {canViewInventoryValue && <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-gray-400">Precio</th>}
                                         {canViewAnalytics && <th className="px-6 py-4 text-center text-[10px] font-black uppercase tracking-widest text-gray-400">Mínimo</th>}
                                         {canShowActions && <th className="px-6 py-4 text-right text-[10px] font-black uppercase tracking-widest text-gray-400">Acciones</th>}
                                     </tr>
@@ -1761,7 +1761,7 @@ const Inventory = () => {
                                                     {item.is_service_item ? 'Sin control' : `${item.stock_qty} uds`}
                                                 </span>
                                             </td>
-                                            {!isSellerReadOnly && (
+                                            {canViewInventoryValue && (
                                                 <td className="px-6 py-5 text-center text-sm font-bold text-gray-900">
                                                     {canManagePricing && editingPriceId === item.id ? (
                                                         <div className="flex items-center justify-center gap-2">

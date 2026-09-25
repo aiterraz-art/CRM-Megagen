@@ -94,7 +94,7 @@ const normalizePhoneForStorage = (value: string) => {
 };
 
 const MetaLeads = () => {
-    const { profile, effectiveRole, hasPermission } = useUser();
+    const { profile, hasPermission } = useUser();
     const [loading, setLoading] = useState(true);
     const [assigningId, setAssigningId] = useState<string | null>(null);
     const [importing, setImporting] = useState(false);
@@ -103,7 +103,7 @@ const MetaLeads = () => {
     const [selectedSellerByLead, setSelectedSellerByLead] = useState<Record<string, string>>({});
     const csvInputRef = useRef<HTMLInputElement>(null);
 
-    const canImport = effectiveRole === 'admin' || effectiveRole === 'jefe' || hasPermission('IMPORT_CLIENTS');
+    const canImport = hasPermission('IMPORT_CLIENTS');
 
     const fetchMetaLeads = async () => {
         setLoading(true);

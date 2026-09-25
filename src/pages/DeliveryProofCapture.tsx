@@ -46,7 +46,7 @@ const loadDraft = (): DeliveryProofDraft | null => {
 const DeliveryProofCapture = () => {
     const navigate = useNavigate();
     const { orderId } = useParams<{ orderId: string }>();
-    const { profile, effectiveRole, hasPermission } = useUser();
+    const { profile, hasPermission } = useUser();
 
     const [order, setOrder] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
@@ -60,7 +60,7 @@ const DeliveryProofCapture = () => {
     const [deliveryGpsStatus, setDeliveryGpsStatus] = useState<'idle' | 'searching' | 'ready' | 'error'>('idle');
 
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
-    const canAccess = effectiveRole === 'driver' || hasPermission('EXECUTE_DELIVERY');
+    const canAccess = hasPermission('EXECUTE_DELIVERY');
     const isAndroidDevice = useMemo(() => {
         if (typeof navigator === 'undefined') return false;
         return /Android/i.test(navigator.userAgent || '');

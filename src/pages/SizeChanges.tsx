@@ -56,7 +56,7 @@ const buildActorName = (profile?: ProfileRow | null) => {
 };
 
 const SizeChanges: React.FC = () => {
-    const { profile, effectiveRole, hasPermission } = useUser();
+    const { profile, hasPermission } = useUser();
     const canViewSizeChanges = hasPermission('VIEW_SIZE_CHANGES');
     const canCreateSizeChanges = hasPermission('CREATE_SIZE_CHANGES');
     const canManageSizeChanges = hasPermission('MANAGE_SIZE_CHANGES');
@@ -343,16 +343,15 @@ const SizeChanges: React.FC = () => {
 
     const canEditRequest = (request: EnrichedRequest) => {
         if (request.status !== 'requested') return false;
-        if (effectiveRole === 'admin') return true;
-        if (effectiveRole === 'jefe') return true;
-        return effectiveRole === 'seller' && request.seller_id === profile?.id;
+        if (canManageSizeChanges) return true;
+        return canCreateSizeChanges && request.seller_id === profile?.id;
     };
 
     const canMarkSentRequest = (request: EnrichedRequest) => canManageSizeChanges && request.status === 'requested';
     const canCloseRequest = (request: EnrichedRequest) => canManageSizeChanges && request.status === 'sent';
     const canCancelRequest = (request: EnrichedRequest) => {
-        if (effectiveRole === 'seller') return request.seller_id === profile?.id && request.status === 'requested';
-        return canManageSizeChanges && (request.status === 'requested' || request.status === 'sent');
+        if (canManageSizeChanges) return request.status === 'requested' || request.status === 'sent';
+        return canCreateSizeChanges && request.seller_id === profile?.id && request.status === 'requested';
     };
 
     const handleSubmitForm = async (payload: {
@@ -671,7 +670,7 @@ const SizeChanges: React.FC = () => {
                 inventory={inventory}
                 sellerOptions={sellerOptions}
                 currentUserProfile={profile as ProfileRow | null}
-                effectiveRole={effectiveRole}
+                canChooseSeller={canManageSizeChanges && canCreateSizeChanges}
                 initialDraftState={formDraftState}
                 initialRequest={editingRequest ? {
                     clientId: editingRequest.client_id,

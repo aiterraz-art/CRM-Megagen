@@ -36,6 +36,8 @@ interface UserContextType {
     canViewMetas: boolean;
     hasPermission: (permission: string) => boolean;
     permissions: string[];
+    /** true mientras se resuelven los permisos; las guardas de ruta deben esperar. */
+    permissionsLoading: boolean;
     simulatedRole: string | null;
     setSimulatedRole: (role: string | null) => void;
 }
@@ -47,6 +49,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
     const [impersonatedUser, setImpersonatedUser] = useState<Profile | null>(null);
     const [permissions, setPermissions] = useState<string[]>([]);
+    const [permissionsLoading, setPermissionsLoading] = useState(true);
     const [simulatedRole, setSimulatedRole] = useState<string | null>(null);
     // Identifica al usuario cuyo perfil ya esta cargado, para no repetir la carga
     // ante eventos de sesion que no cambian de usuario.
@@ -175,6 +178,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (!role) {
             setPermissions([]);
+            setPermissionsLoading(false);
             return;
         }
 
@@ -186,12 +190,14 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (isOwnerSession && !isViewingAsSomeoneElse) {
             setPermissions(getDefaultPermissions('admin'));
+            setPermissionsLoading(false);
             return;
         }
 
         let cancelled = false;
         // Al simular un rol se ve el rol puro; las excepciones son de una persona concreta.
         const overridesUserId = simulatedRole ? null : (impersonatedUser || profile)?.id || null;
+        setPermissionsLoading(true);
 
         void (async () => {
             const [rows, overrides] = await Promise.all([
@@ -200,6 +206,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ]);
             if (cancelled) return;
             setPermissions(applyPermissionOverrides(role, resolveRolePermissions(role, rows).permissions, overrides));
+            setPermissionsLoading(false);
         })();
 
         return () => {
@@ -233,7 +240,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             profile: effectiveProfile, loading, isSupervisor, impersonatedUser, impersonateUser: async (email: string) => {
                 const { data } = await supabase.from('profiles').select('*').eq('email', email).single();
                 if (data) setImpersonatedUser(data as any as Profile);
-            }, stopImpersonation: () => setImpersonatedUser(null), effectiveRole, canImpersonate: bCanImpersonate, realRole: normalizeRole(profile?.role) || null, isManager, isChief, isFacturador, isSeller, isDriver, canUploadData: bCanUploadData, canViewMetas: bCanViewMetas, hasPermission: bHasPermission, permissions, simulatedRole, setSimulatedRole: (role: string | null) => setSimulatedRole(role ? normalizeRole(role) : null)
+            }, stopImpersonation: () => setImpersonatedUser(null), effectiveRole, canImpersonate: bCanImpersonate, realRole: normalizeRole(profile?.role) || null, isManager, isChief, isFacturador, isSeller, isDriver, canUploadData: bCanUploadData, canViewMetas: bCanViewMetas, hasPermission: bHasPermission, permissions, permissionsLoading, simulatedRole, setSimulatedRole: (role: string | null) => setSimulatedRole(role ? normalizeRole(role) : null)
         }}>
             {children}
         </UserContext.Provider>

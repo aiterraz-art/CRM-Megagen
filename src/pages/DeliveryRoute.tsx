@@ -129,7 +129,7 @@ const Directions = ({ orders, userLocation }: { orders: any[], userLocation: { l
 };
 
 const DeliveryRoute: React.FC = () => {
-    const { profile, effectiveRole, hasPermission } = useUser();
+    const { profile, hasPermission } = useUser();
     const navigate = useNavigate();
     const [orders, setOrders] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -732,7 +732,7 @@ const DeliveryRoute: React.FC = () => {
         }
     };
 
-    if (!(effectiveRole === 'driver' || hasPermission('EXECUTE_DELIVERY'))) {
+    if (!hasPermission('EXECUTE_DELIVERY')) {
         return <div className="p-8 text-center font-bold text-gray-500">Acceso denegado. Este módulo es solo para repartidores.</div>;
     }
 

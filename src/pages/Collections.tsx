@@ -100,7 +100,7 @@ const compareValues = (left: string | number, right: string | number, direction:
 };
 
 const Collections = () => {
-    const { profile, effectiveRole, hasPermission } = useUser();
+    const { profile, hasPermission } = useUser();
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const proofInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -144,15 +144,15 @@ const Collections = () => {
     const [clientDetailDebtSnapshot, setClientDetailDebtSnapshot] = useState<CollectionsDebtSnapshot | null>(null);
     const [clientDetailCrmSnapshot, setClientDetailCrmSnapshot] = useState<CollectionsCrmCommercialSnapshot | null>(null);
 
-    const isSeller = effectiveRole === 'seller';
-    const isChief = effectiveRole === 'jefe';
+    // Sin VIEW_ALL_COLLECTIONS solo se ven las cobranzas propias.
+    const isSeller = !hasPermission('VIEW_ALL_COLLECTIONS');
     const canManageCollections = hasPermission('MANAGE_COLLECTIONS');
-    const canManageClientOwnership = hasPermission('MANAGE_CLIENTS') || effectiveRole === 'jefe';
+    const canManageClientOwnership = hasPermission('ASSIGN_CLIENTS');
     const canUpload = canManageCollections;
     const canDownloadTemplate = canManageCollections;
-    const canEditComment = effectiveRole === 'seller' || canManageCollections;
+    const canEditComment = hasPermission('COMMENT_COLLECTIONS');
     const canAssignSeller = canManageCollections && canManageClientOwnership;
-    const canFilterBySeller = canManageCollections || isChief;
+    const canFilterBySeller = hasPermission('VIEW_ALL_COLLECTIONS');
 
     const normalizeEmail = (value: string | null | undefined) => (value || '').trim().toLowerCase();
 
@@ -1018,7 +1018,7 @@ const Collections = () => {
         }
     };
 
-    if (effectiveRole === 'driver') {
+    if (!hasPermission('VIEW_COLLECTIONS')) {
         return <div className="p-10 text-center font-bold">Acceso denegado</div>;
     }
 

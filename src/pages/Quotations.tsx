@@ -110,13 +110,11 @@ type QuotationBuilderDraft = {
 const PAYMENT_PROOF_RESTORE_MESSAGE = 'La app se recargó mientras seleccionabas el comprobante. Debes volver a elegir el archivo antes de generar el pedido.';
 
 const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
-const canAssignQuotationSeller = (role: string | null | undefined) =>
-    role === 'admin' || role === 'facturador' || role === 'tesorero';
 const canCloseQuotationSale = (
-    role: string | null | undefined,
+    canConvertAnyQuotation: boolean,
     actorId: string | null | undefined,
     quotationSellerId: string | null | undefined
-) => quotationSellerId === actorId || role === 'admin' || role === 'facturador';
+) => quotationSellerId === actorId || canConvertAnyQuotation;
 const isQuotationConverted = (quotation: any) =>
     Boolean(quotation?.has_order || quotation?.linked_order_id || quotation?.status === 'approved');
 
@@ -340,15 +338,18 @@ const Quotations: React.FC = () => {
         return /Android/i.test(navigator.userAgent || '');
     }, []);
 
-    const isSellerRole = effectiveRole === 'seller';
-    const canViewOrderConversionTrace = effectiveRole === 'admin' && profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
-    const canViewAll = useMemo(
-        () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
-        [isSellerRole, hasPermission, isSupervisor, profile?.email]
-    );
+    const canViewOrderConversionTrace = hasPermission('VIEW_AUDIT_TRACE');
+    const canViewAll = hasPermission('VIEW_ALL_QUOTATIONS');
+    const canViewAllClients = hasPermission('VIEW_ALL_CLIENTS');
+    const canAssignQuotationSeller = hasPermission('ASSIGN_QUOTATION_SELLER');
+    const canConvertAnyQuotation = hasPermission('CONVERT_ANY_QUOTATION');
+    const canEditQuotePrices = hasPermission('EDIT_QUOTE_PRICES');
+    // Sin este permiso aplica el tope de descuento de vendedor.
+    const isDiscountLimited = !hasPermission('BYPASS_DISCOUNT_LIMIT');
+    const canSimulateLocation = hasPermission('SIMULATE_LOCATION');
     const canEditQuotationRecord = useCallback((quotation: any) => {
-        return isSupervisor || canCloseQuotationSale(effectiveRole, profile?.id, quotation?.seller_id);
-    }, [effectiveRole, isSupervisor, profile?.id]);
+        return isSupervisor || canCloseQuotationSale(canConvertAnyQuotation, profile?.id, quotation?.seller_id);
+    }, [canConvertAnyQuotation, isSupervisor, profile?.id]);
 
     const requestDiscountApprovalReason = useCallback(async ({
         status,
@@ -563,8 +564,8 @@ const Quotations: React.FC = () => {
             const { data: pageRows, error: quotesError } = await supabase.rpc('search_quotations_paged', {
                 p_actor_id: profile?.id ?? null,
                 // Un vendedor queda acotado a sus propias cotizaciones, igual que antes.
-                p_can_view_all: canViewAll && !isSellerRole,
-                p_is_seller: isSellerRole,
+                p_can_view_all: canViewAll,
+                p_is_seller: !canViewAll,
                 p_status: QUOTATION_STATUS_BY_FILTER[activeFilter] ?? 'All',
                 p_search: debouncedQuotationSearch,
                 p_limit: QUOTATIONS_PAGE_SIZE,
@@ -747,7 +748,6 @@ const Quotations: React.FC = () => {
         }
     }, [
         canViewAll,
-        isSellerRole,
         profile?.id,
         activeFilter,
         debouncedQuotationSearch,
@@ -841,7 +841,7 @@ const Quotations: React.FC = () => {
     }, [upsertProductsCache]);
 
     const fetchAvailableSellers = useCallback(async () => {
-        if (!canAssignQuotationSeller(effectiveRole)) {
+        if (!canAssignQuotationSeller) {
             setAvailableSellers([]);
             return;
         }
@@ -882,15 +882,14 @@ const Quotations: React.FC = () => {
                 getSellerDisplayName(left).localeCompare(getSellerDisplayName(right), 'es')
             )
         );
-    }, [effectiveRole]);
+    }, [canAssignQuotationSeller]);
 
     const fetchClientsForModal = useCallback(async () => {
         let query = supabase.from('clients').select('*').order('name');
-        if (isSellerRole && profile?.id) query = query.eq('created_by', profile.id);
-        else if (!canViewAll && profile?.id) query = query.eq('created_by', profile.id);
+        if (!canViewAllClients && profile?.id) query = query.eq('created_by', profile.id);
         const { data } = await query;
         if (data) setAvailableClients(data);
-    }, [canViewAll, isSellerRole, profile?.id]);
+    }, [canViewAllClients, profile?.id]);
 
     const handleCreateExternalSeller = useCallback(async () => {
         const normalizedName = newSellerName.trim();
@@ -1107,7 +1106,7 @@ const Quotations: React.FC = () => {
         setPaymentTerms(getPaymentTermsFromCreditDays(getClientCreditDays(client)));
         setManualLocation(null);
         setEditingQuotation(null); // Ensure we are NOT in edit mode
-        setSelectedSellerId((prev) => canAssignQuotationSeller(effectiveRole) ? prev : (profile?.id ? `profile:${profile.id}` : null));
+        setSelectedSellerId((prev) => canAssignQuotationSeller ? prev : (profile?.id ? `profile:${profile.id}` : null));
     };
 
     const handleEditQuotation = (q: any) => {
@@ -1461,7 +1460,7 @@ const Quotations: React.FC = () => {
             return;
         }
 
-        if (!canCloseQuotationSale(effectiveRole, profile.id, quotationToRestore.seller_id)) {
+        if (!canCloseQuotationSale(canConvertAnyQuotation, profile.id, quotationToRestore.seller_id)) {
             clearPaymentProofModalDraft();
             return;
         }
@@ -1472,8 +1471,8 @@ const Quotations: React.FC = () => {
         setOrderConversionStage(null);
         setPaymentProofError(PAYMENT_PROOF_RESTORE_MESSAGE);
     }, [
+        canConvertAnyQuotation,
         clearPaymentProofModalDraft,
-        effectiveRole,
         loadPaymentProofModalDraft,
         profile?.id,
         quotationPendingOrder,
@@ -1593,7 +1592,7 @@ const Quotations: React.FC = () => {
             role: effectiveRole,
             status: profile.status || null
         });
-        const sellerOptionForQuotation = canAssignQuotationSeller(effectiveRole)
+        const sellerOptionForQuotation = canAssignQuotationSeller
             ? selectedSellerOption
             : actingSellerOption;
 
@@ -1628,7 +1627,7 @@ const Quotations: React.FC = () => {
             const shouldPromoteProspectToEvaluating = isProspectStatus(selectedClient.status);
             let latitude: number | null = null;
             let longitude: number | null = null;
-            const shouldCaptureSellerLocation = !(canAssignQuotationSeller(effectiveRole) && sellerProfileIdForQuotation !== profile.id);
+            const shouldCaptureSellerLocation = !(canAssignQuotationSeller && sellerProfileIdForQuotation !== profile.id);
 
             if (manualLocation && shouldCaptureSellerLocation) {
                 latitude = manualLocation.lat;
@@ -1763,7 +1762,7 @@ const Quotations: React.FC = () => {
             setSelectedSourceVisitId(null);
             setCreateError(null);
             setEditingQuotation(null);
-            setSelectedSellerId((prev) => canAssignQuotationSeller(effectiveRole) ? prev : profile.id);
+            setSelectedSellerId((prev) => canAssignQuotationSeller ? prev : profile.id);
             if (profile?.id) clearPersistedModalDraft(buildQuotationDraftKey(profile.id));
             fetchQuotations();
 
@@ -1786,7 +1785,7 @@ const Quotations: React.FC = () => {
             alert('No se pudo identificar el usuario actual. Cierra y vuelve a iniciar sesión.');
             return;
         }
-        if (!canCloseQuotationSale(effectiveRole, profile.id, quotation?.seller_id)) {
+        if (!canCloseQuotationSale(canConvertAnyQuotation, profile.id, quotation?.seller_id)) {
             alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
             return;
         }
@@ -2163,7 +2162,7 @@ const Quotations: React.FC = () => {
         getQuotationCreditDays,
         linkOrderToSourceVisit,
         requestDiscountApprovalReason,
-        effectiveRole,
+        canConvertAnyQuotation,
         profile?.id,
         syncQuotationAsApproved,
         syncOrderNotesFromQuotation,
@@ -2182,7 +2181,7 @@ const Quotations: React.FC = () => {
             alert(`Esta cotización ya fue convertida a pedido ${orderRef}. Revisa el módulo de Pedidos para su seguimiento.`);
             return;
         }
-        if (!canCloseQuotationSale(effectiveRole, profile.id, quotation?.seller_id)) {
+        if (!canCloseQuotationSale(canConvertAnyQuotation, profile.id, quotation?.seller_id)) {
             alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
             return;
         }
@@ -2244,7 +2243,7 @@ const Quotations: React.FC = () => {
     useEffect(() => {
         if (currentPage > totalQuotationPages) setCurrentPage(totalQuotationPages);
     }, [currentPage, totalQuotationPages]);
-    const pendingApprovalMineCount = effectiveRole === 'seller' ? quotationTotals.pendingMine : 0;
+    const pendingApprovalMineCount = isDiscountLimited ? quotationTotals.pendingMine : 0;
     const formMaxDiscountPct = useMemo(() => {
         return getQuotationMaxDiscountPct(formItems);
     }, [formItems]);
@@ -2346,7 +2345,7 @@ const Quotations: React.FC = () => {
                 </div>
             )}
 
-            {effectiveRole === 'seller' && pendingApprovalMineCount > 0 && (
+            {isDiscountLimited && pendingApprovalMineCount > 0 && (
                 <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-800 text-sm font-bold">
                     Tienes {pendingApprovalMineCount} cotización(es) pendiente(s) de aprobación. Se muestran primero en el listado.
                 </div>
@@ -2366,7 +2365,7 @@ const Quotations: React.FC = () => {
                     filteredQuotations.map((q) => {
                         const hasWhatsappTarget = Boolean(normalizePhoneForWhatsapp(q.client_phone || q.client?.phone));
                         const hasEmailTarget = Boolean(String(q.client_email || q.client?.email || '').trim());
-                        const canConvertOrder = canCloseQuotationSale(effectiveRole, profile?.id, q.seller_id);
+                        const canConvertOrder = canCloseQuotationSale(canConvertAnyQuotation, profile?.id, q.seller_id);
                         const isConvertedQuotation = isQuotationConverted(q);
 
                         return (
@@ -2893,7 +2892,7 @@ const Quotations: React.FC = () => {
                                     <p className="text-white/80 text-sm">Cliente: {selectedClient.name}</p>
                                 </div>
                                 <div className="flex gap-2">
-                                    {effectiveRole === 'admin' && (
+                                    {canSimulateLocation && (
                                         <button
                                             onClick={() => setIsLocationPickerOpen(true)}
                                             className={`p-2 rounded-full transition-all border ${manualLocation ? 'bg-green-400 text-white border-green-500' : 'bg-white/10 border-white/20 hover:bg-white/20'}`}
@@ -2909,7 +2908,7 @@ const Quotations: React.FC = () => {
                             </div>
 
                             <div className="p-6 overflow-y-auto">
-                                {isSellerRole && (
+                                {isDiscountLimited && (
                                     <div className="mb-4 p-3 rounded-xl border border-indigo-100 bg-indigo-50 text-indigo-800 text-xs font-bold">
                                         Vista comercial: costos y márgenes internos no se muestran en esta pantalla.
                                         <div className="mt-1 font-semibold">
@@ -2939,7 +2938,7 @@ const Quotations: React.FC = () => {
                                         </div>
                                     </div>
                                 )}
-                                {canAssignQuotationSeller(effectiveRole) && (
+                                {canAssignQuotationSeller && (
                                     <div className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
                                         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                                             <div>
@@ -2986,8 +2985,8 @@ const Quotations: React.FC = () => {
                                             {(() => {
                                                 const resolvedProduct = resolveInventoryProduct(item);
                                                 const selectedProduct = item?.productId ? resolvedProduct : null;
-                                                const allowManualUnitPrice = !isSellerRole || isDispatchServiceProduct(resolvedProduct);
-                                                const allowManualNetPrice = !isSellerRole || Boolean(resolvedProduct);
+                                                const allowManualUnitPrice = canEditQuotePrices || isDispatchServiceProduct(resolvedProduct);
+                                                const allowManualNetPrice = canEditQuotePrices || Boolean(resolvedProduct);
                                                 const codeSuggestionVisible =
                                                     activeSuggestion?.index === index &&
                                                     activeSuggestion.field === 'code' &&
@@ -3298,12 +3297,12 @@ const Quotations: React.FC = () => {
                                         <p className={`mt-2 text-sm font-bold ${formMaxDiscountPct > SELLER_MAX_DISCOUNT_PCT ? 'text-red-600' : 'text-emerald-600'}`}>
                                             Máximo aplicado: {formMaxDiscountPct.toFixed(2)}%
                                         </p>
-                                        {isSellerRole && formMaxDiscountPct > SELLER_MAX_DISCOUNT_PCT && (
+                                        {isDiscountLimited && formMaxDiscountPct > SELLER_MAX_DISCOUNT_PCT && (
                                             <p className="mt-2 text-xs font-medium text-red-600">
                                                 Supera el {SELLER_MAX_DISCOUNT_PCT}%. La autorización se solicitará cuando intentes pasar la cotización a pedido.
                                             </p>
                                         )}
-                                        {isSellerRole && formMaxDiscountPct <= SELLER_MAX_DISCOUNT_PCT && (
+                                        {isDiscountLimited && formMaxDiscountPct <= SELLER_MAX_DISCOUNT_PCT && (
                                             <p className="mt-2 text-xs font-medium text-gray-500">
                                                 Dentro del límite permitido para vendedor.
                                             </p>
@@ -3480,7 +3479,7 @@ const Quotations: React.FC = () => {
                                     <p className="text-xl md:text-2xl font-black text-indigo-600">
                                         {formatMoney(formGrandTotal)}
                                     </p>
-                                    {isSellerRole && (
+                                    {isDiscountLimited && (
                                         <p className={`text-xs font-bold mt-1 ${formMaxDiscountPct > SELLER_MAX_DISCOUNT_PCT ? 'text-red-600' : 'text-gray-500'}`}>
                                             Máx descuento aplicado: {formMaxDiscountPct.toFixed(2)}% (límite vendedor {SELLER_MAX_DISCOUNT_PCT}%)
                                         </p>

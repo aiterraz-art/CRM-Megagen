@@ -255,7 +255,7 @@ const buildClientFormState = (assignedSellerId = '') => ({
 });
 
 const ClientsContent = () => {
-    const { profile, hasPermission, isSupervisor, effectiveRole } = useUser();
+    const { profile, hasPermission } = useUser();
     const navigate = useNavigate();
     const searchParams = new URLSearchParams(window.location.search);
     const initialFilter = searchParams.get('filter') || 'all';
@@ -319,17 +319,14 @@ const ClientsContent = () => {
     const [clientTypeFilter, setClientTypeFilter] = useState<'all' | 'active' | 'prospect'>('all');
     const [sellerFilter, setSellerFilter] = useState<string>('all');
     const [poolAssigneeId, setPoolAssigneeId] = useState<string>('');
-    const isSellerRole = effectiveRole === 'seller';
-    const canReassignPoolLead = effectiveRole === 'admin' || effectiveRole === 'jefe';
-    const canAssignClientOwner = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'tesorero';
-    const canManageClientCredit = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'facturador';
-    const canMergeDuplicateGroups = effectiveRole === 'admin' || effectiveRole === 'jefe' || effectiveRole === 'facturador' || effectiveRole === 'tesorero';
-    const canEditAnyClient = hasPermission('MANAGE_CLIENTS') || effectiveRole === 'jefe';
+    const canReassignPoolLead = hasPermission('ASSIGN_CLIENTS');
+    const canAssignClientOwner = hasPermission('ASSIGN_CLIENTS');
+    const canManageClientCredit = hasPermission('MANAGE_CLIENT_CREDIT');
+    const canMergeDuplicateGroups = hasPermission('MERGE_CLIENTS');
+    const canEditAnyClient = hasPermission('MANAGE_CLIENTS');
+    const canManageDiscountPolicy = hasPermission('MANAGE_DISCOUNT_POLICY');
     const show3DentalClientFields = is3DentalCompany();
-    const canViewAll = useMemo(
-        () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
-        [isSellerRole, hasPermission, isSupervisor, profile?.email]
-    );
+    const canViewAll = hasPermission('VIEW_ALL_CLIENTS');
 
     // New/Edit Client Form State
     const [clientForm, setClientForm] = useState(buildClientFormState());
@@ -459,8 +456,8 @@ const ClientsContent = () => {
 
     const buildClientSearchParams = (page: number, pageSize: number) => ({
         p_actor_id: profile?.id ?? null,
-        // Un vendedor siempre queda acotado a su propia cartera, igual que antes.
-        p_can_view_all: canViewAll && !isSellerRole,
+        // Sin VIEW_ALL_CLIENTS el usuario queda acotado a su propia cartera.
+        p_can_view_all: canViewAll,
         p_portfolio_tab: portfolioTab,
         p_view_mode: viewMode,
         p_search: debouncedSearch,
@@ -632,7 +629,7 @@ const ClientsContent = () => {
     // returns other sellers' matches as read-only references while a search is active.
     useEffect(() => {
         const term = search.trim();
-        if (!isSellerRole || term.length < 2) {
+        if (canViewAll || term.length < 2) {
             setReadonlySearchClients([]);
             setReadonlySearchLoading(false);
             setReadonlySearchError(null);
@@ -661,7 +658,7 @@ const ClientsContent = () => {
             cancelled = true;
             window.clearTimeout(timeoutId);
         };
-    }, [search, isSellerRole]);
+    }, [search, canViewAll]);
 
     const handleOpenModal = (clientToEdit?: Client, mode: 'full' | 'credit' = 'full') => {
         if (clientToEdit) {
@@ -842,7 +839,7 @@ const ClientsContent = () => {
                         } : {}),
                         comuna: finalComuna,
                         office: clientForm.office,
-                        ...(effectiveRole === 'admin' ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {}),
+                        ...(canManageDiscountPolicy ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {}),
                         ...(canManageClientCredit ? { credit_days: sanitizedCreditDays } : {}),
                         ...(canAssignClientOwner ? { created_by: clientForm.assignedSellerId, pending_seller_email: null } : {})
                     };
@@ -917,7 +914,7 @@ const ClientsContent = () => {
                     comuna: finalComuna,
                     office: clientForm.office,
                     credit_days: 0,
-                    ...(effectiveRole === 'admin' ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {})
+                    ...(canManageDiscountPolicy ? { requires_discount_approval: clientForm.requiresDiscountApproval } : {})
                 }, { onDuplicate: 'error' });
 
                 alert('¡Cliente creado exitosamente!');
@@ -2295,7 +2292,7 @@ const ClientsContent = () => {
                 />
             </div>
 
-            {isSellerRole && search.trim().length >= 2 && (readonlySearchLoading || readonlySearchError || readonlySearchClients.length > 0) && (
+            {!canViewAll && search.trim().length >= 2 && (readonlySearchLoading || readonlySearchError || readonlySearchClients.length > 0) && (
                 <section className="rounded-3xl border border-amber-200 bg-amber-50/70 p-5">
                     <div className="flex items-start gap-3">
                         <div className="mt-0.5 rounded-xl bg-amber-100 p-2 text-amber-700">
@@ -2949,7 +2946,7 @@ const ClientsContent = () => {
                                                 </div>
                                             )}
 
-                                            {effectiveRole === 'admin' && editScope === 'full' && (
+                                            {canManageDiscountPolicy && editScope === 'full' && (
                                                 <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-4">
                                                     <label className="flex items-start gap-3 cursor-pointer">
                                                         <input

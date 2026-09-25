@@ -16,7 +16,7 @@ type SizeChangeRequestFormProps = {
     inventory: InventoryRow[];
     sellerOptions: ProfileRow[];
     currentUserProfile: ProfileRow | null;
-    effectiveRole: string | null;
+    canChooseSeller: boolean;
     initialRequest?: {
         clientId: string;
         sellerId: string;
@@ -70,14 +70,13 @@ const SizeChangeRequestForm = ({
     inventory,
     sellerOptions,
     currentUserProfile,
-    effectiveRole,
+    canChooseSeller,
     initialRequest,
     initialDraftState,
     onDraftChange,
     onClose,
     onSubmit,
 }: SizeChangeRequestFormProps) => {
-    const isAdmin = effectiveRole === 'admin';
     const hasInitializedWhileOpenRef = useRef(false);
     const [clientSearch, setClientSearch] = useState('');
     const [clientId, setClientId] = useState('');
@@ -99,7 +98,7 @@ const SizeChangeRequestForm = ({
         if (initialDraftState) {
             setClientId(initialDraftState.clientId || '');
             setClientSearch(initialDraftState.clientSearch || '');
-            setSellerId(initialDraftState.sellerId || (isAdmin ? '' : (currentUserProfile?.id || '')));
+            setSellerId(initialDraftState.sellerId || (canChooseSeller ? '' : (currentUserProfile?.id || '')));
             setRequestComment(initialDraftState.requestComment || '');
             setLines(
                 initialDraftState.lines.length > 0
@@ -132,7 +131,7 @@ const SizeChangeRequestForm = ({
         } else {
             setClientId('');
             setClientSearch('');
-            setSellerId(isAdmin ? '' : (currentUserProfile?.id || ''));
+            setSellerId(canChooseSeller ? '' : (currentUserProfile?.id || ''));
             setRequestComment('');
             setLines([buildEmptyLine()]);
         }
@@ -141,7 +140,7 @@ const SizeChangeRequestForm = ({
         setClientSuggestionsOpen(false);
         setActiveProductRowId(null);
         hasInitializedWhileOpenRef.current = true;
-    }, [clients, currentUserProfile?.id, initialDraftState, initialRequest, isAdmin, isOpen]);
+    }, [clients, currentUserProfile?.id, initialDraftState, initialRequest, canChooseSeller, isOpen]);
 
     useEffect(() => {
         if (!isOpen || !onDraftChange) return;
@@ -335,7 +334,7 @@ const SizeChangeRequestForm = ({
 
                             <div className="premium-card p-5">
                                 <label className="text-[10px] font-black uppercase tracking-[0.25em] text-gray-400">Vendedor responsable</label>
-                                {isAdmin ? (
+                                {canChooseSeller ? (
                                     <select
                                         value={sellerId}
                                         onChange={(event) => {

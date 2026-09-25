@@ -22,7 +22,7 @@ type Client = Database['public']['Tables']['clients']['Row'];
 
 const VisitLog = () => {
     const { clientId } = useParams<{ clientId: string }>();
-    const { profile, hasPermission, effectiveRole } = useUser();
+    const { profile, hasPermission } = useUser();
     const { startVisit, activeVisit, endVisit } = useVisit(); // Use context
     const navigate = useNavigate();
     const [client, setClient] = useState<Client | null>(null);
@@ -67,7 +67,7 @@ const VisitLog = () => {
             const { data } = await (supabase.from('clients') as any).select('*').eq('id', clientId).single();
             if (data) {
                 // Security Check
-                const canViewAll = effectiveRole === 'admin' || hasPermission('VIEW_ALL_CLIENTS') || hasPermission('VIEW_TEAM_STATS') || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl');
+                const canViewAll = hasPermission('VIEW_ALL_CLIENTS') || hasPermission('VIEW_TEAM_STATS');
                 if (!canViewAll && data.created_by !== profile?.id) {
                     alert('Acceso denegado: Este cliente no está en tu cartera.');
                     navigate('/');
@@ -80,7 +80,7 @@ const VisitLog = () => {
             setLoading(false);
         };
         if (profile) fetchClient();
-    }, [clientId, profile, effectiveRole, hasPermission, navigate]);
+    }, [clientId, profile, hasPermission, navigate]);
 
     useEffect(() => {
         if (!activeVisit?.id) {

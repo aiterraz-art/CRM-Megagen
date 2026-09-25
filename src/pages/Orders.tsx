@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Eye, FileText, History, PackageCheck, RefreshCw, RotateCcw, Search, ShoppingCart, Send, Truck } from 'lucide-react';
 import { supabase } from '../services/supabase';
@@ -62,8 +62,6 @@ type CourierModalDraft = {
 };
 const CHUNK_SIZE = 50;
 const PAGE_SIZE = 10;
-const isBillingBackofficeRole = (role: string | null | undefined) =>
-    role === 'facturador' || role === 'tesorero';
 
 const COURIER_OPTIONS: Array<{ value: CourierProvider; label: string }> = [
     { value: 'chileexpress', label: 'Chilexpress' },
@@ -100,34 +98,23 @@ const chunkArray = <T,>(values: T[], size: number) => {
 };
 
 const canResendOrderEmail = (
-    effectiveRole: string | null | undefined,
+    canResendAnyOrder: boolean,
     profileId: string | null | undefined,
     order: EnrichedOrder
 ) => {
     if (!profileId) return false;
     if (String(order.status || '').toLowerCase() === 'cancelled') return false;
-    return effectiveRole === 'admin'
-        || effectiveRole === 'seller'
-        || isBillingBackofficeRole(effectiveRole)
-        || order.user_id === profileId;
+    return canResendAnyOrder || order.user_id === profileId;
 };
 
 const canCancelOrder = (
-    effectiveRole: string | null | undefined,
+    canCancelAnyOrder: boolean,
     profileId: string | null | undefined,
     order: EnrichedOrder
 ) => {
     if (!profileId) return false;
-    return effectiveRole === 'admin'
-        || effectiveRole === 'jefe'
-        || isBillingBackofficeRole(effectiveRole)
-        || order.user_id === profileId;
+    return canCancelAnyOrder || order.user_id === profileId;
 };
-
-const canManageCourierShipment = (effectiveRole: string | null | undefined) =>
-    effectiveRole === 'admin'
-    || effectiveRole === 'jefe'
-    || isBillingBackofficeRole(effectiveRole);
 
 const getPaymentEmailStatusStyles = (status: string | null | undefined) => {
     switch ((status || '').toLowerCase()) {
@@ -190,7 +177,7 @@ const getDeliveryStatusLabel = (status: string | null | undefined) => {
 };
 
 const Orders = () => {
-    const { profile, effectiveRole, hasPermission, isSupervisor } = useUser();
+    const { profile, hasPermission } = useUser();
     // La lista ya no se carga entera: la base devuelve una pagina con la busqueda, los
     // filtros y el orden ya resueltos.
     const [orders, setOrders] = useState<EnrichedOrder[]>([]);
@@ -258,11 +245,10 @@ const Orders = () => {
         return savedDraft.data?.orderId || null;
     });
 
-    const isSellerRole = effectiveRole === 'seller';
-    const canViewAll = useMemo(
-        () => !isSellerRole && (hasPermission('VIEW_ALL_CLIENTS') || isSupervisor || profile?.email === (import.meta.env.VITE_OWNER_EMAIL || 'aterraza@imegagen.cl')),
-        [isSellerRole, hasPermission, isSupervisor, profile?.email]
-    );
+    const canViewAll = hasPermission('VIEW_ALL_ORDERS');
+    const canResendAnyOrder = hasPermission('RESEND_ORDER_EMAIL');
+    const canCancelAnyOrder = hasPermission('CANCEL_ORDERS');
+    const canManageCourierShipment = hasPermission('MANAGE_COURIER_SHIPMENTS');
 
     const fetchOrders = useCallback(async () => {
         setLoading(true);
@@ -272,7 +258,7 @@ const Orders = () => {
             // exactamente como cuando el filtro se aplicaba sobre la lista ya cargada.
             const { data, error } = await supabase.rpc('search_orders_paged', {
                 p_actor_id: profile?.id ?? null,
-                p_can_view_all: canViewAll && !isSellerRole,
+                p_can_view_all: canViewAll,
                 p_view_mode: viewMode,
                 p_order_status: orderStatusFilter,
                 p_delivery_status: deliveryStatusFilter,
@@ -376,7 +362,6 @@ const Orders = () => {
         }
     }, [
         canViewAll,
-        isSellerRole,
         profile?.id,
         viewMode,
         orderStatusFilter,
@@ -785,7 +770,7 @@ const Orders = () => {
             alert('No se pudo identificar al usuario actual.');
             return;
         }
-        const canResend = canResendOrderEmail(effectiveRole, profile.id, order);
+        const canResend = canResendOrderEmail(canResendAnyOrder, profile.id, order);
         if (!canResend) {
             alert('No tienes permisos para reenviar este correo.');
             return;
@@ -820,7 +805,7 @@ const Orders = () => {
         } finally {
             setResendingOrderId(null);
         }
-    }, [buildOrderPdfPayload, effectiveRole, fetchOrders, profile?.id]);
+    }, [buildOrderPdfPayload, canResendAnyOrder, fetchOrders, profile?.id]);
 
     const handleCancelOrder = useCallback(async (order: EnrichedOrder) => {
         if (!profile?.id) {
@@ -828,7 +813,7 @@ const Orders = () => {
             return;
         }
 
-        const canCancel = canCancelOrder(effectiveRole, profile.id, order);
+        const canCancel = canCancelOrder(canCancelAnyOrder, profile.id, order);
         if (!canCancel) {
             alert('No tienes permisos para cancelar este pedido.');
             return;
@@ -883,7 +868,7 @@ const Orders = () => {
         } finally {
             setCancellingOrderId(null);
         }
-    }, [effectiveRole, fetchOrders, profile?.id]);
+    }, [canCancelAnyOrder, fetchOrders, profile?.id]);
 
     const closeCourierModal = useCallback(() => {
         setCourierModalOrder(null);
@@ -946,7 +931,7 @@ const Orders = () => {
             setCourierModalError('No se pudo identificar al usuario actual.');
             return;
         }
-        if (!canManageCourierShipment(effectiveRole)) {
+        if (!canManageCourierShipment) {
             setCourierModalError('No tienes permisos para marcar encomiendas.');
             return;
         }
@@ -985,7 +970,7 @@ const Orders = () => {
         } finally {
             setSavingCourierOrderId(null);
         }
-    }, [closeCourierModal, courierModalOrder, courierProvider, effectiveRole, fetchOrders, profile?.id, trackingNumber]);
+    }, [closeCourierModal, courierModalOrder, canManageCourierShipment, courierProvider, fetchOrders, profile?.id, trackingNumber]);
 
     // La base ya aplica busqueda, estados, vista y rango de fechas.
     const filteredOrders = orders;
@@ -1192,10 +1177,10 @@ const Orders = () => {
                                 {paginatedOrders.map((order) => (
                                     <tr key={order.id} className="border-b border-gray-100 last:border-0">
                                         {(() => {
-                                            const canResend = canResendOrderEmail(effectiveRole, profile?.id, order);
+                                            const canResend = canResendOrderEmail(canResendAnyOrder, profile?.id, order);
                                             const canRetryEmail = canResend && ['failed', 'pending'].includes(String(order.payment_email_status || '').toLowerCase());
-                                            const canCancel = canCancelOrder(effectiveRole, profile?.id, order);
-                                            const canManageCourier = canManageCourierShipment(effectiveRole);
+                                            const canCancel = canCancelOrder(canCancelAnyOrder, profile?.id, order);
+                                            const canManageCourier = canManageCourierShipment;
                                             const isCancelled = String(order.status || '').toLowerCase() === 'cancelled';
                                             const isDispatchLocked = ['assigned', 'out_for_delivery', 'delivered'].includes(String(order.delivery_status || '').toLowerCase());
                                             const hasCourier = isCourierShipment(order);

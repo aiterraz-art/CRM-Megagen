@@ -18,10 +18,10 @@ const PROOF_ROUTE_DRAFT_KEY = 'quotation_order_proof_route';
 const PROOF_ROUTE_RESTORE_MESSAGE = 'La app se recargó mientras seleccionabas el comprobante. Vuelve a elegir el archivo y luego genera el pedido.';
 const allowedPaymentProofExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
 const canCloseQuotationSale = (
-    role: string | null | undefined,
+    canConvertAnyQuotation: boolean,
     actorId: string | null | undefined,
     quotationSellerId: string | null | undefined
-) => quotationSellerId === actorId || role === 'admin' || role === 'facturador';
+) => quotationSellerId === actorId || canConvertAnyQuotation;
 
 type ProofRouteDraft = {
     quotationId: string;
@@ -77,7 +77,8 @@ const createAttemptId = () => {
 const QuotationOrderProof = () => {
     const navigate = useNavigate();
     const { quotationId } = useParams<{ quotationId: string }>();
-    const { profile, effectiveRole } = useUser();
+    const { profile, hasPermission } = useUser();
+    const canConvertAnyQuotation = hasPermission('CONVERT_ANY_QUOTATION');
 
     const [quotation, setQuotation] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
@@ -384,7 +385,7 @@ const QuotationOrderProof = () => {
 
         try {
             if (!quotation || !profile?.id) return;
-            if (!canCloseQuotationSale(effectiveRole, profile.id, quotation?.seller_id)) {
+            if (!canCloseQuotationSale(canConvertAnyQuotation, profile.id, quotation?.seller_id)) {
                 alert('Solo el vendedor dueño, un admin o facturación pueden convertir esta cotización a pedido.');
                 return;
             }
@@ -674,8 +675,8 @@ const QuotationOrderProof = () => {
         }
     }, [
         buildOrderEmailPayload,
+        canConvertAnyQuotation,
         clearDraft,
-        effectiveRole,
         getQuotationCreditDays,
         paymentProofFile,
         profile?.id,

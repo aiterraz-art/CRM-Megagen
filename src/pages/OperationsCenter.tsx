@@ -164,7 +164,7 @@ const summarizeApprovalProducts = (items: any[]) => {
 };
 
 const OperationsCenter = () => {
-    const { hasPermission, profile, effectiveRole } = useUser();
+    const { hasPermission, profile } = useUser();
     const [activeTab, setActiveTab] = useState<TabKey>('health');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -405,7 +405,7 @@ const OperationsCenter = () => {
     };
 
     const approveRequest = async (id: string, approve: boolean) => {
-        if (!(effectiveRole === 'admin' || effectiveRole === 'jefe' || hasPermission('MANAGE_APPROVALS'))) return alert('Sin permisos para aprobaciones.');
+        if (!hasPermission('MANAGE_APPROVALS')) return alert('Sin permisos para aprobaciones.');
         const request = approvals.find((a) => a.id === id);
         const payload = approve
             ? { status: 'approved', decided_at: new Date().toISOString(), approver_id: profile?.id || null, decision_note: 'Aprobado desde Centro de Operaciones' }
@@ -642,7 +642,7 @@ const OperationsCenter = () => {
         );
     };
 
-    if (!(effectiveRole === 'admin' || effectiveRole === 'jefe')) {
+    if (!hasPermission('VIEW_OPERATIONS')) {
         return <div className="p-10 text-center font-bold">Acceso denegado</div>;
     }
 
