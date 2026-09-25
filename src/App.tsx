@@ -67,6 +67,8 @@ const DashboardWrapper = () => {
     if (effectiveRole === 'driver') return <DriverDashboard />;
     if (effectiveRole === 'seller') return <SellerDashboard />;
     if (isBillingBackofficeRole(effectiveRole)) return <AdministrativeDashboard />;
+    // Marketing no trabaja con las metricas de venta del panel general: entra a sus leads.
+    if (effectiveRole === 'marketing') return <Navigate to="/lead-pipeline" replace />;
     return <Dashboard />;
 };
 

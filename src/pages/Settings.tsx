@@ -1507,6 +1507,7 @@ const Settings: React.FC = () => {
                                                 <option value="tesorero">Tesorero</option>
                                                 <option value="jefe">Jefe de Ventas</option>
                                                 <option value="driver">Repartidor</option>
+                                                <option value="marketing">Marketing</option>
                                                 <option value="admin">Admin</option>
                                             </select>
                                         </div>

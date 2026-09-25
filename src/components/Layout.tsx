@@ -544,6 +544,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                                     <option value="facturador" className="text-gray-800">Ver como Facturador</option>
                                     <option value="tesorero" className="text-gray-800">Ver como Tesorero</option>
                                     <option value="driver" className="text-gray-800">Ver como Repartidor</option>
+                                    <option value="marketing" className="text-gray-800">Ver como Marketing</option>
                                 </select>
                                 {simulatedRole && (
                                     <button

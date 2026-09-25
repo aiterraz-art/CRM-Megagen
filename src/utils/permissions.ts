@@ -109,6 +109,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
     // Leads
     { key: 'VIEW_LEADS', module: 'leads', label: 'Ver Leads', desc: 'Acceso al embudo de leads y a los mensajes.' },
     { key: 'VIEW_ALL_LEADS', module: 'leads', label: 'Ver Todos los Leads', desc: 'Ver los leads de todo el equipo y los no asignados.' },
+    { key: 'MANAGE_LEADS', module: 'leads', label: 'Gestionar Leads', desc: 'Mover de etapa, editar, importar y asignar prospectos de todo el equipo, sin acceso a clientes activos.' },
     { key: 'MANAGE_LEAD_TEMPLATES', module: 'leads', label: 'Gestionar Plantillas', desc: 'Crear y editar plantillas y adjuntos de mensajes a leads.' },
     { key: 'VIEW_META_LEADS', module: 'leads', label: 'Ver Meta Leads', desc: 'Acceso al módulo de leads recibidos desde Meta.' },
     { key: 'VIEW_REACTIVATION', module: 'leads', label: 'Ver Reactivación', desc: 'Acceso al módulo y a los casos de reactivación asignados a uno mismo.' },
@@ -168,7 +169,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
 export const PERMISSION_KEYS: string[] = PERMISSION_CATALOG.map((permission) => permission.key);
 
 /** Roles asignables desde la matriz de permisos, en el orden en que se muestran. */
-export const ASSIGNABLE_ROLES = ['admin', 'jefe', 'bodega', 'facturador', 'tesorero', 'seller', 'driver'] as const;
+export const ASSIGNABLE_ROLES = ['admin', 'jefe', 'bodega', 'facturador', 'tesorero', 'seller', 'driver', 'marketing'] as const;
 
 export const normalizeRole = (role: string | null | undefined): string => {
     const baseRole = (role || '').trim().toLowerCase();
@@ -198,7 +199,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
         'VIEW_QUOTATIONS', 'VIEW_ALL_QUOTATIONS', 'MANAGE_ALL_QUOTATIONS', 'EDIT_QUOTE_PRICES', 'BYPASS_DISCOUNT_LIMIT',
         'VIEW_ALL_ORDERS', 'MANAGE_ALL_ORDERS', 'CANCEL_ORDERS', 'MANAGE_COURIER_SHIPMENTS',
         'VIEW_SCHEDULE', 'VIEW_TEAM_ACTIVITY', 'MANAGE_TEAM_ACTIVITY', 'VIEW_VISITS', 'CONVERT_COLD_VISITS', 'VIEW_MAP', 'VIEW_PIPELINE', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_TEAM_CALENDARS', 'SEND_TEAM_PUSH', 'VIEW_METAS', 'MANAGE_METAS',
-        'VIEW_LEADS', 'VIEW_ALL_LEADS', 'MANAGE_LEAD_TEMPLATES', 'VIEW_REACTIVATION', 'MANAGE_REACTIVATION', 'VIEW_ALL_REACTIVATION',
+        'VIEW_LEADS', 'VIEW_ALL_LEADS', 'MANAGE_LEADS', 'MANAGE_LEAD_TEMPLATES', 'VIEW_REACTIVATION', 'MANAGE_REACTIVATION', 'VIEW_ALL_REACTIVATION',
         'VIEW_COLLECTIONS', 'VIEW_ALL_COLLECTIONS',
         'VIEW_INVENTORY', 'VIEW_INVENTORY_VALUE', 'VIEW_INVENTORY_ANALYTICS', 'MANAGE_INVENTORY', 'DOWNLOAD_CATALOG',
         'VIEW_PROCUREMENT', 'REQUEST_PRODUCTS', 'MANAGE_PROCUREMENT', 'VIEW_SUPPLIER_PAYABLES', 'MANAGE_SUPPLIER_PAYABLES',
@@ -246,7 +247,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
         'VIEW_DELIVERY_STATUS',
         'VIEW_KIT_LOANS', 'REQUEST_KIT_LOANS', 'VIEW_SIZE_CHANGES', 'CREATE_SIZE_CHANGES'
     ],
-    driver: ['EXECUTE_DELIVERY']
+    driver: ['EXECUTE_DELIVERY'],
+    marketing: [
+        'VIEW_LEADS', 'VIEW_ALL_LEADS', 'MANAGE_LEADS', 'MANAGE_LEAD_TEMPLATES', 'VIEW_META_LEADS', 'IMPORT_CLIENTS',
+        'VIEW_INVENTORY', 'VIEW_INVENTORY_VALUE', 'MANAGE_WEB_STORE'
+    ]
 };
 
 export const getDefaultPermissions = (role: string | null | undefined): string[] =>
