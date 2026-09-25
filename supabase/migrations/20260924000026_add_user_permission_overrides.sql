@@ -59,7 +59,7 @@ AS $$
     SELECT public.user_has_permission(auth.uid(), p_permission);
 $$;
 
-REVOKE ALL ON FUNCTION public.user_has_permission(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.user_has_permission(uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.user_has_permission(uuid, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.auth_user_has_permission(text) TO authenticated;
 
@@ -246,7 +246,7 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.set_user_permission_overrides(uuid, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.set_user_permission_overrides(uuid, jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.set_user_permission_overrides(uuid, jsonb) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';
