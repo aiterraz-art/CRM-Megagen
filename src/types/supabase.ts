@@ -1618,6 +1618,49 @@ export interface Database {
                     created_at?: string
                 }
             }
+            role_permissions: {
+                Row: {
+                    id: string
+                    role: string
+                    permission: string
+                    created_at: string | null
+                }
+                Insert: {
+                    id?: string
+                    role: string
+                    permission: string
+                    created_at?: string | null
+                }
+                Update: {
+                    id?: string
+                    role?: string
+                    permission?: string
+                    created_at?: string | null
+                }
+            }
+            user_permission_overrides: {
+                Row: {
+                    user_id: string
+                    permission: string
+                    effect: 'grant' | 'deny'
+                    updated_by: string | null
+                    updated_at: string
+                }
+                Insert: {
+                    user_id: string
+                    permission: string
+                    effect: 'grant' | 'deny'
+                    updated_by?: string | null
+                    updated_at?: string
+                }
+                Update: {
+                    user_id?: string
+                    permission?: string
+                    effect?: 'grant' | 'deny'
+                    updated_by?: string | null
+                    updated_at?: string
+                }
+            }
         }
         Functions: {
             apply_inventory_manual_adjustment: {
@@ -1690,6 +1733,30 @@ export interface Database {
                     office: string | null
                     seller_name: string | null
                 }[]
+            }
+            sync_role_permissions: {
+                Args: {
+                    p_rows: Json
+                }
+                Returns: number
+            }
+            set_user_permission_overrides: {
+                Args: {
+                    p_user_id: string
+                    p_overrides: Json
+                }
+                Returns: number
+            }
+            mark_delivery_route_item_closed: {
+                Args: {
+                    p_route_item_id: string
+                    p_proof_photo_url?: string | null
+                    p_attempted_at?: string | null
+                    p_lat?: number | null
+                    p_lng?: number | null
+                    p_notes?: string | null
+                }
+                Returns: Json
             }
         }
     }

@@ -87,10 +87,10 @@ const UserPermissionsModal = ({ user, isOpen, onClose }: Props) => {
                 .filter(([, choice]) => choice !== 'role')
                 .map(([permission, effect]) => ({ permission, effect }));
 
-            const { error } = await supabase.rpc('set_user_permission_overrides' as any, {
+            const { error } = await supabase.rpc('set_user_permission_overrides', {
                 p_user_id: user.id,
                 p_overrides: overrides
-            } as any);
+            });
 
             if (error) throw error;
             onClose();

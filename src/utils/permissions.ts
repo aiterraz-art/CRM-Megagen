@@ -329,7 +329,8 @@ export const buildRolePermissionMatrix = (rows: RolePermissionRow[] | null): Rec
  */
 export const fetchUserPermissionOverrides = async (userId: string): Promise<UserPermissionOverride[]> => {
     try {
-        const { data, error } = await (supabase.from('user_permission_overrides') as any)
+        const { data, error } = await supabase
+            .from('user_permission_overrides')
             .select('permission, effect')
             .eq('user_id', userId);
 
