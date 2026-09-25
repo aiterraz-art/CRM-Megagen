@@ -24,10 +24,11 @@ import { isProspectStatus } from '../utils/prospect';
 import { Database } from '../types/supabase';
 import ClientFormModal from '../components/modals/ClientFormModal';
 import { saveClientWithDeduplication } from '../utils/clientDuplicates';
+import { getVirtualChannelLabel, getVirtualOutcomeLabel, isVirtualVisit, VIRTUAL_VISIT_TYPE } from '../utils/virtualVisits';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 type VisitStatusFilter = 'all' | 'in_progress' | 'completed' | 'cancelled';
-type VisitTypeFilter = 'all' | 'cold_visit';
+type VisitTypeFilter = 'all' | 'cold_visit' | 'virtual';
 type VisitConversionFilter = 'all' | 'pending' | 'converted';
 
 interface VisitHistoryItem {
@@ -63,6 +64,9 @@ interface VisitHistoryItem {
     sales_rep_id: string | null;
     sales_rep_email: string | null;
     visit_type: string | null;
+    channel: string | null;
+    outcome: string | null;
+    duration_minutes: number | null;
     linked_order_id: string | null;
     linked_order_folio: number | null;
     conversion_status: 'pending' | 'converted';
@@ -119,7 +123,7 @@ const getDefaultFilters = (): VisitFilters => {
 };
 
 const sanitizeTypeFilter = (value: string | null): VisitTypeFilter => {
-    if (value === 'all' || value === 'cold_visit') return value;
+    if (value === 'all' || value === 'cold_visit' || value === VIRTUAL_VISIT_TYPE) return value;
     return 'cold_visit';
 };
 
@@ -213,6 +217,7 @@ const getVisitStatusClass = (status: string | null | undefined) => {
 
 const getVisitTypeLabel = (visit: VisitHistoryItem) => {
     if ((visit.visit_type || '').toLowerCase() === 'cold_visit') return 'Visita en Frio';
+    if (isVirtualVisit({ type: visit.visit_type })) return `Virtual · ${getVirtualChannelLabel(visit.channel)}`;
     const normalizedStatus = normalizeVisitStatus(visit.status);
     if (normalizedStatus === 'scheduled' || normalizedStatus === 'pending' || normalizedStatus === 'rescheduled') {
         return 'Agendada';
@@ -221,21 +226,26 @@ const getVisitTypeLabel = (visit: VisitHistoryItem) => {
     return 'Visita';
 };
 
+// Cold and virtual visits carry their conversion through orders.visit_id.
+const tracksConversion = (visit: VisitHistoryItem) =>
+    (visit.visit_type || '').toLowerCase() === 'cold_visit' || isVirtualVisit({ type: visit.visit_type });
+
 const getConversionLabel = (visit: VisitHistoryItem) => {
-    if ((visit.visit_type || '').toLowerCase() !== 'cold_visit') return 'N/A';
+    if (!tracksConversion(visit)) return 'N/A';
     return visit.conversion_status === 'converted'
         ? `Pedido${visit.linked_order_folio ? ` #${visit.linked_order_folio}` : ''}`
         : 'Sin convertir';
 };
 
 const getConversionClass = (visit: VisitHistoryItem) => {
-    if ((visit.visit_type || '').toLowerCase() !== 'cold_visit') return 'bg-slate-100 text-slate-500';
+    if (!tracksConversion(visit)) return 'bg-slate-100 text-slate-500';
     return visit.conversion_status === 'converted'
         ? 'bg-emerald-100 text-emerald-700'
         : 'bg-amber-100 text-amber-700';
 };
 
 const buildLocationLabel = (visit: VisitHistoryItem) => {
+    if (isVirtualVisit({ type: visit.visit_type })) return `Remota (${getVirtualChannelLabel(visit.channel)})`;
     const address = String(visit.client_address || '').trim();
     const area = String(visit.client_comuna || visit.client_zone || '').trim();
     const hasGps = (typeof visit.lat === 'number' && typeof visit.lng === 'number')
@@ -465,6 +475,9 @@ const VisitHistory = () => {
                         client_id,
                         sales_rep_id,
                         type,
+                        channel,
+                        outcome,
+                        duration_minutes,
                         cold_visit_clinic_name,
                         cold_visit_address,
                         cold_visit_doctor_name,
@@ -506,8 +519,8 @@ const VisitHistory = () => {
                     query = query.in('sales_rep_id', sellerScopeIds);
                 }
 
-                if (filters.type === 'cold_visit') {
-                    query = query.eq('type', 'cold_visit');
+                if (filters.type !== 'all') {
+                    query = query.eq('type', filters.type);
                 }
 
                 if (filters.status === 'in_progress') {
@@ -579,6 +592,9 @@ const VisitHistory = () => {
                         sales_rep_id: visit.sales_rep_id || salesRep?.id || null,
                         sales_rep_email: salesRep?.email || null,
                         visit_type: visit.type || null,
+                        channel: visit.channel || null,
+                        outcome: visit.outcome || null,
+                        duration_minutes: visit.duration_minutes ?? null,
                         linked_order_id: linkedOrder?.id || null,
                         linked_order_folio: linkedOrder?.folio || null,
                         conversion_status: linkedOrder ? 'converted' : 'pending'
@@ -634,6 +650,15 @@ const VisitHistory = () => {
         return `${hours}h ${remainingMinutes}m`;
     };
 
+    // Virtual visits report the duration declared by the seller; the timer may have kept running.
+    const formatVisitDuration = (visit: VisitHistoryItem) => {
+        if (visit.duration_minutes != null && visit.check_out_time) {
+            const minutes = visit.duration_minutes;
+            return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+        }
+        return calculateDuration(visit.check_in_time, visit.check_out_time, visit.status);
+    };
+
     const filteredVisits = useMemo(() => visits.filter((visit) => {
         const query = filters.q.trim().toLowerCase();
         if (query) {
@@ -647,9 +672,8 @@ const VisitHistory = () => {
             if (!matchesQuery) return false;
         }
 
-        const isColdVisit = (visit.visit_type || '').toLowerCase() === 'cold_visit';
         if (filters.conversion !== 'all') {
-            if (!isColdVisit) return false;
+            if (!tracksConversion(visit)) return false;
             if (filters.conversion !== visit.conversion_status) return false;
         }
 
@@ -806,10 +830,11 @@ const VisitHistory = () => {
             fecha: format(parseISO(visit.check_in_time), 'yyyy-MM-dd'),
             hora_inicio: formatHour(visit.check_in_time),
             hora_termino: formatHour(visit.check_out_time),
-            duracion: calculateDuration(visit.check_in_time, visit.check_out_time, visit.status),
+            duracion: formatVisitDuration(visit),
             vendedor: visit.sales_rep_name,
             email_vendedor: visit.sales_rep_email || '',
             tipo_visita: getVisitTypeLabel(visit),
+            resultado: getVirtualOutcomeLabel(visit.outcome) || '',
             cliente: visit.client_name,
             doctor: visit.doctor_name || '',
             ubicacion: buildLocationLabel(visit),
@@ -827,7 +852,7 @@ const VisitHistory = () => {
         const worksheet = XLSX.utils.json_to_sheet(rows);
         XLSX.utils.book_append_sheet(workbook, worksheet, 'Visitas');
 
-        const scopeLabel = filters.type === 'cold_visit' ? 'visitas_frio' : 'visitas';
+        const scopeLabel = filters.type === 'cold_visit' ? 'visitas_frio' : filters.type === VIRTUAL_VISIT_TYPE ? 'gestiones_virtuales' : 'visitas';
         XLSX.writeFile(workbook, `${scopeLabel}_${filters.from}_${filters.to}.xlsx`);
     };
 
@@ -839,7 +864,7 @@ const VisitHistory = () => {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
                         <h1 className="text-4xl font-black text-gray-900 tracking-tight mb-2">Historial de Visitas</h1>
-                        <p className="text-gray-500 font-medium">Aquí se muestran visitas a clientes y visitas en frío. Desde este módulo también puedes convertir una visita en frío en venta.</p>
+                        <p className="text-gray-500 font-medium">Aquí se muestran visitas a clientes, visitas en frío y gestiones virtuales. Desde este módulo también puedes convertir una visita en frío en venta.</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
                         <button
@@ -916,6 +941,7 @@ const VisitHistory = () => {
                                 className="w-full appearance-none px-4 py-4 bg-gray-50/50 border border-transparent rounded-2xl text-gray-900 font-bold focus:bg-white focus:border-dental-500/30 outline-none transition-all"
                             >
                                 <option value="cold_visit">Visita en Frio</option>
+                                <option value="virtual">Gestión virtual</option>
                                 <option value="all">Todas las visitas</option>
                             </select>
                         </label>
@@ -1021,7 +1047,7 @@ const VisitHistory = () => {
                                                         {normalizeVisitStatus(visit.status) === 'in_progress' || normalizeVisitStatus(visit.status) === 'in-progress' ? (
                                                             <LiveDuration start={visit.check_in_time} />
                                                         ) : (
-                                                            <span>{calculateDuration(visit.check_in_time, visit.check_out_time, visit.status)}</span>
+                                                            <span>{formatVisitDuration(visit)}</span>
                                                         )}
                                                     </div>
                                                 </td>
@@ -1109,6 +1135,9 @@ const VisitHistory = () => {
                                                     <div className="flex items-start gap-2">
                                                         <ClipboardList size={16} className="text-gray-300 mt-1 shrink-0" />
                                                         <p className="text-sm font-medium text-gray-600 line-clamp-4 leading-relaxed">
+                                                            {getVirtualOutcomeLabel(visit.outcome) && (
+                                                                <span className="block text-[10px] font-black uppercase tracking-widest text-sky-700">{getVirtualOutcomeLabel(visit.outcome)}</span>
+                                                            )}
                                                             {visit.notes || <span className="italic text-gray-400">Sin notas registradas</span>}
                                                         </p>
                                                     </div>

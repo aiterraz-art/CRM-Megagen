@@ -5,14 +5,15 @@ import { Database } from '../types/supabase';
 import { useUser } from './UserContext';
 import { queueVisitCheckoutLocation } from '../services/locationQueue';
 import { AUTO_REFRESH_ENABLED } from '../utils/runtimeFlags';
+import { getVirtualChannelLabel, getVirtualOutcomeLabel, isVirtualVisit, VIRTUAL_VISIT_TYPE, VirtualChannel, VirtualCheckoutDetails } from '../utils/virtualVisits';
 
 type Visit = Database['public']['Tables']['visits']['Row'];
 
 interface VisitContextType {
     activeVisit: Visit | null;
     loading: boolean;
-    startVisit: (clientId: string, options?: { type?: string }) => Promise<Visit | null>;
-    endVisit: (options?: { notes?: string }) => Promise<boolean>;
+    startVisit: (clientId: string, options?: { type?: string; channel?: VirtualChannel }) => Promise<Visit | null>;
+    endVisit: (options?: { notes?: string; virtual?: VirtualCheckoutDetails }) => Promise<boolean>;
 }
 
 const VisitContext = createContext<VisitContextType | undefined>(undefined);
@@ -102,7 +103,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
     }, [profile]);
 
-    const startVisit = async (clientId: string, options?: { type?: string }) => {
+    const startVisit = async (clientId: string, options?: { type?: string; channel?: VirtualChannel }) => {
         if (!profile?.id) return null;
 
         if (activeVisit) {
@@ -132,18 +133,22 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             return existing;
         }
 
-        // Capture Location for Audit
+        const isVirtual = options?.type === VIRTUAL_VISIT_TYPE;
+
+        // Capture Location for Audit (virtual visits happen remotely: no location)
         let checkInLat = null;
         let checkInLng = null;
 
-        try {
-            const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 200 });
-            checkInLat = pos.coords.latitude;
-            checkInLng = pos.coords.longitude;
-        } catch (geoError) {
-            console.warn("Could not get geolocation for check-in audit:", geoError);
-            // We continue anyway, as blocking logic is handled in frontend if desired.
-            // But we try to capture it for "knowing where users are".
+        if (!isVirtual) {
+            try {
+                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, retries: 1, minAccuracyMeters: 200 });
+                checkInLat = pos.coords.latitude;
+                checkInLng = pos.coords.longitude;
+            } catch (geoError) {
+                console.warn("Could not get geolocation for check-in audit:", geoError);
+                // We continue anyway, as blocking logic is handled in frontend if desired.
+                // But we try to capture it for "knowing where users are".
+            }
         }
 
         try {
@@ -153,6 +158,7 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 sales_rep_id: profile.id,
                 status: 'in_progress',
                 type: options?.type || null,
+                channel: isVirtual ? options?.channel || null : null,
                 lat: checkInLat, // Audit: Check-in location
                 lng: checkInLng, // Audit: Check-in location
                 scheduled_at: new Date().toISOString() // Required by DB constraint
@@ -170,23 +176,27 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return null;
     };
 
-    const endVisit = async (options?: { notes?: string }) => {
+    const endVisit = async (options?: { notes?: string; virtual?: VirtualCheckoutDetails }) => {
         if (!activeVisit) return false;
 
         const closingVisitId = activeVisit.id;
+        const isVirtual = isVirtualVisit(activeVisit);
+        const virtual = isVirtual ? options?.virtual : undefined;
 
         try {
-            // Get location
+            // Get location (not for virtual visits)
             let lat = null;
             let lng = null;
 
-            try {
-                const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, maximumAgeMs: 2000, retries: 1, minAccuracyMeters: 200 });
-                lat = pos.coords.latitude;
-                lng = pos.coords.longitude;
-            } catch (geoError) {
-                console.warn("Could not get geolocation for checkout:", geoError);
-                // Continue without immediate location; queue retry after close.
+            if (!isVirtual) {
+                try {
+                    const pos = await checkGPSConnection({ showAlert: false, timeoutMs: 12000, maximumAgeMs: 2000, retries: 1, minAccuracyMeters: 200 });
+                    lat = pos.coords.latitude;
+                    lng = pos.coords.longitude;
+                } catch (geoError) {
+                    console.warn("Could not get geolocation for checkout:", geoError);
+                    // Continue without immediate location; queue retry after close.
+                }
             }
 
             const { error } = await supabase.from('visits').update({
@@ -194,7 +204,12 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 status: 'completed',
                 notes: options?.notes || null,
                 check_out_lat: lat as number | undefined,
-                check_out_lng: lng as number | undefined
+                check_out_lng: lng as number | undefined,
+                ...(virtual ? {
+                    outcome: virtual.outcome,
+                    duration_minutes: virtual.durationMinutes,
+                    next_action_at: virtual.nextActionAt
+                } : {})
             } as any).eq('id', closingVisitId);
 
             if (error) {
@@ -203,8 +218,11 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 // Do NOT clear activeVisit so user can try again
                 return false;
             } else {
+                if (virtual?.nextActionAt) {
+                    await createFollowUpTask(activeVisit, virtual, options?.notes || '');
+                }
                 // If checkout location was unavailable at close time, retry in background queue.
-                if (lat === null || lng === null) {
+                if (!isVirtual && (lat === null || lng === null)) {
                     void queueVisitCheckoutLocation({
                         visit_id: closingVisitId,
                         seller_id: profile?.id || activeVisit.sales_rep_id || ''
@@ -220,6 +238,34 @@ export const VisitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             alert(`Error inesperado al terminar visita: ${error.message || 'Error desconocido'}`);
             return false;
         }
+    };
+
+    // The follow-up task is created after the visit is closed: if it fails the visit stays
+    // recorded and the seller is told to create the task by hand.
+    const createFollowUpTask = async (visit: Visit, virtual: VirtualCheckoutDetails, notes: string) => {
+        if (!profile?.id || !virtual.nextActionAt) return;
+
+        const outcomeLabel = getVirtualOutcomeLabel(virtual.outcome);
+        const { data, error } = await supabase.from('tasks').insert({
+            user_id: profile.id,
+            client_id: visit.client_id,
+            title: `Seguimiento gestión ${getVirtualChannelLabel(visit.channel).toLowerCase()}${outcomeLabel ? ` · ${outcomeLabel}` : ''}`,
+            description: notes || null,
+            due_date: virtual.nextActionAt,
+            priority: 'medium',
+            status: 'pending'
+        } as any).select('id').single();
+
+        if (error || !data) {
+            console.error("Error creating follow-up task:", error);
+            alert('La gestión quedó registrada, pero no se pudo crear la tarea de seguimiento. Créala manualmente desde la agenda.');
+            return;
+        }
+
+        const { error: linkError } = await supabase.from('visits')
+            .update({ follow_up_task_id: (data as { id: string }).id })
+            .eq('id', visit.id);
+        if (linkError) console.warn("Could not link follow-up task to visit:", linkError);
     };
 
     return (

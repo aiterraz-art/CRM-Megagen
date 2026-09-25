@@ -889,16 +889,20 @@ export interface Database {
             }
             visits: {
                 Row: {
+                    channel: string | null
                     check_in_time: string | null
                     check_out_time: string | null
                     check_out_lat: number | null
                     check_out_lng: number | null
                     client_id: string | null
                     doctor_name: string | null
+                    duration_minutes: number | null
+                    follow_up_task_id: string | null
                     google_event_id: string | null
                     id: string
                     lat: number | null
                     lng: number | null
+                    next_action_at: string | null
                     notes: string | null
                     outcome: string | null
                     purpose: string | null
@@ -908,16 +912,20 @@ export interface Database {
                     title: string | null
                 }
                 Insert: {
+                    channel?: string | null
                     check_in_time?: string | null
                     check_out_time?: string | null
                     check_out_lat?: number | null
                     check_out_lng?: number | null
                     client_id?: string | null
                     doctor_name?: string | null
+                    duration_minutes?: number | null
+                    follow_up_task_id?: string | null
                     google_event_id?: string | null
                     id?: string
                     lat?: number | null
                     lng?: number | null
+                    next_action_at?: string | null
                     notes?: string | null
                     outcome?: string | null
                     purpose?: string | null
@@ -927,16 +935,20 @@ export interface Database {
                     title?: string | null
                 }
                 Update: {
+                    channel?: string | null
                     check_in_time?: string | null
                     check_out_time?: string | null
                     check_out_lat?: number | null
                     check_out_lng?: number | null
                     client_id?: string | null
                     doctor_name?: string | null
+                    duration_minutes?: number | null
+                    follow_up_task_id?: string | null
                     google_event_id?: string | null
                     id?: string
                     lat?: number | null
                     lng?: number | null
+                    next_action_at?: string | null
                     notes?: string | null
                     outcome?: string | null
                     purpose?: string | null

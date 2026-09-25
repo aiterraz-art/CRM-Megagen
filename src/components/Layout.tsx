@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { AlertTriangle, HeartPulse, LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw, Globe } from 'lucide-react';
+import { AlertTriangle, HeartPulse, LayoutDashboard, Map as MapIcon, Calendar, Users, Package, LogOut, Settings, ShieldCheck, ShoppingBag, ShoppingCart, Truck, Menu, X, Stethoscope, ClipboardList, ActivitySquare, CircleDollarSign, Target, MessageSquare, Trophy, Megaphone, ShipWheel, ChevronDown, RefreshCw, Globe, Headset } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import GlobalVisitTimer from './GlobalVisitTimer';
@@ -132,6 +132,14 @@ const allMenuEntries: MenuEntry[] = [
         label: 'Visita en Frío',
         path: '/cold-visit',
         icon: <Stethoscope size={20} />,
+        group: 'prospection',
+        visibleWhen: ({ can }) => can('VIEW_VISITS'),
+    },
+    {
+        id: 'virtual-visit',
+        label: 'Gestión Virtual',
+        path: '/virtual-visit',
+        icon: <Headset size={20} />,
         group: 'prospection',
         visibleWhen: ({ can }) => can('VIEW_VISITS'),
     },

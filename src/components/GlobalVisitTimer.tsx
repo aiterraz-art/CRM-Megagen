@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVisit } from '../contexts/VisitContext';
-import { Clock, MapPin, Camera, ShoppingCart } from 'lucide-react';
+import { Clock, MapPin, Camera, ShoppingCart, Headset } from 'lucide-react';
 import { Database } from '../types/supabase';
 import VisitCheckoutModal from './modals/VisitCheckoutModal';
 import ScheduleVisitModal from './modals/ScheduleVisitModal';
@@ -9,6 +9,7 @@ import { supabase } from '../services/supabase';
 import { isProspectStatus } from '../utils/prospect';
 import { clearVisitCheckoutDraft, loadVisitCheckoutDraft, saveVisitCheckoutDraft } from '../utils/visitCheckoutDraft';
 import { cleanupTransientColdVisitClient } from '../utils/coldVisitClientLifecycle';
+import { getVirtualChannelLabel, isVirtualVisit, VirtualCheckoutDetails } from '../utils/virtualVisits';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -124,7 +125,7 @@ const GlobalVisitTimer = () => {
         return { formatted, isOvertime };
     };
 
-    const handleConfirmCheckout = async () => {
+    const handleConfirmCheckout = async (virtual?: VirtualCheckoutDetails) => {
         if (!activeVisit) return;
         setFinishing(true);
 
@@ -183,7 +184,7 @@ const GlobalVisitTimer = () => {
                 } : prev);
             }
 
-            const closed = await endVisit({ notes: visitNotes });
+            const closed = await endVisit({ notes: visitNotes, virtual });
             if (closed) {
                 if (isColdVisitFlow && activeClient) {
                     const cleanupResult = await cleanupTransientColdVisitClient({
@@ -217,6 +218,7 @@ const GlobalVisitTimer = () => {
     const timeInfo = formatTime(elapsedTime);
     const isColdVisitFlow = (activeVisit.type || '').toLowerCase() === 'cold_visit';
     const requiresProspectCompletion = isProspectStatus(activeClient?.status);
+    const isVirtual = isVirtualVisit(activeVisit);
 
     return (
         <div className="fixed bottom-0 left-0 right-0 z-50 animate-in slide-in-from-bottom-full duration-500">
@@ -231,6 +233,7 @@ const GlobalVisitTimer = () => {
                         </div>
                         <div>
                             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest hidden md:block">
+                                {isVirtual ? `Gestión ${getVirtualChannelLabel(activeVisit.channel)} · ` : ''}
                                 {timeInfo.isOvertime ? 'Tiempo Excedido' : 'Tiempo Restante'}
                             </p>
                             <p className={`text-xl font-black tracking-wider ${timeInfo.isOvertime ? 'text-red-500' : 'text-white'}`}>
@@ -243,13 +246,15 @@ const GlobalVisitTimer = () => {
                     <div className="flex items-center space-x-3">
                         {/* Shortcuts */}
                         <div className="hidden md:flex items-center space-x-2 mr-4 border-r border-white/10 pr-4">
-                            <button
-                                onClick={() => navigate(`/visit/${activeVisit.client_id}`)}
-                                className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all flex flex-col items-center group"
-                                title="Evidencia Visual"
-                            >
-                                <Camera size={18} />
-                            </button>
+                            {!isVirtual && (
+                                <button
+                                    onClick={() => navigate(`/visit/${activeVisit.client_id}`)}
+                                    className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all flex flex-col items-center group"
+                                    title="Evidencia Visual"
+                                >
+                                    <Camera size={18} />
+                                </button>
+                            )}
                             <button
                                 onClick={() => navigate(`/visit/${activeVisit.client_id}`)}
                                 className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all flex flex-col items-center group"
@@ -268,8 +273,8 @@ const GlobalVisitTimer = () => {
                                 <span>Guardando...</span>
                             ) : (
                                 <>
-                                    <span>Terminar Visita</span>
-                                    <MapPin size={14} />
+                                    <span>{isVirtual ? 'Terminar Gestión' : 'Terminar Visita'}</span>
+                                    {isVirtual ? <Headset size={14} /> : <MapPin size={14} />}
                                 </>
                             )}
                         </button>
@@ -298,6 +303,8 @@ const GlobalVisitTimer = () => {
                 onClose={() => setShowNotesModal(false)}
                 onSchedule={() => setShowScheduleModal(true)}
                 saving={finishing}
+                virtualChannel={isVirtual ? activeVisit.channel || 'call' : null}
+                startedAt={activeVisit.check_in_time}
             />
 
             <ScheduleVisitModal

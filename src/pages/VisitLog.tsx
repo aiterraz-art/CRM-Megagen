@@ -6,7 +6,7 @@ import { checkGPSConnection } from '../utils/gps';
 
 import { useUser } from '../contexts/UserContext';
 import { Database } from '../types/supabase';
-import { MapPin, Clock, Camera, CheckCircle, ChevronRight, AlertCircle, Navigation, ShoppingCart } from 'lucide-react';
+import { MapPin, Clock, Camera, CheckCircle, ChevronRight, AlertCircle, Navigation, ShoppingCart, Headset, ExternalLink } from 'lucide-react';
 import { useVisit } from '../contexts/VisitContext';
 import VisualEvidence from '../components/VisualEvidence';
 import VisitCheckoutModal from '../components/modals/VisitCheckoutModal';
@@ -17,6 +17,7 @@ import { isProspectStatus } from '../utils/prospect';
 import ConfettiBurst, { ConfettiBurstController } from '../components/ConfettiBurst';
 import { clearVisitCheckoutDraft, loadVisitCheckoutDraft, saveVisitCheckoutDraft } from '../utils/visitCheckoutDraft';
 import { cleanupTransientColdVisitClient } from '../utils/coldVisitClientLifecycle';
+import { buildVirtualChannelUrl, getVirtualChannelLabel, isVirtualVisit, openVirtualChannel, VirtualChannel, VirtualCheckoutDetails } from '../utils/virtualVisits';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -45,6 +46,7 @@ const VisitLog = () => {
     const [checkoutDoctorSpecialty, setCheckoutDoctorSpecialty] = useState('');
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [confettiController, setConfettiController] = useState<ConfettiBurstController | null>(null);
+    const isVirtualFlow = isVirtualVisit(activeVisit) && activeVisit?.client_id === clientId;
 
     // Client Validation State
     // Client Validation State
@@ -201,7 +203,7 @@ const VisitLog = () => {
         return { formatted, isOvertime };
     };
 
-    const handleCheckOut = async () => {
+    const handleCheckOut = async (virtual?: VirtualCheckoutDetails) => {
         if (!visitId) return;
         setFinishing(true);
 
@@ -255,7 +257,7 @@ const VisitLog = () => {
                     } : {})
                 } : prev);
             }
-            const closed = await endVisit({ notes: visitNotes });
+            const closed = await endVisit({ notes: visitNotes, virtual });
             if (closed) {
                 if (isColdVisitFlow && client) {
                     const cleanupResult = await cleanupTransientColdVisitClient({
@@ -295,7 +297,8 @@ const VisitLog = () => {
             alert("⚠️ DATOS INCOMPLETOS\n\nPara generar una cotización formal, debes completar la ficha del cliente (RUT, Email, Teléfono, etc.).");
             setShowClientForm(true);
         } else {
-            navigate('/quotations', { state: { client } });
+            // Virtual visits link the quotation (and the order it becomes) to the visit.
+            navigate('/quotations', { state: { client, sourceVisitId: isVirtualFlow ? visitId : null } });
         }
     };
 
@@ -303,6 +306,9 @@ const VisitLog = () => {
     if (!client) return <div className="p-8 text-center text-red-500 font-bold">Client not found</div>;
 
     const isColdVisitFlow = (activeVisit?.type || '').toLowerCase() === 'cold_visit';
+    const virtualChannelUrl = isVirtualFlow && activeVisit?.channel
+        ? buildVirtualChannelUrl(activeVisit.channel as VirtualChannel, client)
+        : null;
 
     // Previous conditional visual return was removed here.
 
@@ -339,6 +345,8 @@ const VisitLog = () => {
                     onClose={() => setShowNotesModal(false)}
                     onSchedule={() => setShowScheduleModal(true)}
                     saving={finishing}
+                    virtualChannel={isVirtualFlow ? activeVisit?.channel || 'call' : null}
+                    startedAt={activeVisit?.check_in_time}
                 />
 
                 {/* Schedule Modal Integration */}
@@ -379,7 +387,7 @@ const VisitLog = () => {
                                 }
                             }
                             alert("Ficha actualizada correctamente. Ahora puedes cotizar.");
-                            navigate('/quotations', { state: { client: { ...client, ...updatedData, status: 'active' } } });
+                            navigate('/quotations', { state: { client: { ...client, ...updatedData, status: 'active' }, sourceVisitId: isVirtualFlow ? visitId : null } });
                         }}
                     />
                 )}
@@ -402,12 +410,21 @@ const VisitLog = () => {
                             </div>
                         </div>
                     </div>
-                    <div className="flex flex-col items-center">
-                        <div className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] mb-2 ${isNear ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-red-50 text-red-600 border border-red-100'}`}>
-                            {isNear ? '• Secure Proximity Active' : '! Distance Warning'}
+                    {isVirtualFlow ? (
+                        <div className="flex flex-col items-center">
+                            <div className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] mb-2 bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center gap-2">
+                                <Headset size={14} /> Gestión virtual · {getVirtualChannelLabel(activeVisit?.channel)}
+                            </div>
+                            <p className="text-xs text-gray-400 font-bold">SIN GEOLOCALIZACIÓN</p>
                         </div>
-                        <p className="text-xs text-gray-400 font-bold">2KM GEOSHIELD ACTIVE</p>
-                    </div>
+                    ) : (
+                        <div className="flex flex-col items-center">
+                            <div className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] mb-2 ${isNear ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-red-50 text-red-600 border border-red-100'}`}>
+                                {isNear ? '• Secure Proximity Active' : '! Distance Warning'}
+                            </div>
+                            <p className="text-xs text-gray-400 font-bold">2KM GEOSHIELD ACTIVE</p>
+                        </div>
+                    )}
                 </div>
 
                 {!visitId ? (
@@ -426,21 +443,42 @@ const VisitLog = () => {
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <button
-                            onClick={() => setShowEvidence(true)}
-                            className="premium-card p-8 flex items-center justify-between group hover:border-dental-400 transition-all text-left"
-                        >
-                            <div className="flex items-center space-x-4">
-                                <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                    <Camera size={24} />
+                        {isVirtualFlow ? (
+                            <button
+                                onClick={() => virtualChannelUrl && openVirtualChannel(virtualChannelUrl)}
+                                disabled={!virtualChannelUrl}
+                                className="premium-card p-8 flex items-center justify-between group hover:border-dental-400 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <div className="flex items-center space-x-4">
+                                    <div className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                                        <Headset size={24} />
+                                    </div>
+                                    <div>
+                                        <p className="font-black text-gray-900">Abrir {getVirtualChannelLabel(activeVisit?.channel)}</p>
+                                        <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">
+                                            {virtualChannelUrl ? 'Contactar al cliente' : 'Sin dato de contacto en la ficha'}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="font-black text-gray-900">Visual Evidence</p>
-                                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Sync Clinic Photos</p>
+                                <ExternalLink size={20} className="text-gray-200" />
+                            </button>
+                        ) : (
+                            <button
+                                onClick={() => setShowEvidence(true)}
+                                className="premium-card p-8 flex items-center justify-between group hover:border-dental-400 transition-all text-left"
+                            >
+                                <div className="flex items-center space-x-4">
+                                    <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition-all">
+                                        <Camera size={24} />
+                                    </div>
+                                    <div>
+                                        <p className="font-black text-gray-900">Visual Evidence</p>
+                                        <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Sync Clinic Photos</p>
+                                    </div>
                                 </div>
-                            </div>
-                            <ChevronRight size={20} className="text-gray-200" />
-                        </button>
+                                <ChevronRight size={20} className="text-gray-200" />
+                            </button>
+                        )}
 
                         <button
                             onClick={handleQuotationClick}
@@ -459,7 +497,7 @@ const VisitLog = () => {
                         </button>
 
                         <div className="md:col-span-2 p-4 text-center text-gray-400 text-xs uppercase tracking-widest font-bold bg-gray-50 rounded-xl border border-gray-100">
-                            La visita está en curso. Usa la barra inferior para terminar.
+                            {isVirtualFlow ? 'La gestión está en curso' : 'La visita está en curso'}. Usa la barra inferior para terminar.
                         </div>
 
                         {/* Checkout Button */}
@@ -468,7 +506,7 @@ const VisitLog = () => {
                             disabled={finishing}
                             className="md:col-span-2 p-6 bg-red-50 text-red-600 rounded-2xl font-black text-lg hover:bg-red-600 hover:text-white transition-all shadow-lg active:scale-95"
                         >
-                            {finishing ? "Procesando..." : "Finalizar Visita"}
+                            {finishing ? "Procesando..." : isVirtualFlow ? "Finalizar Gestión" : "Finalizar Visita"}
                         </button>
 
                     </div>

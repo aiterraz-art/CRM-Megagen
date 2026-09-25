@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, MapPin, Phone, Mail, Building2, FileText, ShoppingBag, Clock, FileSpreadsheet, Pencil, CalendarRange, CheckCircle2, AlertTriangle, Send, MessageCircle, HeartPulse } from 'lucide-react';
+import { X, MapPin, Phone, Mail, Building2, FileText, ShoppingBag, Clock, FileSpreadsheet, Pencil, CalendarRange, CheckCircle2, AlertTriangle, Send, MessageCircle, HeartPulse, Headset } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { ATTEMPT_CHANNELS, ATTEMPT_OUTCOMES } from '../../utils/reactivation';
 import { Database } from '../../types/supabase';
@@ -8,6 +8,8 @@ import { useNavigate } from 'react-router-dom';
 import CallOutcomeModal from './CallOutcomeModal';
 import ScheduleVisitModal from './ScheduleVisitModal';
 import ClientManagementModal from './ClientManagementModal';
+import VirtualVisitStartModal from './VirtualVisitStartModal';
+import { getVirtualChannelLabel, getVirtualOutcomeLabel, isVirtualVisit } from '../../utils/virtualVisits';
 import { useUser } from '../../contexts/UserContext';
 import { googleService } from '../../services/googleService';
 import { is3DentalCompany } from '../../utils/companyConfig';
@@ -181,6 +183,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const [showCallOutcome, setShowCallOutcome] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [showManagementModal, setShowManagementModal] = useState(false);
+    const [showVirtualVisitModal, setShowVirtualVisitModal] = useState(false);
 
     const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
     const show3DentalClientFields = is3DentalCompany();
@@ -221,7 +224,7 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
     const fetchHistoryItems = async (limit?: number): Promise<HistoryFetchResult> => {
         let visitsQuery = supabase
             .from('visits')
-            .select('id, title, purpose, notes, status, check_in_time, sales_rep_id')
+            .select('id, title, purpose, notes, status, check_in_time, sales_rep_id, type, channel, outcome')
             .eq('client_id', client.id)
             .order('check_in_time', { ascending: false });
         let quotationsQuery = supabase
@@ -315,8 +318,10 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 id: `visit-${item.id}`,
                 kind: 'visit' as const,
                 date: item.check_in_time,
-                title: item.status === 'scheduled' ? 'Visita agendada' : item.status === 'cancelled' ? 'Visita cancelada' : 'Visita registrada',
-                subtitle: item.title || item.purpose || item.notes || 'Sin detalle',
+                title: isVirtualVisit(item)
+                    ? `Gestión virtual · ${getVirtualChannelLabel(item.channel)}`
+                    : item.status === 'scheduled' ? 'Visita agendada' : item.status === 'cancelled' ? 'Visita cancelada' : 'Visita registrada',
+                subtitle: [getVirtualOutcomeLabel(item.outcome), item.title || item.purpose || item.notes].filter(Boolean).join(' — ') || 'Sin detalle',
                 actor: item.sales_rep_id ? actorNameMap[item.sales_rep_id] || 'Usuario' : null,
                 status: item.status === 'scheduled' ? 'Agendada' : item.status === 'cancelled' ? 'Cancelada' : 'Completada'
             }))),
@@ -642,6 +647,9 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                             <button onClick={() => setShowManagementModal(true)} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm sm:text-base transition-all shadow-lg shadow-emerald-900/30 active:scale-95">
                                 <MessageCircle size={18} /> Gestión
                             </button>
+                            <button onClick={() => setShowVirtualVisitModal(true)} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold text-sm sm:text-base transition-all shadow-lg shadow-sky-900/30 active:scale-95">
+                                <Headset size={18} /> Virtual
+                            </button>
                             <button onClick={handleQuote} className="min-w-0 flex items-center justify-center gap-2 px-3 sm:px-5 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold text-sm sm:text-base transition-all border border-gray-700 active:scale-95">
                                 <FileText size={18} /> Cotizar
                             </button>
@@ -907,12 +915,19 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                                         <div key={visit.id} className="p-4 sm:p-6 border-b border-gray-100 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 group">
                                             <div className="flex items-center gap-4 min-w-0">
                                                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold ${visit.status === 'scheduled' ? 'bg-purple-50 text-purple-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                                                    {visit.status === 'scheduled' ? <CalendarRange size={20} /> : <MapPin size={20} />}
+                                                    {visit.status === 'scheduled' ? <CalendarRange size={20} /> : isVirtualVisit(visit) ? <Headset size={20} /> : <MapPin size={20} />}
                                                 </div>
                                                 <div>
-                                                    <p className="font-bold text-gray-900">{visit.title || visit.purpose || 'Visita Regular'}</p>
+                                                    <p className="font-bold text-gray-900">
+                                                        {isVirtualVisit(visit) ? `Gestión virtual · ${getVirtualChannelLabel(visit.channel)}` : visit.title || visit.purpose || 'Visita Regular'}
+                                                    </p>
                                                     <p className="text-xs text-gray-500 font-medium flex items-center gap-1"><Clock size={10} /> {formatDateTime(visit.check_in_time)} por {visit.profiles?.full_name}</p>
                                                     {visit.status === 'scheduled' && <p className="text-[10px] text-purple-600 font-bold bg-purple-50 inline-block px-2 py-0.5 rounded mt-1">PROGRAMADA</p>}
+                                                    {isVirtualVisit(visit) && (visit.outcome || visit.duration_minutes != null) && (
+                                                        <p className="text-[10px] text-sky-700 font-bold bg-sky-50 inline-block px-2 py-0.5 rounded mt-1 uppercase">
+                                                            {[getVirtualOutcomeLabel(visit.outcome), visit.duration_minutes != null ? `${visit.duration_minutes} min` : null].filter(Boolean).join(' · ')}
+                                                        </p>
+                                                    )}
                                                     {visit.notes && (
                                                         <div className="mt-2 p-2 bg-gray-50 rounded-lg border border-gray-100">
                                                             <p className="text-xs text-gray-600 italic">"{visit.notes}"</p>
@@ -1092,6 +1107,12 @@ const ClientDetailModal = ({ client, onClose, onEdit, onEmail }: ClientDetailMod
                 onSaved={() => {
                     if (activeTab === 'visits' || activeTab === 'overview' || activeTab === 'history') fetchData();
                 }}
+            />
+
+            <VirtualVisitStartModal
+                client={client}
+                isOpen={showVirtualVisitModal}
+                onClose={() => setShowVirtualVisitModal(false)}
             />
 
             <ClientManagementModal

@@ -35,6 +35,7 @@ const LeadPipeline = loadable(() => import('./pages/LeadPipeline'));
 const LeadMessages = loadable(() => import('./pages/LeadMessages'));
 const MetaLeads = loadable(() => import('./pages/MetaLeads'));
 const ColdVisit = loadable(() => import('./pages/ColdVisit'));
+const VirtualVisit = loadable(() => import('./pages/VirtualVisit'));
 const Dispatch = loadable(() => import('./pages/Dispatch'));
 const DeliveryRoute = loadable(() => import('./pages/DeliveryRoute'));
 const DeliveryProofCapture = loadable(() => import('./pages/DeliveryProofCapture'));
@@ -194,6 +195,7 @@ const AppRoutesWithRecovery = ({ session }: { session: Session | null }) => {
                     ) : <Navigate to="/login" />}>
                         <Route index element={<RoleBasedDashboard />} />
                         <Route path="cold-visit" element={<PermissionGuard permission="VIEW_VISITS"><ColdVisit /></PermissionGuard>} />
+                        <Route path="virtual-visit" element={<PermissionGuard permission="VIEW_VISITS"><VirtualVisit /></PermissionGuard>} />
                         <Route path="map" element={<PermissionGuard permission="VIEW_MAP"><MapView /></PermissionGuard>} />
                         <Route path="visit/:clientId" element={<VisitLog />} />
                         <Route path="visits" element={<PermissionGuard permission="VIEW_VISITS"><VisitHistory /></PermissionGuard>} />

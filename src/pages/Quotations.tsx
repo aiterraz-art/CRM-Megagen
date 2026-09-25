@@ -12,6 +12,7 @@ import {
     savePersistedModalDraft
 } from '../utils/modalDrafts';
 import { useVisit } from '../contexts/VisitContext';
+import { getQuotationInteractionTypeForChannel, isVirtualVisit } from '../utils/virtualVisits';
 import { checkGPSConnection } from '../utils/gps';
 import { queueQuotationLocation } from '../services/locationQueue';
 import { sendOrderNotificationEmail } from '../utils/orderEmail';
@@ -333,6 +334,7 @@ const Quotations: React.FC = () => {
 
     const { profile, isSupervisor, hasPermission, permissions, effectiveRole } = useUser();
     const { activeVisit } = useVisit();
+    const hasOnSiteVisit = Boolean(activeVisit) && !isVirtualVisit(activeVisit);
     const isAndroidDevice = useMemo(() => {
         if (typeof navigator === 'undefined') return false;
         return /Android/i.test(navigator.userAgent || '');
@@ -1505,13 +1507,15 @@ const Quotations: React.FC = () => {
 
     useEffect(() => {
         if (isInteractionModalOpen) {
-            if (activeVisit) {
+            if (hasOnSiteVisit) {
                 setSelectedInteractionType('Presencial');
+            } else if (isVirtualVisit(activeVisit)) {
+                setSelectedInteractionType(getQuotationInteractionTypeForChannel(activeVisit?.channel));
             } else {
                 setSelectedInteractionType('WhatsApp');
             }
         }
-    }, [isInteractionModalOpen, activeVisit]);
+    }, [isInteractionModalOpen, activeVisit, hasOnSiteVisit]);
 
     const linkOrderToSourceVisit = useCallback(async (orderId: string | null | undefined, sourceVisitId: string | null | undefined) => {
         if (!orderId || !sourceVisitId) return;
@@ -3516,7 +3520,7 @@ const Quotations: React.FC = () => {
 
                         <div className="mt-8 space-y-3">
                             {[
-                                { id: 'Presencial', icon: <User size={18} />, desc: 'Visita en clínica', disabled: !activeVisit },
+                                { id: 'Presencial', icon: <User size={18} />, desc: 'Visita en clínica', disabled: !hasOnSiteVisit },
                                 { id: 'WhatsApp', icon: <MessageSquare size={18} />, desc: 'Conversación digital', disabled: false },
                                 { id: 'Teléfono', icon: <Phone size={18} />, desc: 'Llamada comercial', disabled: false }
                             ].map((type) => (
