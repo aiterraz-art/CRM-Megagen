@@ -25,6 +25,7 @@ type MenuContext = {
     canViewKitLoans: boolean;
     canViewSizeChanges: boolean;
     canViewReactivation: boolean;
+    canManageAccess: boolean;
 };
 
 type MenuEntry = {
@@ -70,7 +71,7 @@ const allMenuEntries: MenuEntry[] = [
         icon: <Settings size={20} />,
         group: null,
         isPinned: true,
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'facturador' || effectiveRole === 'tesorero',
+        visibleWhen: ({ effectiveRole, canManageAccess }) => (effectiveRole === 'facturador' || effectiveRole === 'tesorero') && !canManageAccess,
     },
     {
         id: 'schedule',
@@ -295,7 +296,7 @@ const allMenuEntries: MenuEntry[] = [
         path: '/settings',
         icon: <Settings size={20} />,
         group: 'management',
-        visibleWhen: ({ effectiveRole }) => effectiveRole === 'admin',
+        visibleWhen: ({ effectiveRole, canManageAccess }) => effectiveRole === 'admin' || canManageAccess,
     },
     {
         id: 'supplier-payables',
@@ -318,6 +319,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const [lostReasonAlertAcknowledged, setLostReasonAlertAcknowledged] = useState(false);
     const canViewProcurement = hasPermission('VIEW_PROCUREMENT');
     const canViewPurchaseOrders = hasPermission('VIEW_PURCHASE_ORDERS') || hasPermission('MANAGE_PURCHASE_ORDERS');
+    const canManageAccess = hasPermission('MANAGE_USERS') || hasPermission('MANAGE_PERMISSIONS');
     const canViewSupplierPayables = hasPermission('VIEW_SUPPLIER_PAYABLES') || hasPermission('MANAGE_SUPPLIER_PAYABLES');
     const canViewKitLoans = hasPermission('VIEW_KIT_LOANS');
     const canViewSizeChanges = hasPermission('VIEW_SIZE_CHANGES');
@@ -334,8 +336,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             canViewKitLoans,
             canViewSizeChanges,
             canViewReactivation,
+            canManageAccess,
         }),
-        [effectiveRole, isSupervisor, canViewProcurement, canViewPurchaseOrders, canViewSupplierPayables, canViewKitLoans, canViewSizeChanges, canViewReactivation]
+        [effectiveRole, isSupervisor, canViewProcurement, canViewPurchaseOrders, canViewSupplierPayables, canViewKitLoans, canViewSizeChanges, canViewReactivation, canManageAccess]
     );
 
     const visibleMenuEntries = useMemo(

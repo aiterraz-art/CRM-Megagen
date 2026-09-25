@@ -5,6 +5,7 @@ import { Shield, User, Search, CheckCircle, Ban, Edit, Save, AlertTriangle, Tras
 import { Profile } from '../contexts/UserContext';
 import { googleService } from '../services/googleService';
 import WooConnectionCard from '../components/WooConnectionCard';
+import UserPermissionsModal from '../components/modals/UserPermissionsModal';
 import { Database } from '../types/supabase';
 import {
     ASSIGNABLE_ROLES,
@@ -25,20 +26,25 @@ type ClientFollowupSettingsRow = Database['public']['Tables']['client_followup_s
 type QuotationSellerRow = Database['public']['Tables']['quotation_sellers']['Row'];
 
 const Settings: React.FC = () => {
-    const { profile, effectiveRole } = useUser();
+    const { profile, effectiveRole, hasPermission } = useUser();
     const isBillingBackoffice = effectiveRole === 'facturador' || effectiveRole === 'tesorero';
     const canManageGlobalSettings = effectiveRole === 'admin';
-    const canAccessSettings = canManageGlobalSettings || isBillingBackoffice;
-    const canAccessUserAdmin = canManageGlobalSettings;
-    const canAccessPermissionMatrix = canManageGlobalSettings;
+    // El admin se evalua por rol porque siempre tiene todos los permisos y asi no depende
+    // de que la carga asincrona de permisos haya terminado al elegir la pestana inicial.
+    const canAccessUserAdmin = canManageGlobalSettings || hasPermission('MANAGE_USERS');
+    const canAccessPermissionMatrix = canManageGlobalSettings || hasPermission('MANAGE_PERMISSIONS');
     const canAccessIntegrations = canManageGlobalSettings || isBillingBackoffice;
     const canAccessClientFollowupSettings = canManageGlobalSettings;
+    const canAccessSettings = canAccessUserAdmin || canAccessPermissionMatrix || canAccessIntegrations;
     const ownerEmail = import.meta.env.VITE_OWNER_EMAIL || 'owner@company.com';
     const [users, setUsers] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'integrations' | 'clients'>(canManageGlobalSettings ? 'users' : 'integrations');
+    const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'integrations' | 'clients'>(
+        canAccessUserAdmin ? 'users' : canAccessPermissionMatrix ? 'permissions' : 'integrations'
+    );
+    const [permissionsUser, setPermissionsUser] = useState<Profile | null>(null);
     const [testingSync, setTestingSync] = useState(false);
     const [googleStatus, setGoogleStatus] = useState<{
         googleEmail: string | null;
@@ -700,10 +706,17 @@ const Settings: React.FC = () => {
 
     useEffect(() => {
         if (!canAccessSettings) return;
-        if (!canManageGlobalSettings && activeTab !== 'integrations') {
-            setActiveTab('integrations');
+        const allowedTabs = {
+            users: canAccessUserAdmin,
+            permissions: canAccessPermissionMatrix,
+            integrations: canAccessIntegrations,
+            clients: canAccessClientFollowupSettings
+        };
+        if (!allowedTabs[activeTab]) {
+            const firstAllowed = (Object.keys(allowedTabs) as (keyof typeof allowedTabs)[]).find((tab) => allowedTabs[tab]);
+            if (firstAllowed) setActiveTab(firstAllowed);
         }
-    }, [activeTab, canAccessSettings, canManageGlobalSettings]);
+    }, [activeTab, canAccessSettings, canAccessUserAdmin, canAccessPermissionMatrix, canAccessIntegrations, canAccessClientFollowupSettings]);
 
     const handleRemoveManualRecipient = (email: string) => {
         const next = configuredManualRecipients.filter((recipient) => recipient !== email);
@@ -880,6 +893,17 @@ const Settings: React.FC = () => {
                                                     </div>
                                                 ) : (
                                                     <div className="flex justify-end items-center gap-4">
+                                                        {canAccessPermissionMatrix && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPermissionsUser(user)}
+                                                                className="flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800"
+                                                                title="Dar o quitar permisos puntuales a esta persona"
+                                                            >
+                                                                <Shield size={15} />
+                                                                <span className="text-[10px] font-black uppercase tracking-widest">Permisos</span>
+                                                            </button>
+                                                        )}
                                                         <button
                                                             type="button"
                                                             onClick={() => void handleDisableUser(user.id, user.email || '')}
@@ -1516,6 +1540,12 @@ const Settings: React.FC = () => {
                     </div>
                 )
             }
+
+            <UserPermissionsModal
+                user={permissionsUser}
+                isOpen={Boolean(permissionsUser)}
+                onClose={() => setPermissionsUser(null)}
+            />
         </div >
     );
 };

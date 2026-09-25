@@ -2,7 +2,9 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { supabase } from '../services/supabase';
 import { Database } from '../types/supabase';
 import {
+    applyPermissionOverrides,
     fetchRolePermissionRows,
+    fetchUserPermissionOverrides,
     getDefaultPermissions,
     isBillingBackofficeRole,
     normalizeRole,
@@ -188,17 +190,22 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         let cancelled = false;
+        // Al simular un rol se ve el rol puro; las excepciones son de una persona concreta.
+        const overridesUserId = simulatedRole ? null : (impersonatedUser || profile)?.id || null;
 
         void (async () => {
-            const rows = await fetchRolePermissionRows();
+            const [rows, overrides] = await Promise.all([
+                fetchRolePermissionRows(),
+                overridesUserId ? fetchUserPermissionOverrides(overridesUserId) : Promise.resolve([])
+            ]);
             if (cancelled) return;
-            setPermissions(resolveRolePermissions(role, rows).permissions);
+            setPermissions(applyPermissionOverrides(role, resolveRolePermissions(role, rows).permissions, overrides));
         })();
 
         return () => {
             cancelled = true;
         };
-    }, [profile?.email, profile?.role, impersonatedUser?.id, impersonatedUser?.role, simulatedRole]);
+    }, [profile?.id, profile?.email, profile?.role, impersonatedUser?.id, impersonatedUser?.role, simulatedRole]);
 
     useEffect(() => {
         if (!simulatedRole) return;

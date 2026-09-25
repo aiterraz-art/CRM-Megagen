@@ -18,6 +18,14 @@ export type RolePermissionRow = {
     permission: string;
 };
 
+export type PermissionOverrideEffect = 'grant' | 'deny';
+
+/** Excepción individual: otorga o quita un permiso a una persona por encima de su rol. */
+export type UserPermissionOverride = {
+    permission: string;
+    effect: PermissionOverrideEffect;
+};
+
 /** Origen efectivo del conjunto de permisos resuelto, para diagnóstico y trazabilidad. */
 export type RolePermissionSource = 'database' | 'defaults';
 
@@ -172,4 +180,53 @@ export const buildRolePermissionMatrix = (rows: RolePermissionRow[] | null): Rec
         matrix[role] = resolveRolePermissions(role, rows).permissions;
     });
     return matrix;
+};
+
+/**
+ * Lee las excepciones individuales de un usuario.
+ *
+ * Ante un error devuelve una lista vacía: el usuario conserva los permisos de su rol,
+ * que es el mismo criterio que aplica la base de datos cuando no hay excepciones.
+ */
+export const fetchUserPermissionOverrides = async (userId: string): Promise<UserPermissionOverride[]> => {
+    try {
+        const { data, error } = await (supabase.from('user_permission_overrides') as any)
+            .select('permission, effect')
+            .eq('user_id', userId);
+
+        if (error) {
+            console.error('No se pudieron leer las excepciones de permisos del usuario:', error);
+            return [];
+        }
+
+        return (data || [])
+            .map((row: any) => ({
+                permission: String(row?.permission || '').trim(),
+                effect: row?.effect === 'deny' ? 'deny' : 'grant'
+            }) as UserPermissionOverride)
+            .filter((row: UserPermissionOverride) => row.permission !== '');
+    } catch (err) {
+        console.error('Error inesperado al leer las excepciones de permisos:', err);
+        return [];
+    }
+};
+
+/**
+ * Aplica las excepciones individuales sobre los permisos del rol, con la misma
+ * precedencia que public.user_has_permission: el admin conserva todo, luego
+ * 'deny' quita y 'grant' agrega.
+ */
+export const applyPermissionOverrides = (
+    role: string | null | undefined,
+    rolePermissions: string[],
+    overrides: UserPermissionOverride[]
+): string[] => {
+    if (normalizeRole(role) === 'admin') return rolePermissions;
+
+    const effective = new Set(rolePermissions);
+    overrides.forEach((override) => {
+        if (override.effect === 'deny') effective.delete(override.permission);
+        else effective.add(override.permission);
+    });
+    return Array.from(effective);
 };
