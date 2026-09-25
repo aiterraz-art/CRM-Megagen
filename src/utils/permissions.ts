@@ -80,6 +80,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
     { key: 'VIEW_QUOTATIONS', module: 'quotations', label: 'Ver Cotizaciones', desc: 'Acceso al módulo de cotizaciones.' },
     { key: 'VIEW_ALL_QUOTATIONS', module: 'quotations', label: 'Ver Todas las Cotizaciones', desc: 'Ver las cotizaciones de todo el equipo (vs solo propias).' },
     { key: 'ASSIGN_QUOTATION_SELLER', module: 'quotations', label: 'Cotizar a Nombre de Otro', desc: 'Elegir el vendedor asignado al crear o editar una cotización.' },
+    { key: 'MANAGE_ALL_QUOTATIONS', module: 'quotations', label: 'Editar Cotizaciones de Otros', desc: 'Crear, editar y eliminar cotizaciones de otros vendedores.' },
     { key: 'CONVERT_ANY_QUOTATION', module: 'quotations', label: 'Cerrar Ventas de Otros', desc: 'Editar y convertir en pedido cotizaciones de otros vendedores.' },
     { key: 'EDIT_QUOTE_PRICES', module: 'quotations', label: 'Editar Precio en Cotización', desc: 'Modificar manualmente el precio unitario o neto de una línea.' },
     { key: 'BYPASS_DISCOUNT_LIMIT', module: 'quotations', label: 'Sin Tope de Descuento', desc: 'No se aplica el tope de descuento definido para vendedores.' },
@@ -87,6 +88,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
     { key: 'VIEW_AUDIT_TRACE', module: 'quotations', label: 'Ver Trazabilidad', desc: 'Ver la traza técnica de conversión de cotización a pedido.' },
     // Pedidos
     { key: 'VIEW_ALL_ORDERS', module: 'orders', label: 'Ver Todos los Pedidos', desc: 'Ver los pedidos de todo el equipo (vs solo propios).' },
+    { key: 'MANAGE_ALL_ORDERS', module: 'orders', label: 'Editar Pedidos de Otros', desc: 'Crear, editar y eliminar pedidos de otros vendedores.' },
     { key: 'RESEND_ORDER_EMAIL', module: 'orders', label: 'Reenviar Correo de Pedido', desc: 'Reenviar la notificación de pedidos ajenos (el propio siempre se puede).' },
     { key: 'CANCEL_ORDERS', module: 'orders', label: 'Anular Pedidos', desc: 'Anular pedidos de cualquier vendedor y reabrir la cotización.' },
     { key: 'MANAGE_COURIER_SHIPMENTS', module: 'orders', label: 'Gestionar Envíos Courier', desc: 'Registrar despacho por courier y número de seguimiento en pedidos.' },
@@ -189,8 +191,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     admin: PERMISSION_KEYS,
     jefe: [
         'VIEW_CLIENTS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'ASSIGN_CLIENTS', 'MANAGE_CLIENT_CREDIT', 'MERGE_CLIENTS', 'IMPORT_CLIENTS', 'ARCHIVE_CLIENTS',
-        'VIEW_QUOTATIONS', 'VIEW_ALL_QUOTATIONS', 'EDIT_QUOTE_PRICES', 'BYPASS_DISCOUNT_LIMIT',
-        'VIEW_ALL_ORDERS', 'CANCEL_ORDERS', 'MANAGE_COURIER_SHIPMENTS',
+        'VIEW_QUOTATIONS', 'VIEW_ALL_QUOTATIONS', 'MANAGE_ALL_QUOTATIONS', 'EDIT_QUOTE_PRICES', 'BYPASS_DISCOUNT_LIMIT',
+        'VIEW_ALL_ORDERS', 'MANAGE_ALL_ORDERS', 'CANCEL_ORDERS', 'MANAGE_COURIER_SHIPMENTS',
         'VIEW_SCHEDULE', 'VIEW_VISITS', 'CONVERT_COLD_VISITS', 'VIEW_MAP', 'VIEW_PIPELINE', 'VIEW_TEAM_STATS', 'VIEW_ALL_TEAM_STATS', 'VIEW_TEAM_CALENDARS', 'SEND_TEAM_PUSH', 'VIEW_METAS', 'MANAGE_METAS',
         'VIEW_LEADS', 'VIEW_ALL_LEADS', 'MANAGE_LEAD_TEMPLATES', 'VIEW_REACTIVATION', 'MANAGE_REACTIVATION', 'VIEW_ALL_REACTIVATION',
         'VIEW_COLLECTIONS', 'VIEW_ALL_COLLECTIONS',
@@ -209,8 +211,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     ],
     facturador: [
         'VIEW_CLIENTS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENT_CREDIT', 'MERGE_CLIENTS',
-        'VIEW_QUOTATIONS', 'VIEW_ALL_QUOTATIONS', 'ASSIGN_QUOTATION_SELLER', 'CONVERT_ANY_QUOTATION', 'EDIT_QUOTE_PRICES', 'BYPASS_DISCOUNT_LIMIT',
-        'VIEW_ALL_ORDERS', 'RESEND_ORDER_EMAIL', 'CANCEL_ORDERS', 'MANAGE_COURIER_SHIPMENTS',
+        'VIEW_QUOTATIONS', 'VIEW_ALL_QUOTATIONS', 'MANAGE_ALL_QUOTATIONS', 'ASSIGN_QUOTATION_SELLER', 'CONVERT_ANY_QUOTATION', 'EDIT_QUOTE_PRICES', 'BYPASS_DISCOUNT_LIMIT',
+        'VIEW_ALL_ORDERS', 'MANAGE_ALL_ORDERS', 'RESEND_ORDER_EMAIL', 'CANCEL_ORDERS', 'MANAGE_COURIER_SHIPMENTS',
         'VIEW_SCHEDULE', 'CONVERT_COLD_VISITS',
         'VIEW_COLLECTIONS', 'VIEW_ALL_COLLECTIONS', 'COMMENT_COLLECTIONS', 'MANAGE_COLLECTIONS',
         'VIEW_INVENTORY', 'VIEW_INVENTORY_VALUE', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'UPLOAD_EXCEL',
@@ -221,8 +223,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     ],
     tesorero: [
         'VIEW_CLIENTS', 'VIEW_ALL_CLIENTS', 'MANAGE_CLIENTS', 'ASSIGN_CLIENTS', 'MERGE_CLIENTS',
-        'VIEW_QUOTATIONS', 'VIEW_ALL_QUOTATIONS', 'ASSIGN_QUOTATION_SELLER', 'EDIT_QUOTE_PRICES', 'BYPASS_DISCOUNT_LIMIT',
-        'VIEW_ALL_ORDERS', 'RESEND_ORDER_EMAIL', 'CANCEL_ORDERS', 'MANAGE_COURIER_SHIPMENTS',
+        'VIEW_QUOTATIONS', 'VIEW_ALL_QUOTATIONS', 'MANAGE_ALL_QUOTATIONS', 'ASSIGN_QUOTATION_SELLER', 'EDIT_QUOTE_PRICES', 'BYPASS_DISCOUNT_LIMIT',
+        'VIEW_ALL_ORDERS', 'MANAGE_ALL_ORDERS', 'RESEND_ORDER_EMAIL', 'CANCEL_ORDERS', 'MANAGE_COURIER_SHIPMENTS',
         'VIEW_SCHEDULE', 'CONVERT_COLD_VISITS',
         'VIEW_COLLECTIONS', 'VIEW_ALL_COLLECTIONS', 'COMMENT_COLLECTIONS', 'MANAGE_COLLECTIONS',
         'VIEW_INVENTORY', 'VIEW_INVENTORY_VALUE', 'MANAGE_INVENTORY', 'MANAGE_PRICING', 'UPLOAD_EXCEL',
