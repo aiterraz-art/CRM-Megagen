@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { canvasToPdfImage, getSafeRenderScale } from './pdfCanvas';
 import PurchaseOrderDocumentContent from '../components/PurchaseOrderDocumentContent';
 
 export type PurchaseOrderPdfItem = {
@@ -57,8 +58,6 @@ const waitForImages = async (container: HTMLElement) => {
 };
 
 export const generatePurchaseOrderPdfBlob = async (data: PurchaseOrderPdfData): Promise<Blob | null> => {
-    const renderScale = Math.min(Math.max(window.devicePixelRatio || 1, 3), 4);
-
     const sandbox = document.createElement('div');
     sandbox.style.position = 'fixed';
     sandbox.style.left = '-20000px';
@@ -88,14 +87,14 @@ export const generatePurchaseOrderPdfBlob = async (data: PurchaseOrderPdfData): 
         await waitForImages(mountNode);
 
         const canvas = await html2canvas(mountNode, {
-            scale: renderScale,
+            scale: getSafeRenderScale(mountNode, 1000),
             useCORS: true,
             backgroundColor: '#ffffff',
             windowWidth: 1000,
             width: 1000,
         });
 
-        const imgData = canvas.toDataURL('image/png');
+        const imgData = canvasToPdfImage(canvas);
         const pageWidth = 210;
         const horizontalMargin = 10;
         const topMargin = 10;
@@ -108,7 +107,7 @@ export const generatePurchaseOrderPdfBlob = async (data: PurchaseOrderPdfData): 
             compress: true,
         });
 
-        pdf.addImage(imgData, 'PNG', horizontalMargin, topMargin, imgWidth, imgHeight);
+        pdf.addImage(imgData, 'JPEG', horizontalMargin, topMargin, imgWidth, imgHeight);
         return pdf.output('blob');
     } finally {
         try {

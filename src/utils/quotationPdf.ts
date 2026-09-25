@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { canvasToPdfImage, getSafeRenderScale } from './pdfCanvas';
 import type { QuotationPreviewData } from './quotationPreview';
 import QuotationDocumentContent from '../components/QuotationDocumentContent';
 
@@ -25,8 +26,6 @@ const waitForImages = async (container: HTMLElement) => {
 };
 
 export const generateQuotationPdfBlob = async (data: QuotationPreviewData): Promise<Blob | null> => {
-    const renderScale = Math.min(Math.max(window.devicePixelRatio || 1, 3), 4);
-
     const sandbox = document.createElement('div');
     sandbox.style.position = 'fixed';
     sandbox.style.left = '-20000px';
@@ -54,14 +53,14 @@ export const generateQuotationPdfBlob = async (data: QuotationPreviewData): Prom
         await waitForImages(mountNode);
 
         const canvas = await html2canvas(mountNode, {
-            scale: renderScale,
+            scale: getSafeRenderScale(mountNode, 1000),
             useCORS: true,
             backgroundColor: '#ffffff',
             windowWidth: 1000,
             width: 1000
         });
 
-        const imgData = canvas.toDataURL('image/png');
+        const imgData = canvasToPdfImage(canvas);
         const imgWidth = 210;
         const imgHeight = (canvas.height * imgWidth) / canvas.width;
         const pdf = new jsPDF({
@@ -71,7 +70,7 @@ export const generateQuotationPdfBlob = async (data: QuotationPreviewData): Prom
             compress: true
         });
 
-        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+        pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
         return pdf.output('blob');
     } finally {
         try {
