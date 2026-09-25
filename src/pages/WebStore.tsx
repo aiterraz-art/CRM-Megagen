@@ -183,6 +183,22 @@ const WebStore: React.FC = () => {
                             La base no tiene pg_net: los cambios se envían con el barrido periódico o el botón "Enviar pendientes".
                         </p>
                     )}
+                    {health?.enabled && (
+                        health.sweep_scheduled ? (
+                            <p className="text-xs text-slate-500 font-medium">
+                                Reintento automático cada 10 minutos para los envíos que fallen.
+                            </p>
+                        ) : (
+                            <p className="text-xs text-amber-600 font-bold">
+                                Sin reintento automático: los envíos que fallen esperan al próximo cambio de stock o al botón "Enviar pendientes".
+                            </p>
+                        )
+                    )}
+                    {(health?.exhausted ?? 0) > 0 && (
+                        <p className="text-xs text-rose-600 font-bold">
+                            {health!.exhausted} SKU agotaron sus 10 intentos y ya no se reintentan solos. Revisa el error y usa "Reenviar aprobados".
+                        </p>
+                    )}
                     {health?.recent_errors?.slice(0, 3).map((item) => (
                         <p key={item.sku} className="text-xs text-rose-600 font-bold break-words">{item.sku}: {item.error}</p>
                     ))}

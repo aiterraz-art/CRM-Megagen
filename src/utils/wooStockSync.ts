@@ -16,6 +16,7 @@ export type WooConnection = {
 export type WooHealth = {
     enabled: boolean;
     pg_net: boolean;
+    sweep_scheduled?: boolean;
     credentials: Record<string, boolean>;
     store_url: string | null;
     connection: WooConnection | null;
@@ -25,6 +26,7 @@ export type WooHealth = {
     synced: number;
     pending: number;
     failed: number;
+    exhausted?: number;
     last_synced_at: string | null;
     recent_errors: Array<{ sku: string; error: string | null; attempts: number }>;
 };
