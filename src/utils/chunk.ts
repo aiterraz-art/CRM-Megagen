@@ -19,7 +19,9 @@ export const chunkArray = <T,>(items: T[], size: number): T[][] => {
 /**
  * Tamano de bloque para filtros por identificador.
  *
- * Con UUID de 36 caracteres, 200 identificadores ocupan unos 7,5 KB de URL, por debajo
- * del limite habitual de 8 a 16 KB de nginx y similares.
+ * El proxy de produccion responde 414 cuando la linea de peticion pasa de unos 8 190
+ * caracteres, y sin cabeceras CORS el navegador solo informa "Failed to fetch". Cada UUID
+ * codificado ocupa 39 caracteres, asi que 200 identificadores rozaban el limite; con 100
+ * la URL queda en unos 4 KB y deja margen para el resto de la consulta.
  */
-export const ID_FILTER_CHUNK_SIZE = 200;
+export const ID_FILTER_CHUNK_SIZE = 100;
