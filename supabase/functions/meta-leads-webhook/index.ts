@@ -12,9 +12,22 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { usersWithPermission } from "../_shared/permissions.ts";
+import webpush from "npm:web-push@3.6.7";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
+const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
+const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:soporte@crm.local";
+
+// Cada empresa tiene su propio logo y su propia instancia; el aviso debe salir
+// con el de la suya, nunca con el de la otra.
+const COMPANY_ICON = SUPABASE_URL.includes("3dental")
+  ? "/logo_3dental.png"
+  : SUPABASE_URL.includes("megagen")
+    ? "/logo_megagen.png"
+    : undefined;
 
 const encoder = new TextEncoder();
 
@@ -176,6 +189,89 @@ const fetchCampaignContext = async (config: MetaConfig, lead: Record<string, any
 };
 
 // ---------------------------------------------------------------------------
+// Aviso a quien reparte
+// ---------------------------------------------------------------------------
+
+// El lead entra sin dueño a propósito, así que el aviso es lo único que evita
+// que se quede esperando en la bandeja. Nunca hace fallar la entrada del lead:
+// un lead guardado sin aviso es recuperable, uno perdido no.
+const notifyLead = async (
+  supabase: SupabaseClient,
+  clientId: string,
+  action: string,
+  context: Record<string, string>,
+) => {
+  try {
+    if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+      log("no hay claves de notificación, se omite el aviso");
+      return;
+    }
+
+    const recipientIds = await usersWithPermission(supabase, "RECEIVE_META_LEAD_ALERTS");
+    if (recipientIds.length === 0) {
+      log("nadie tiene el permiso de avisos de leads");
+      return;
+    }
+
+    const [{ data: client }, { data: subscriptions }] = await Promise.all([
+      supabase.from("clients").select("name, comuna").eq("id", clientId).maybeSingle(),
+      supabase.from("push_subscriptions").select("id, endpoint, p256dh, auth").in("user_id", recipientIds),
+    ]);
+
+    if (!subscriptions || subscriptions.length === 0) {
+      log("los destinatarios no tienen notificaciones activadas");
+      return;
+    }
+
+    const nombre = String((client as any)?.name || "").trim() || "Lead sin nombre";
+    const origen = context.campaign_name || context.form_name || "Meta Ads";
+    const comuna = String((client as any)?.comuna || "").trim();
+
+    const detalle = [origen, comuna].filter(Boolean).join(" · ");
+    const body = action === "matched"
+      ? `${nombre} ya está en la cartera y volvió a pedir información. ${detalle}`.trim()
+      : `${nombre} acaba de dejar sus datos. ${detalle}`.trim();
+
+    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+
+    const payload = JSON.stringify({
+      title: action === "matched" ? "Un cliente volvió por Meta" : "Nuevo lead de Meta",
+      body,
+      url: "/meta-leads",
+      // Sin agrupar por lead: dos leads seguidos deben verse como dos avisos.
+      tag: `meta-lead-${clientId}`,
+      ...(COMPANY_ICON ? { icon: COMPANY_ICON, badge: COMPANY_ICON } : {}),
+    });
+
+    let enviados = 0;
+    const caducadas: string[] = [];
+
+    for (const sub of subscriptions as any[]) {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          payload,
+        );
+        enviados += 1;
+      } catch (err: any) {
+        const status = Number(err?.statusCode || err?.status || 0);
+        if (status === 404 || status === 410) caducadas.push(sub.id);
+      }
+    }
+
+    // Una suscripción que el navegador ya descartó no vuelve: se limpia para que
+    // no engorde la lista ni frene los avisos siguientes.
+    if (caducadas.length > 0) {
+      await supabase.from("push_subscriptions").delete().in("id", caducadas);
+    }
+
+    log("aviso enviado", { clientId, enviados, destinatarios: recipientIds.length, caducadas: caducadas.length });
+  } catch (error) {
+    log("no se pudo avisar del lead", { clientId, error: String(error) });
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Procesamiento
 // ---------------------------------------------------------------------------
 
@@ -204,6 +300,12 @@ const processLead = async (config: MetaConfig, leadgenId: string) => {
     if (error) throw new Error(error.message);
 
     log("lead procesado", { leadgenId, resultado: data });
+
+    // Solo se avisa de lo que entró de nuevo: un reproceso no vuelve a sonar.
+    if (data?.client_id && !data?.already_processed) {
+      await notifyLead(supabase, String(data.client_id), String(data.action || ""), context);
+    }
+
     return data;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
