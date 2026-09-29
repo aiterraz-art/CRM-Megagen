@@ -322,7 +322,6 @@ const ScheduleVisitModal = ({
                     title,
                     purpose: 'Visita en frío agendada',
                     notes: formData.notes.trim() || null,
-                    doctor_name: doctorName,
                     cold_visit_clinic_name: clinicName,
                     cold_visit_address: address || null,
                     cold_visit_doctor_name: doctorName,
