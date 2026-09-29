@@ -23,6 +23,7 @@ import { supabase } from '../services/supabase';
 import { useUser } from '../contexts/UserContext';
 import { uploadFileToStorage } from '../utils/storageUpload';
 import { markDeliveryAttemptClosed } from '../utils/deliveryProof';
+import { ID_FILTER_CHUNK_SIZE, chunkArray } from '../utils/chunk';
 
 type DispatchTab = 'upload' | 'queue' | 'routes' | 'history';
 
@@ -393,29 +394,36 @@ const Dispatch: React.FC = () => {
     const [deletingRouteId, setDeletingRouteId] = useState<string | null>(null);
     const deliveryProofsBucket = import.meta.env.VITE_DELIVERY_PROOFS_BUCKET || 'evidence-photos';
 
+    // PostgREST lleva los filtros `in` en la URL: con cientos de UUID la peticion supera el
+    // limite del proxy y el navegador solo ve "Failed to fetch". Se consulta por bloques.
+    const fetchRowsByIds = async <T,>(
+        ids: string[],
+        query: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: any }>
+    ): Promise<T[]> => {
+        const results = await Promise.all(chunkArray(ids, ID_FILTER_CHUNK_SIZE).map(query));
+        const failed = results.find((result) => result.error);
+        if (failed) throw failed.error;
+        return results.flatMap((result) => result.data || []);
+    };
+
     const fetchOrderFlowMap = async (orderIds: string[]) => {
         const normalizedIds = Array.from(new Set(orderIds.filter(Boolean)));
         if (normalizedIds.length === 0) return new Map<string, OrderFlowSnapshot>();
 
-        const { data: orderRows, error: orderError } = await supabase
+        const orders = await fetchRowsByIds<any>(normalizedIds, (ids) => supabase
             .from('orders')
             .select('id, status, delivery_status, payment_email_status, payment_proof_path, delivery_photo_url, quotation_id')
-            .in('id', normalizedIds);
-
-        if (orderError) throw orderError;
-
-        const orders = orderRows || [];
+            .in('id', ids));
         const quotationIds = Array.from(new Set(orders.map((order: any) => order.quotation_id).filter(Boolean)));
         const quotationsMap = new Map<string, { folio: number | null; status: string | null }>();
 
         if (quotationIds.length > 0) {
-            const { data: quotationRows, error: quotationError } = await supabase
+            const quotationRows = await fetchRowsByIds<any>(quotationIds, (ids) => supabase
                 .from('quotations')
                 .select('id, folio, status')
-                .in('id', quotationIds);
+                .in('id', ids));
 
-            if (quotationError) throw quotationError;
-            (quotationRows || []).forEach((quotation: any) => {
+            quotationRows.forEach((quotation: any) => {
                 quotationsMap.set(quotation.id, {
                     folio: quotation.folio ?? null,
                     status: quotation.status ?? null
@@ -508,15 +516,13 @@ const Dispatch: React.FC = () => {
         }
 
         const routeIds = routeRows.map((route) => route.id);
-        const { data: itemRows, error: itemError } = await supabase
+        const itemRows = await fetchRowsByIds<any>(routeIds, (ids) => supabase
             .from('route_items')
             .select('route_id, status')
-            .in('route_id', routeIds);
-
-        if (itemError) throw itemError;
+            .in('route_id', ids));
 
         const itemsByRoute = new Map<string, Array<{ route_id: string | null; status: string }>>();
-        (itemRows || []).forEach((item: any) => {
+        itemRows.forEach((item: any) => {
             if (!item.route_id) return;
             if (!itemsByRoute.has(item.route_id)) itemsByRoute.set(item.route_id, []);
             itemsByRoute.get(item.route_id)!.push(item);
