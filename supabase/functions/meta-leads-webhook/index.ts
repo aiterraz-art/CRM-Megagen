@@ -146,12 +146,18 @@ const graphGet = async (config: MetaConfig, path: string, params: Record<string,
 const fetchCampaignContext = async (config: MetaConfig, lead: Record<string, any>) => {
   const context: Record<string, string> = {};
 
-  if (lead?.ad_id) {
+  // El propio lead ya trae los nombres cuando la app tiene permiso de anuncios,
+  // así que lo normal es no tener que preguntar nada más.
+  if (lead?.ad_name) context.ad_name = String(lead.ad_name);
+  if (lead?.adset_name) context.adset_name = String(lead.adset_name);
+  if (lead?.campaign_name) context.campaign_name = String(lead.campaign_name);
+
+  if (lead?.ad_id && (!context.ad_name || !context.campaign_name)) {
     try {
       const ad = await graphGet(config, String(lead.ad_id), { fields: "name,adset{name},campaign{name}" });
-      if (ad?.name) context.ad_name = String(ad.name);
-      if (ad?.adset?.name) context.adset_name = String(ad.adset.name);
-      if (ad?.campaign?.name) context.campaign_name = String(ad.campaign.name);
+      if (!context.ad_name && ad?.name) context.ad_name = String(ad.name);
+      if (!context.adset_name && ad?.adset?.name) context.adset_name = String(ad.adset.name);
+      if (!context.campaign_name && ad?.campaign?.name) context.campaign_name = String(ad.campaign.name);
     } catch (error) {
       log("no se pudo leer el anuncio", { ad_id: lead.ad_id, error: String(error) });
     }
@@ -182,7 +188,9 @@ const processLead = async (config: MetaConfig, leadgenId: string) => {
     }
 
     const lead = await graphGet(config, leadgenId, {
-      fields: "id,created_time,field_data,ad_id,adgroup_id,campaign_id,form_id,platform,is_organic",
+      // adgroup_id ya no existe en el objeto de lead: pedirlo hace que Meta
+      // rechace la consulta entera y el lead se quede sin procesar.
+      fields: "id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,platform,is_organic",
     });
 
     const context = await fetchCampaignContext(config, lead);
