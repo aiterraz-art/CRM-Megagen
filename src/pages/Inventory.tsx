@@ -738,13 +738,13 @@ const Inventory = () => {
                 alert(`Importador de stock completado. ${data?.processed_count || newItems.length} SKU procesados, ${data?.deleted_count || 0} SKU reemplazados y ${data?.preserved_historical_count || 0} SKU históricos conservados con stock 0.`);
             } else {
                 const expectedSkuHeaders = ['sku'];
-                const expectedPriceHeaders = ['precionetoventa', 'precionetodeventa'];
+                const expectedPriceHeaders = ['precionetoventa', 'precionetodeventa', 'preciounitario'];
                 const normalizedFileHeaders = new Set(Object.keys(rows[0] || {}).map(normalizeHeader));
                 const hasSkuHeader = expectedSkuHeaders.some((header) => normalizedFileHeaders.has(header));
                 const hasPriceHeader = expectedPriceHeaders.some((header) => normalizedFileHeaders.has(header));
 
                 if (!hasSkuHeader || !hasPriceHeader) {
-                    throw new Error('Formato inválido para importador de precios. Solo se aceptan columnas: SKU y Precio Neto Venta.');
+                    throw new Error('Formato inválido para importador de precios. Solo se aceptan columnas: SKU y Precio Neto Venta (o Precio Unitario).');
                 }
 
                 const parsedPriceRows = rows
@@ -752,9 +752,10 @@ const Inventory = () => {
                         const sku = normalizeSku(getValueByExactAliases(row, expectedSkuHeaders));
                         const rawPrice = getValueByExactAliases(row, expectedPriceHeaders);
                         const price = parseImportedPrice(rawPrice);
+                        // Round to cents: the server treats more than two decimals as thousands separators.
                         return {
                             sku,
-                            price: Number.isFinite(price) ? Math.max(0, price) : NaN
+                            price: Number.isFinite(price) ? Math.round(Math.max(0, price) * 100) / 100 : NaN
                         };
                     })
                     .filter((row) => row.sku && Number.isFinite(row.price));
