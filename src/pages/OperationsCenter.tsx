@@ -261,8 +261,9 @@ const OperationsCenter = () => {
             if (quotationsError) throw quotationsError;
 
             const requesterIds = rawApprovals.map((approval: any) => approval?.requester_id).filter(Boolean);
+            const approverIds = rawApprovals.map((approval: any) => approval?.approver_id).filter(Boolean);
             const quotationSellerIds = (quotationsData || []).map((quotation: any) => quotation?.seller_id).filter(Boolean);
-            const profileIds = Array.from(new Set([...requesterIds, ...quotationSellerIds]));
+            const profileIds = Array.from(new Set([...requesterIds, ...approverIds, ...quotationSellerIds]));
 
             const { data: profilesData, error: profilesError } = profileIds.length > 0
                 ? await supabase
@@ -293,6 +294,10 @@ const OperationsCenter = () => {
                     || quotation?.seller?.email?.split('@')[0]?.toUpperCase()
                     || 'Vendedor no identificado'
                 );
+                const approverProfile = profilesMap[approval.approver_id] || null;
+                const approverName = approval.approver_id
+                    ? String(approverProfile?.full_name || approverProfile?.email?.split('@')[0]?.toUpperCase() || 'Usuario no identificado')
+                    : null;
 
                 return {
                     ...approval,
@@ -302,6 +307,7 @@ const OperationsCenter = () => {
                     requestedItems,
                     requestReason: getApprovalReason(approval),
                     sellerName,
+                    approverName,
                     sellerEmail: String(payload.seller_email || requesterProfile?.email || quotation?.seller?.email || '').trim()
                 };
             });
@@ -592,6 +598,12 @@ const OperationsCenter = () => {
                         {archived && (
                             <p className="mt-1 text-[11px] font-medium text-emerald-700">
                                 Archivada el {formatApprovalDate(approval.decided_at)} a las {formatApprovalTime(approval.decided_at)}
+                            </p>
+                        )}
+                        {approval.status !== 'pending' && (
+                            <p className={`mt-1 text-[11px] font-medium ${approval.status === 'rejected' ? 'text-red-700' : 'text-emerald-700'}`}>
+                                {approval.status === 'rejected' ? 'Rechazada' : 'Aprobada'} por <span className="font-bold">{approval.approverName || 'Usuario no registrado'}</span>
+                                {!archived && approval.decided_at && ` el ${formatApprovalDate(approval.decided_at)} a las ${formatApprovalTime(approval.decided_at)}`}
                             </p>
                         )}
                         {isDiscountApproval && (
@@ -1052,6 +1064,9 @@ const OperationsCenter = () => {
                                         <p><span className="font-bold">Fecha:</span> {formatApprovalDate(selectedApprovalPreview.requested_at)}</p>
                                         <p><span className="font-bold">Hora:</span> {formatApprovalTime(selectedApprovalPreview.requested_at)}</p>
                                         <p><span className="font-bold">Vendedor:</span> {selectedApprovalPreview.sellerName}</p>
+                                        {selectedApprovalPreview.status !== 'pending' && (
+                                            <p><span className="font-bold">{selectedApprovalPreview.status === 'rejected' ? 'Rechazada por' : 'Aprobada por'}:</span> {selectedApprovalPreview.approverName || 'Usuario no registrado'}</p>
+                                        )}
                                         <p><span className="font-bold">Cliente:</span> {selectedApprovalPreview.payloadData?.client_name || 'N/A'}</p>
                                         <p><span className="font-bold">Folio:</span> {selectedApprovalPreview.payloadData?.folio || 'N/A'}</p>
                                         <p><span className="font-bold">Monto:</span> {formatMoney(Number(selectedApprovalPreview.payloadData?.total_amount || 0))}</p>
