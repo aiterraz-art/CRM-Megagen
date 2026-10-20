@@ -12,6 +12,7 @@ import {
     Plus,
     RefreshCw,
     Search,
+    Trash2,
     TrendingUp,
     X
 } from 'lucide-react';
@@ -1027,6 +1028,36 @@ const Inventory = () => {
         }
     };
 
+    const deleteInventoryItem = async (item: InventoryItem) => {
+        if (!canManageInventory) return;
+
+        const label = item.sku ? `${item.sku} · ${item.name}` : item.name;
+        if (!window.confirm(`¿Eliminar el producto "${label}" del inventario?\n\nEsta acción no se puede deshacer.`)) return;
+
+        try {
+            const { data, error } = await supabase
+                .from('inventory')
+                .delete()
+                .eq('id', item.id)
+                .select('id');
+
+            if (error) throw error;
+            if (!data || data.length === 0) {
+                throw new Error('No tienes permisos para eliminar este producto.');
+            }
+
+            alert('Producto eliminado del inventario.');
+            await refreshAll();
+        } catch (error: any) {
+            console.error('Error deleting inventory item:', error);
+            if (error?.code === '23503') {
+                alert('No se puede eliminar este producto porque tiene historial (pedidos, movimientos de stock o cambios de talla). Si ya no se usa, deja su stock en 0.');
+                return;
+            }
+            alert(`No se pudo eliminar el producto: ${error.message}`);
+        }
+    };
+
     const saveMinStock = async () => {
         if (!minStockItem || !profile?.id) return;
 
@@ -1885,6 +1916,15 @@ const Inventory = () => {
                                                                 title="Ver historial"
                                                             >
                                                                 <History size={18} />
+                                                            </button>
+                                                        )}
+                                                        {canManageInventory && (
+                                                            <button
+                                                                onClick={() => void deleteInventoryItem(item)}
+                                                                className="rounded-lg p-2 text-gray-400 transition-all hover:bg-red-50 hover:text-red-600"
+                                                                title="Eliminar producto"
+                                                            >
+                                                                <Trash2 size={18} />
                                                             </button>
                                                         )}
                                                         {canRequestProducts && !item.is_service_item && (
