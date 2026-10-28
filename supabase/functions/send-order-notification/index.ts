@@ -70,6 +70,29 @@ const buildMimeMessage = (input: {
   return parts.filter(Boolean).join("\r\n");
 };
 
+// Quien aprueba un descuento genera el pedido en ese mismo momento y tambien debe poder
+// enviarlo a facturacion, aunque no tenga RESEND_ORDER_EMAIL.
+const isDiscountApproverForOrder = async (
+  serviceClient: ReturnType<typeof createSupabaseClients>["serviceClient"],
+  userId: string,
+  quotationId: string | null,
+) => {
+  if (!quotationId) return false;
+  if (!await userHasPermission(serviceClient, userId, "MANAGE_APPROVALS")) return false;
+
+  const { data, error } = await serviceClient
+    .from("approval_requests")
+    .select("status")
+    .eq("entity_id", quotationId)
+    .eq("module", "sales")
+    .eq("approval_type", "extra_discount")
+    .order("requested_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.status === "approved";
+};
+
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -161,7 +184,8 @@ serve(async (req) => {
     if (orderError || !order) throw orderError || new Error("Order not found");
 
     const isAllowedActor = order.user_id === authUser.id
-      || await userHasPermission(serviceClient, authUser.id, "RESEND_ORDER_EMAIL");
+      || await userHasPermission(serviceClient, authUser.id, "RESEND_ORDER_EMAIL")
+      || await isDiscountApproverForOrder(serviceClient, authUser.id, order.quotation_id);
     if (!isAllowedActor) {
       throw new Error("No tienes permisos para enviar este pedido a facturación");
     }

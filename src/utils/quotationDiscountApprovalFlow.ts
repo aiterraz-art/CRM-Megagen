@@ -1,7 +1,8 @@
 import { supabase } from '../services/supabase';
-import { buildDiscountApprovalRequestedItems } from './discountApproval';
+import { buildDiscountApprovalRequestedItems, type DiscountApprovalPaymentProof } from './discountApproval';
 
 export const SELLER_MAX_DISCOUNT_PCT = 5;
+const PAYMENT_PROOFS_BUCKET = 'payment-proofs';
 
 const toNumber = (value: unknown) => {
     const parsed = Number(value);
@@ -55,6 +56,9 @@ type EnsureDiscountApprovalParams = {
     onApprovalCreated?: (approvalId: string) => void;
     latestApproval?: any;
     limitPct?: number;
+    // Sube el comprobante de pago (clientes sin credito) justo antes de crear la solicitud,
+    // para que el pedido se genere solo al aprobarla.
+    paymentProofProvider?: () => Promise<{ path: string; name: string; mimeType: string } | null>;
 };
 
 type EnsureDiscountApprovalResult = {
@@ -73,6 +77,7 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
     onApprovalCreated,
     latestApproval,
     limitPct = SELLER_MAX_DISCOUNT_PCT,
+    paymentProofProvider,
 }: EnsureDiscountApprovalParams): Promise<EnsureDiscountApprovalResult> => {
     const maxDiscountPct = getQuotationMaxDiscountPct(quotation?.items || []);
     const requiresDiscountApproval = quotationRequiresDiscountApproval(quotation);
@@ -98,7 +103,7 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
             allowed: false,
             action: 'pending',
             approval: currentApproval,
-            message: 'Esta cotización ya tiene una aprobación de descuento pendiente. Debes esperar la resolución antes de generar el pedido.',
+            message: 'Esta cotización ya tiene una aprobación de descuento pendiente. Cuando sea aprobada, el pedido se generará automáticamente.',
         };
     }
 
@@ -117,6 +122,10 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
     }
 
     const requestedItems = buildDiscountApprovalRequestedItems(quotation?.items || [], effectiveLimitPct);
+    const uploadedProof = paymentProofProvider ? await paymentProofProvider() : null;
+    const paymentProof: DiscountApprovalPaymentProof | null = uploadedProof
+        ? { path: uploadedProof.path, name: uploadedProof.name, mime_type: uploadedProof.mimeType }
+        : null;
     const { data: approvalRow, error: approvalError } = await supabase
         .from('approval_requests')
         .insert({
@@ -135,13 +144,19 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
                 seller_name: sellerName || quotation?.seller_name || null,
                 seller_email: sellerEmail || quotation?.seller_email || null,
                 requested_items: requestedItems,
+                payment_proof: paymentProof,
             },
             status: 'pending',
         } as any)
         .select('id, entity_id, status, approval_type, requested_at, payload')
         .single();
 
-    if (approvalError) throw approvalError;
+    if (approvalError) {
+        if (paymentProof) {
+            void supabase.storage.from(PAYMENT_PROOFS_BUCKET).remove([paymentProof.path]);
+        }
+        throw approvalError;
+    }
     if (approvalRow?.id && onApprovalCreated) {
         onApprovalCreated(approvalRow.id);
     }
@@ -151,7 +166,7 @@ export const ensureDiscountApprovalBeforeOrderConversion = async ({
         action: 'requested',
         approval: approvalRow,
         message: currentApproval?.status === 'rejected'
-            ? 'Se envió una nueva solicitud de autorización de descuento. Cuando sea aprobada podrás generar el pedido.'
-            : 'Se envió la solicitud de autorización de descuento. Cuando sea aprobada podrás generar el pedido.',
+            ? 'Se envió una nueva solicitud de autorización de descuento. Cuando sea aprobada, el pedido se generará y enviará a facturación automáticamente.'
+            : 'Se envió la solicitud de autorización de descuento. Cuando sea aprobada, el pedido se generará y enviará a facturación automáticamente.',
     };
 };

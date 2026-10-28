@@ -19,6 +19,14 @@ export type DiscountApprovalPayload = {
     seller_name?: string | null;
     seller_email?: string | null;
     requested_items?: DiscountApprovalRequestedItem[];
+    // Comprobante que el vendedor adjunta al pedir la autorizacion, para generar el pedido al aprobarla.
+    payment_proof?: DiscountApprovalPaymentProof | null;
+};
+
+export type DiscountApprovalPaymentProof = {
+    path: string;
+    name: string;
+    mime_type: string;
 };
 
 const toNumber = (value: any) => {

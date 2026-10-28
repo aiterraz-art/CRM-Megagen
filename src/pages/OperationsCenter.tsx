@@ -6,6 +6,7 @@ import { Activity, AlertTriangle, Bot, CheckCircle2, Clock3, DollarSign, ShieldC
 import { formatPaymentTermsFromCreditDays, getClientCreditDays } from '../utils/credit';
 import { getApprovalReason, getApprovalRequestedItems, readDiscountApprovalPayload } from '../utils/discountApproval';
 import { buildQuotationPreviewData } from '../utils/quotationPreview';
+import { convertQuotationAfterDiscountApproval, type ApprovedDiscountConversionResult } from '../utils/approvedDiscountOrderConversion';
 import { CollectionUploadRejected, parseCollectionsImportFile, uploadCollectionsSnapshot } from '../utils/collectionsImport';
 
 type TabKey = 'health' | 'automations' | 'sla' | 'approvals' | 'postsale';
@@ -429,12 +430,34 @@ const OperationsCenter = () => {
             await supabase.from('quotations').update({ comments: current }).eq('id', request.entity_id);
         }
 
+        // Al aprobar, el pedido se genera de inmediato; el push al vendedor informa el resultado.
+        let conversion: ApprovedDiscountConversionResult | null = null;
+        if (approve && request?.approval_type === 'extra_discount' && profile?.id) {
+            conversion = await convertQuotationAfterDiscountApproval(request, profile.id);
+            if (conversion.status === 'converted') {
+                alert(conversion.emailError
+                    ? `Descuento aprobado y pedido #${conversion.orderFolio} generado, pero el correo a facturación falló: ${conversion.emailError}. Puede reenviarse desde Pedidos.`
+                    : `Descuento aprobado. Pedido #${conversion.orderFolio} generado y enviado a facturación.`);
+            } else if (conversion.status === 'already_exists') {
+                alert(`Descuento aprobado. La cotización ya tenía el pedido #${conversion.orderFolio ?? '-'}.`);
+            } else if (conversion.status === 'missing_proof') {
+                alert('Descuento aprobado. Esta solicitud no trae comprobante de pago, así que el vendedor deberá generar el pedido desde la cotización.');
+            } else {
+                alert(`Descuento aprobado, pero no se pudo generar el pedido: ${conversion.message}\n\nEl vendedor podrá generarlo desde la cotización.`);
+            }
+        }
+
         if (request?.approval_type === 'extra_discount') {
+            const orderFolio = conversion?.status === 'converted' || conversion?.status === 'already_exists'
+                ? conversion.orderFolio
+                : null;
             try {
                 const { error: pushError } = await supabase.functions.invoke('send-approval-push', {
                     body: {
                         approval_id: id,
-                        icon: import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png'
+                        icon: import.meta.env.VITE_COMPANY_LOGO || '/logo_megagen.png',
+                        order_folio: orderFolio,
+                        order_auto_converted: conversion ? Boolean(orderFolio) : undefined
                     }
                 });
                 if (pushError) {

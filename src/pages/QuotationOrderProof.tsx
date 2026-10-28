@@ -390,27 +390,6 @@ const QuotationOrderProof = () => {
                 return;
             }
 
-            const approvalGate = await ensureDiscountApprovalBeforeOrderConversion({
-                quotation,
-                requesterId: profile.id,
-                sellerName: quotation?.seller_name,
-                sellerEmail: quotation?.seller_email,
-                requestReasonProvider: requestDiscountApprovalReason,
-                onApprovalCreated: (approvalId) => {
-                    void notifyApprovalPush(approvalId);
-                },
-            });
-
-            if (!approvalGate.allowed) {
-                if (approvalGate.approval) {
-                    setQuotation((current: any) => current ? { ...current, discount_approval: approvalGate.approval } : current);
-                }
-                if (approvalGate.message) {
-                    alert(approvalGate.message);
-                }
-                return;
-            }
-
             const creditDays = getQuotationCreditDays(quotation);
             const requiresProof = creditDays === 0;
             let normalizedProofFile = paymentProofFile;
@@ -482,6 +461,44 @@ const QuotationOrderProof = () => {
                 } finally {
                     setPaymentProofPreparing(false);
                 }
+            }
+
+            const approvalGate = await ensureDiscountApprovalBeforeOrderConversion({
+                quotation,
+                requesterId: profile.id,
+                sellerName: quotation?.seller_name,
+                sellerEmail: quotation?.seller_email,
+                requestReasonProvider: requestDiscountApprovalReason,
+                // El comprobante viaja con la solicitud para que el pedido se genere solo al aprobarla.
+                paymentProofProvider: requiresProof && normalizedProofFile
+                    ? async () => {
+                        setSubmitting(true);
+                        setOrderConversionStage('Subiendo comprobante de pago...');
+                        try {
+                            return await uploadPaymentProof(quotation, normalizedProofFile as File);
+                        } finally {
+                            setSubmitting(false);
+                            setOrderConversionStage(null);
+                        }
+                    }
+                    : undefined,
+                onApprovalCreated: (approvalId) => {
+                    void notifyApprovalPush(approvalId);
+                },
+            });
+
+            if (!approvalGate.allowed) {
+                if (approvalGate.approval) {
+                    setQuotation((current: any) => current ? { ...current, discount_approval: approvalGate.approval } : current);
+                }
+                if (approvalGate.message) {
+                    alert(approvalGate.message);
+                }
+                if (approvalGate.action === 'requested') {
+                    clearDraft();
+                    navigate('/quotations', { replace: true });
+                }
+                return;
             }
 
             setSubmitting(true);
@@ -678,9 +695,11 @@ const QuotationOrderProof = () => {
         canConvertAnyQuotation,
         clearDraft,
         getQuotationCreditDays,
+        navigate,
         paymentProofFile,
         profile?.id,
         quotation,
+        requestDiscountApprovalReason,
         syncQuotationAsApproved,
         syncOrderNotesFromQuotation,
         uploadPaymentProof,

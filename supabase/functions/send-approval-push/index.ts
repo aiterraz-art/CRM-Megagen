@@ -27,7 +27,7 @@ serve(async (req) => {
       throw new Error("VAPID keys are missing");
     }
 
-    const { approval_id, icon } = await req.json();
+    const { approval_id, icon, order_folio, order_auto_converted } = await req.json();
     if (!approval_id) {
       throw new Error("Missing approval_id");
     }
@@ -107,13 +107,20 @@ serve(async (req) => {
         ? "Descuento rechazado"
         : "Nueva aprobación pendiente";
 
+    // Al aprobar se intenta generar el pedido; si no se pudo, el vendedor debe generarlo a mano.
+    const approvedFollowUp = order_folio
+      ? ` Se generó el pedido #${order_folio}.`
+      : order_auto_converted === false
+        ? " Ingresa a la cotización para generar el pedido."
+        : "";
+
     const body = approval.status === "approved"
-      ? `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue aprobada.`
+      ? `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue aprobada.${approvedFollowUp}`
       : approval.status === "rejected"
         ? `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue rechazada.`
         : `${sellerName} solicita aprobación para ${clientName}.`;
 
-    const url = approval.status === "pending" ? "/operations" : "/quotations";
+    const url = approval.status === "pending" ? "/operations" : order_folio ? "/orders" : "/quotations";
 
     const payload = JSON.stringify({
       title,

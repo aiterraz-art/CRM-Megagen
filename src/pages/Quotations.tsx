@@ -1794,35 +1794,6 @@ const Quotations: React.FC = () => {
             return;
         }
 
-        const approvalGate = await ensureDiscountApprovalBeforeOrderConversion({
-            quotation,
-            requesterId: profile.id,
-            sellerName: quotation?.seller_name,
-            sellerEmail: quotation?.seller_email,
-            latestApproval: quotation?.discount_approval ?? undefined,
-            requestReasonProvider: requestDiscountApprovalReason,
-            onApprovalCreated: (approvalId) => {
-                void notifyApprovalPush(approvalId);
-            },
-        });
-
-        if (!approvalGate.allowed) {
-            if (approvalGate.approval) {
-                setQuotations((prev) => prev.map((item) => (
-                    item.id === quotation.id
-                        ? { ...item, discount_approval: approvalGate.approval }
-                        : item
-                )));
-            }
-            if (approvalGate.message) {
-                alert(approvalGate.message);
-            }
-            if (approvalGate.action === 'requested') {
-                await fetchQuotations();
-            }
-            return;
-        }
-
         const creditDays = getQuotationCreditDays(quotation);
         const requiresProof = creditDays === 0;
         const attemptId = crypto.randomUUID();
@@ -1893,6 +1864,57 @@ const Quotations: React.FC = () => {
             } finally {
                 setPaymentProofPreparing(false);
             }
+        }
+
+        let approvalGate: Awaited<ReturnType<typeof ensureDiscountApprovalBeforeOrderConversion>>;
+        try {
+            approvalGate = await ensureDiscountApprovalBeforeOrderConversion({
+                quotation,
+                requesterId: profile.id,
+                sellerName: quotation?.seller_name,
+                sellerEmail: quotation?.seller_email,
+                latestApproval: quotation?.discount_approval ?? undefined,
+                requestReasonProvider: requestDiscountApprovalReason,
+                // El comprobante viaja con la solicitud para que el pedido se genere solo al aprobarla.
+                paymentProofProvider: requiresProof && normalizedProofFile
+                    ? async () => {
+                        setSubmitting(true);
+                        setOrderConversionStage('Subiendo comprobante de pago...');
+                        try {
+                            return await uploadPaymentProof(quotation, normalizedProofFile as File);
+                        } finally {
+                            setSubmitting(false);
+                            setOrderConversionStage(null);
+                        }
+                    }
+                    : undefined,
+                onApprovalCreated: (approvalId) => {
+                    void notifyApprovalPush(approvalId);
+                },
+            });
+        } catch (approvalRequestError: any) {
+            const message = approvalRequestError?.message || 'No se pudo enviar la solicitud de autorización de descuento.';
+            setPaymentProofError(message);
+            alert(message);
+            return;
+        }
+
+        if (!approvalGate.allowed) {
+            if (approvalGate.approval) {
+                setQuotations((prev) => prev.map((item) => (
+                    item.id === quotation.id
+                        ? { ...item, discount_approval: approvalGate.approval }
+                        : item
+                )));
+            }
+            if (approvalGate.message) {
+                alert(approvalGate.message);
+            }
+            if (approvalGate.action === 'requested') {
+                closePaymentProofModal();
+                await fetchQuotations();
+            }
+            return;
         }
 
         setSubmitting(true);

@@ -130,7 +130,7 @@ export default function ApprovalRealtimeNotifier() {
                         id: toastKey,
                         title: approval.status === 'approved' ? 'Descuento aprobado' : 'Descuento rechazado',
                         message: approval.status === 'approved'
-                            ? `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue aprobada. Ya puedes generar el pedido.`
+                            ? `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue aprobada. El pedido se genera automáticamente; revisa Pedidos en unos segundos.`
                             : `Tu solicitud de descuento para ${clientName} en la cotización #${quotationFolio} fue rechazada.`,
                         targetPath: '/quotations'
                     }, ...prev].slice(0, 3));
